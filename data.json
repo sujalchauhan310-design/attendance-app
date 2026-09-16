@@ -1,0 +1,41 @@
+{
+  "activeCodes": [
+    {
+      "code": "14379",
+      "class_name": "3rd",
+      "period": "3rd",
+      "created_at": 1789588967517,
+      "expires_at": 1789589267517
+    }
+  ],
+  "attendance": [
+    {
+      "roll_no": "2513536034",
+      "class_name": "3rd",
+      "period": "3rd",
+      "date": "2026-09-16",
+      "marked_at": 1789589025508
+    },
+    {
+      "roll_no": "2513536037",
+      "class_name": "3rd",
+      "period": "3rd",
+      "date": "2026-09-16",
+      "marked_at": 1789589087249
+    },
+    {
+      "roll_no": "2513536030",
+      "class_name": "3rd",
+      "period": "3rd",
+      "date": "2026-09-16",
+      "marked_at": 1789589094929
+    },
+    {
+      "roll_no": "2513536016",
+      "class_name": "3rd",
+      "period": "3rd",
+      "date": "2026-09-16",
+      "marked_at": 1789589101700
+    }
+  ]
+}

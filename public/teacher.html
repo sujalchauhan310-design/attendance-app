@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teacher — Attendance</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 500px; margin: 30px auto; padding: 0 15px; background:#f4f6f8; }
+  h1 { font-size: 22px; }
+  input, button, select { width: 100%; padding: 10px; margin: 6px 0; font-size: 16px; box-sizing: border-box; }
+  button { background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; }
+  button:hover { background:#1e4fd1; }
+  .code-box { text-align:center; font-size: 40px; font-weight:bold; letter-spacing: 6px; background:white; border-radius:8px; padding:20px; margin:15px 0; }
+  .timer { text-align:center; color:#555; }
+  table { width:100%; border-collapse: collapse; background:white; margin-top:10px; }
+  th, td { border:1px solid #ddd; padding:8px; text-align:left; font-size:14px; }
+  .card { background:white; padding:15px; border-radius:8px; margin-bottom:15px; }
+</style>
+</head>
+<body>
+  <h1>👩‍🏫 Teacher — Attendance Code</h1>
+
+  <div class="card">
+    <input id="className" placeholder="Class name (e.g. CS101)" />
+    <input id="period" placeholder="Period (e.g. 1, 2, or 9AM-10AM)" />
+    <button onclick="generateCode()">Generate New Code</button>
+  </div>
+
+  <div id="codeSection" style="display:none;" class="card">
+    <div class="code-box" id="codeDisplay">-----</div>
+    <div class="timer" id="timer"></div>
+  </div>
+
+  <div class="card">
+    <button onclick="loadAttendance()">🔄 Refresh Attendance List</button>
+    <div id="attendanceCount" style="margin-top:10px; font-weight:bold;"></div>
+    <table id="attendanceTable">
+      <thead><tr><th>Roll No</th><th>Marked At</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+<script>
+let expiryTimestamp = null;
+let timerInterval = null;
+
+async function generateCode() {
+  const class_name = document.getElementById('className').value.trim();
+  const period = document.getElementById('period').value.trim();
+  if (!class_name || !period) { alert('Enter class name and period first'); return; }
+
+  const res = await fetch('/api/teacher/generate-code', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ class_name, period })
+  });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+
+  document.getElementById('codeSection').style.display = 'block';
+  document.getElementById('codeDisplay').textContent = data.code;
+  expiryTimestamp = Date.now() + data.expires_in_seconds * 1000;
+
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(updateTimer, 1000);
+  updateTimer();
+}
+
+function updateTimer() {
+  const remaining = Math.max(0, Math.round((expiryTimestamp - Date.now())/1000));
+  const min = Math.floor(remaining/60);
+  const sec = remaining % 60;
+  document.getElementById('timer').textContent = remaining > 0
+    ? `Expires in ${min}:${sec.toString().padStart(2,'0')}`
+    : 'Code expired — generate a new one';
+  if (remaining <= 0) clearInterval(timerInterval);
+}
+
+async function loadAttendance() {
+  const class_name = document.getElementById('className').value.trim();
+  const period = document.getElementById('period').value.trim();
+  const params = new URLSearchParams();
+  if (class_name) params.set('class_name', class_name);
+  if (period) params.set('period', period);
+
+  const res = await fetch('/api/teacher/attendance?' + params.toString());
+  const data = await res.json();
+
+  document.getElementById('attendanceCount').textContent = `Total marked: ${data.count}`;
+  const tbody = document.querySelector('#attendanceTable tbody');
+  tbody.innerHTML = '';
+  data.records.forEach(r => {
+    const tr = document.createElement('tr');
+    const time = new Date(r.marked_at).toLocaleTimeString();
+    tr.innerHTML = `<td>${r.roll_no}</td><td>${time}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+</script>
+</body>
+</html>
