@@ -104,10 +104,13 @@ app.get("/api/teacher/attendance", (req, res) => {
 // ---------- STUDENT ROUTE ----------
 
 app.post("/api/student/mark-attendance", (req, res) => {
-  const { roll_no, class_name, period, code } = req.body;
+  const { roll_no, class_name, period, code, device_id } = req.body;
 
   if (!roll_no || !class_name || !period || !code) {
     return res.status(400).json({ error: "All fields are required" });
+  }
+  if (!device_id) {
+    return res.status(400).json({ error: "Device could not be identified. Please reload the page and try again." });
   }
 
   const now = Date.now(); // SERVER time — client can't fake this
@@ -143,6 +146,18 @@ app.post("/api/student/mark-attendance", (req, res) => {
     return res.status(409).json({ error: "Attendance already marked for this roll number today." });
   }
 
+  // 2b. Check if this same device already marked someone's attendance for this class/period/date
+  const deviceAlreadyUsed = data.attendance.some(
+    (r) =>
+      r.device_id === device_id &&
+      r.class_name === class_name &&
+      r.period === period &&
+      r.date === date
+  );
+  if (deviceAlreadyUsed) {
+    return res.status(409).json({ error: "Attendance has already been marked from this device for this period today." });
+  }
+
   // 3. Save attendance
   data.attendance.push({
     roll_no: roll_no.trim(),
@@ -150,6 +165,7 @@ app.post("/api/student/mark-attendance", (req, res) => {
     period,
     date,
     marked_at: now,
+    device_id,
   });
   saveData(data);
 
