@@ -30,6 +30,19 @@
   <div id="message"></div>
 
 <script>
+// Generate (or reuse) a unique device ID stored in this browser, so the
+// server can tell if the same phone/browser is trying to mark attendance
+// for more than one roll number.
+function getDeviceId() {
+  let id = localStorage.getItem('attendance_device_id');
+  if (!id) {
+    id = 'dev-' + Date.now() + '-' + Math.random().toString(36).slice(2, 12);
+    localStorage.setItem('attendance_device_id', id);
+  }
+  return id;
+}
+const device_id = getDeviceId();
+
 async function submitAttendance() {
   const roll_no = document.getElementById('rollNo').value.trim();
   const class_name = document.getElementById('className').value.trim();
@@ -50,7 +63,7 @@ async function submitAttendance() {
     const res = await fetch('/api/student/mark-attendance', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ roll_no, class_name, period, code })
+      body: JSON.stringify({ roll_no, class_name, period, code, device_id })
     });
     const data = await res.json();
 
