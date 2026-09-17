@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Student — Mark Attendance</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="masthead">
+    <div class="kicker">Student Portal</div>
+    <h1>Mark Attendance</h1>
+    <p>Fill in your details below to record today's attendance.</p>
+  </div>
+
+  <div class="card">
+    <label>Roll Number</label>
+    <input id="rollNo" placeholder="e.g. 45678" />
+
+    <label>Your Name</label>
+    <input id="studentName" placeholder="e.g. Priya Sharma" />
+
+    <label>Class</label>
+    <select id="className">
+      <option value="">Select your class</option>
+      <option>BA 1st</option>
+      <option>BA 2nd</option>
+      <option>BA 3rd</option>
+      <option>BSc 1st</option>
+      <option>BSc 2nd</option>
+      <option>BSc 3rd</option>
+      <option>BCom 1st</option>
+      <option>BCom 2nd</option>
+      <option>BCom 3rd</option>
+      <option>MA 1st</option>
+      <option>MA 2nd</option>
+    </select>
+
+    <label>Major Subject <span class="hint">(optional)</span></label>
+    <select id="subject">
+      <option value="">Select subject</option>
+      <option>Political Science</option>
+      <option>History</option>
+      <option>Public Administration</option>
+      <option>Sociology</option>
+      <option>Economics</option>
+      <option>Hindi</option>
+      <option>English</option>
+      <option>Geography</option>
+      <option>Psychology</option>
+      <option>Philosophy</option>
+      <option>Mathematics</option>
+      <option>Physics</option>
+      <option>Chemistry</option>
+      <option>Biology</option>
+      <option>Commerce</option>
+      <option>Computer Science</option>
+      <option>Other</option>
+    </select>
+
+    <label>Code from teacher</label>
+    <input id="code" placeholder="5-digit code" maxlength="5" />
+
+    <button id="submitBtn" onclick="submitAttendance()">Mark Attendance</button>
+  </div>
+  <div id="message"></div>
+</div>
+
+<script>
+function getDeviceId() {
+  let id = localStorage.getItem('attendance_device_id');
+  if (!id) {
+    id = 'dev-' + Date.now() + '-' + Math.random().toString(36).slice(2, 12);
+    localStorage.setItem('attendance_device_id', id);
+  }
+  return id;
+}
+const device_id = getDeviceId();
+
+document.getElementById('rollNo').addEventListener('blur', async () => {
+  const roll_no = document.getElementById('rollNo').value.trim();
+  const nameField = document.getElementById('studentName');
+  const subjectField = document.getElementById('subject');
+  if (!roll_no) return;
+  try {
+    const res = await fetch('/api/student/lookup-name?roll_no=' + encodeURIComponent(roll_no));
+    const data = await res.json();
+    if (data.name && !nameField.value.trim()) nameField.value = data.name;
+    if (data.subject && !subjectField.value) subjectField.value = data.subject;
+  } catch (err) {}
+});
+
+async function submitAttendance() {
+  const roll_no = document.getElementById('rollNo').value.trim();
+  const name = document.getElementById('studentName').value.trim();
+  const class_name = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subject').value.trim();
+  const code = document.getElementById('code').value.trim();
+  const msgDiv = document.getElementById('message');
+  const btn = document.getElementById('submitBtn');
+
+  if (!roll_no || !class_name || !code) {
+    msgDiv.innerHTML = '<div class="msg error">Please fill all required fields.</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+
+  try {
+    const res = await fetch('/api/student/mark-attendance', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ roll_no, name, class_name, subject, code, device_id })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      msgDiv.innerHTML = `<div class="msg success">✅ ${data.message}</div>`;
+    } else {
+      msgDiv.innerHTML = `<div class="msg error">✕ ${data.error}</div>`;
+    }
+  } catch (err) {
+    msgDiv.innerHTML = '<div class="msg error">✕ Network error. Check your connection and try again.</div>';
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Mark Attendance';
+}
+</script>
+</body>
+</html>

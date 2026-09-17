@@ -4,7 +4,7 @@
  * Features:
  *  - Teacher generates a rotating 5-digit code (server-side, expires in 5 min)
  *  - Server time is always used (client device time is never trusted)
- *  - One roll number can mark attendance only ONCE per date+period
+ *  - One roll number can mark attendance only ONCE per class per day
  *  - All validation happens on the server, never trusting client JS
  *  - Data stored permanently in MongoDB (survives server restarts)
  *
@@ -43,18 +43,19 @@ mongoose.connect(MONGODB_URI)
 
 // ---------- DATABASE MODELS ----------
 
-// Remembers a student's name against their roll number, so it can
-// auto-fill next time — permanently, across any device.
+// Remembers a student's name and subject against their roll number, so it
+// can auto-fill next time — permanently, across any device.
 const studentSchema = new mongoose.Schema({
   roll_no: { type: String, required: true, unique: true },
   name: { type: String, required: true },
+  subject: { type: String, default: "" },
 });
 const Student = mongoose.model("Student", studentSchema);
 
 const activeCodeSchema = new mongoose.Schema({
   code: String,
   class_name: String,
-  period: String,
+  subject: String,
   created_at: Number,
   expires_at: Number,
 });
@@ -65,13 +66,12 @@ const attendanceSchema = new mongoose.Schema({
   student_name: String,
   subject: String,
   class_name: String,
-  period: String,
   date: String, // YYYY-MM-DD
   marked_at: Number,
   device_id: String,
 });
-// Same roll number can't mark attendance twice for the same class/period/date
-attendanceSchema.index({ roll_no: 1, class_name: 1, period: 1, date: 1 }, { unique: true });
+// Same roll number can't mark attendance twice for the same class on the same day
+attendanceSchema.index({ roll_no: 1, class_name: 1, date: 1 }, { unique: true });
 const Attendance = mongoose.model("Attendance", attendanceSchema);
 
 // ---------- HELPERS ----------
@@ -87,12 +87,12 @@ function generateCode() {
 
 // ---------- TEACHER ROUTES ----------
 
-// Generate a new attendance code for a class/period
+// Generate a new attendance code for a class + subject
 app.post("/api/teacher/generate-code", async (req, res) => {
   try {
-    const { class_name, period } = req.body;
-    if (!class_name || !period) {
-      return res.status(400).json({ error: "class_name and period are required" });
+    const { class_name, subject } = req.body;
+    if (!class_name || !subject) {
+      return res.status(400).json({ error: "class_name and subject are required" });
     }
 
     const code = generateCode();
@@ -101,7 +101,7 @@ app.post("/api/teacher/generate-code", async (req, res) => {
     await ActiveCode.create({
       code,
       class_name,
-      period,
+      subject,
       created_at: now,
       expires_at: now + CODE_EXPIRY_MS,
     });
@@ -110,7 +110,7 @@ app.post("/api/teacher/generate-code", async (req, res) => {
       code,
       expires_in_seconds: CODE_EXPIRY_MS / 1000,
       class_name,
-      period,
+      subject,
     });
   } catch (err) {
     console.error(err);
@@ -118,28 +118,66 @@ app.post("/api/teacher/generate-code", async (req, res) => {
   }
 });
 
-// Look up a student's saved name from their roll number (for auto-fill)
+// Look up a student's saved name and subject from their roll number (for auto-fill)
 app.get("/api/student/lookup-name", async (req, res) => {
   try {
     const { roll_no } = req.query;
-    if (!roll_no) return res.json({ name: "" });
+    if (!roll_no) return res.json({ name: "", subject: "" });
     const student = await Student.findOne({ roll_no: roll_no.trim() });
-    res.json({ name: student ? student.name : "" });
+    res.json({
+      name: student ? student.name : "",
+      subject: student ? student.subject || "" : "",
+    });
   } catch (err) {
     console.error(err);
-    res.json({ name: "" });
+    res.json({ name: "", subject: "" });
   }
 });
 
-// Get today's attendance list for a class/period
+// Teacher uploads the full class roster in one go: roll_no, name, subject per line.
+// Any roll number already known gets updated; new ones get added.
+// Accepted format per line: "rollno,name,subject" or "rollno,name" (tab-separated also works).
+app.post("/api/teacher/upload-roster", async (req, res) => {
+  try {
+    const { roster_text } = req.body;
+    if (!roster_text || !roster_text.trim()) {
+      return res.status(400).json({ error: "Paste the student list first." });
+    }
+
+    const lines = roster_text.split("\n").map((l) => l.trim()).filter(Boolean);
+    let added = 0;
+    let skipped = 0;
+
+    for (const line of lines) {
+      const parts = line.split(/,|\t/).map((p) => p.trim());
+      const [roll_no, name, subject] = parts;
+      if (!roll_no || !name) {
+        skipped++;
+        continue;
+      }
+      await Student.findOneAndUpdate(
+        { roll_no },
+        { roll_no, name, subject: subject || "" },
+        { upsert: true }
+      );
+      added++;
+    }
+
+    res.json({ success: true, added, skipped, total: lines.length });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong uploading the list." });
+  }
+});
+
+// Get today's attendance list for a class
 app.get("/api/teacher/attendance", async (req, res) => {
   try {
-    const { class_name, period } = req.query;
+    const { class_name } = req.query;
     const date = todayDateString();
 
     const filter = { date };
     if (class_name) filter.class_name = class_name;
-    if (period) filter.period = period;
 
     const rows = await Attendance.find(filter).lean();
 
@@ -162,9 +200,9 @@ app.get("/api/teacher/attendance", async (req, res) => {
 
 app.post("/api/student/mark-attendance", async (req, res) => {
   try {
-    const { roll_no, class_name, period, code, device_id, name, subject } = req.body;
+    const { roll_no, class_name, code, device_id, name, subject } = req.body;
 
-    if (!roll_no || !class_name || !period || !code) {
+    if (!roll_no || !class_name || !code) {
       return res.status(400).json({ error: "All fields are required" });
     }
     if (!device_id) {
@@ -174,11 +212,13 @@ app.post("/api/student/mark-attendance", async (req, res) => {
     const now = Date.now(); // SERVER time — client can't fake this
     const cleanRoll = roll_no.trim();
 
-    // 1. Find the latest active code for this class/period
-    const activeCode = await ActiveCode.findOne({ class_name, period }).sort({ created_at: -1 });
+    // 1. Find the latest active code for this class (matching subject too, if the student picked one)
+    const codeFilter = { class_name };
+    if (subject) codeFilter.subject = subject;
+    const activeCode = await ActiveCode.findOne(codeFilter).sort({ created_at: -1 });
 
     if (!activeCode) {
-      return res.status(400).json({ error: "No active code found for this class/period. Ask your teacher to generate one." });
+      return res.status(400).json({ error: "No active code found for this class. Ask your teacher to generate one." });
     }
     if (now > activeCode.expires_at) {
       return res.status(400).json({ error: "This code has expired. Ask your teacher for the current code." });
@@ -187,45 +227,47 @@ app.post("/api/student/mark-attendance", async (req, res) => {
       return res.status(400).json({ error: "Incorrect code." });
     }
 
-    // 2. Check for duplicate attendance (roll_no + class + date + period)
+    // 2. Check for duplicate attendance (roll_no + class + date)
     const date = todayDateString();
-    const alreadyMarked = await Attendance.findOne({ roll_no: cleanRoll, class_name, period, date });
+    const alreadyMarked = await Attendance.findOne({ roll_no: cleanRoll, class_name, date });
     if (alreadyMarked) {
       return res.status(409).json({ error: "Attendance already marked for this roll number today." });
     }
 
-    // 2b. Check if this same device already marked someone's attendance for this class/period/date
-    const deviceAlreadyUsed = await Attendance.findOne({ device_id, class_name, period, date });
+    // 2b. Check if this same device already marked someone's attendance for this class/date
+    const deviceAlreadyUsed = await Attendance.findOne({ device_id, class_name, date });
     if (deviceAlreadyUsed) {
-      return res.status(409).json({ error: "Attendance has already been marked from this device for this period today." });
+      return res.status(409).json({ error: "Attendance has already been marked from this device today." });
     }
 
-    // 3. Save/update the student's name (so future roll-no entries auto-fill it, on any device)
+    // 3. Save/update the student's name & subject (so future roll-no entries auto-fill, on any device)
     let student_name = name ? name.trim() : "";
+    let student_subject = subject ? subject.trim() : "";
+    if (!student_subject) student_subject = activeCode.subject || ""; // fall back to the subject the teacher tagged this code with
     if (student_name) {
       await Student.findOneAndUpdate(
         { roll_no: cleanRoll },
-        { roll_no: cleanRoll, name: student_name },
+        { roll_no: cleanRoll, name: student_name, subject: student_subject || undefined },
         { upsert: true }
       );
     } else {
       const existing = await Student.findOne({ roll_no: cleanRoll });
       student_name = existing ? existing.name : "";
+      if (!student_subject) student_subject = existing ? existing.subject || "" : "";
     }
 
     // 4. Save attendance
     await Attendance.create({
       roll_no: cleanRoll,
       student_name,
-      subject: subject ? subject.trim() : "",
+      subject: student_subject,
       class_name,
-      period,
       date,
       marked_at: now,
       device_id,
     });
 
-    res.json({ success: true, message: "Attendance marked successfully!", roll_no, date, period });
+    res.json({ success: true, message: "Attendance marked successfully!", roll_no, date });
   } catch (err) {
     if (err.code === 11000) {
       // Duplicate key error from the unique index — a race condition safety net
