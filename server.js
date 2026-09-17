@@ -71,8 +71,8 @@ const attendanceSchema = new mongoose.Schema({
   marked_at: Number,
   device_id: String,
 });
-// Same roll number can't mark attendance twice for the same class on the same day
-attendanceSchema.index({ roll_no: 1, class_name: 1, date: 1 }, { unique: true });
+// Same roll number can't mark attendance twice for the same class + subject on the same day
+attendanceSchema.index({ roll_no: 1, class_name: 1, subject: 1, date: 1 }, { unique: true });
 const Attendance = mongoose.model("Attendance", attendanceSchema);
 
 // ---------- HELPERS ----------
@@ -226,17 +226,17 @@ app.post("/api/student/mark-attendance", async (req, res) => {
       return res.status(400).json({ error: "Incorrect code." });
     }
 
-    // 2. Check for duplicate attendance (roll_no + class + date)
+    // 2. Check for duplicate attendance (roll_no + class + subject + date)
     const date = todayDateString();
-    const alreadyMarked = await Attendance.findOne({ roll_no: cleanRoll, class_name, date });
+    const alreadyMarked = await Attendance.findOne({ roll_no: cleanRoll, class_name, subject, date });
     if (alreadyMarked) {
-      return res.status(409).json({ error: "Attendance already marked for this roll number today." });
+      return res.status(409).json({ error: "Attendance already marked for this subject today." });
     }
 
-    // 2b. Check if this same device already marked someone's attendance for this class/date
-    const deviceAlreadyUsed = await Attendance.findOne({ device_id, class_name, date });
+    // 2b. Check if this same device already marked someone's attendance for this exact class+subject+date
+    const deviceAlreadyUsed = await Attendance.findOne({ device_id, class_name, subject, date });
     if (deviceAlreadyUsed) {
-      return res.status(409).json({ error: "Attendance has already been marked from this device today." });
+      return res.status(409).json({ error: "Attendance has already been marked from this device for this subject today." });
     }
 
     // 3. Save/update the student's name & major subject (so future roll-no entries auto-fill, on any device)
@@ -270,7 +270,7 @@ app.post("/api/student/mark-attendance", async (req, res) => {
   } catch (err) {
     if (err.code === 11000) {
       // Duplicate key error from the unique index — a race condition safety net
-      return res.status(409).json({ error: "Attendance already marked for this roll number today." });
+      return res.status(409).json({ error: "Attendance already marked for this subject today." });
     }
     console.error(err);
     res.status(500).json({ error: "Something went wrong. Try again." });
