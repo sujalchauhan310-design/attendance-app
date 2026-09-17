@@ -37,10 +37,7 @@
       <option>MA 2nd</option>
     </select>
 
-    <label>Class Time</label>
-    <input id="period" placeholder="e.g. 9:00 AM - 10:00 AM" />
-
-    <label>Subject <span class="hint">(optional)</span></label>
+    <label>Major Subject <span class="hint">(optional)</span></label>
     <select id="subject">
       <option value="">Select subject</option>
       <option>Political Science</option>
@@ -84,11 +81,13 @@ const device_id = getDeviceId();
 document.getElementById('rollNo').addEventListener('blur', async () => {
   const roll_no = document.getElementById('rollNo').value.trim();
   const nameField = document.getElementById('studentName');
-  if (!roll_no || nameField.value.trim()) return;
+  const subjectField = document.getElementById('subject');
+  if (!roll_no) return;
   try {
     const res = await fetch('/api/student/lookup-name?roll_no=' + encodeURIComponent(roll_no));
     const data = await res.json();
-    if (data.name) nameField.value = data.name;
+    if (data.name && !nameField.value.trim()) nameField.value = data.name;
+    if (data.subject && !subjectField.value) subjectField.value = data.subject;
   } catch (err) {}
 });
 
@@ -96,13 +95,12 @@ async function submitAttendance() {
   const roll_no = document.getElementById('rollNo').value.trim();
   const name = document.getElementById('studentName').value.trim();
   const class_name = document.getElementById('className').value.trim();
-  const period = document.getElementById('period').value.trim();
   const subject = document.getElementById('subject').value.trim();
   const code = document.getElementById('code').value.trim();
   const msgDiv = document.getElementById('message');
   const btn = document.getElementById('submitBtn');
 
-  if (!roll_no || !class_name || !period || !code) {
+  if (!roll_no || !class_name || !code) {
     msgDiv.innerHTML = '<div class="msg error">Please fill all required fields.</div>';
     return;
   }
@@ -114,7 +112,7 @@ async function submitAttendance() {
     const res = await fetch('/api/student/mark-attendance', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ roll_no, name, class_name, period, subject, code, device_id })
+      body: JSON.stringify({ roll_no, name, class_name, subject, code, device_id })
     });
     const data = await res.json();
 

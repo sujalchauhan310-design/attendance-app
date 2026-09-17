@@ -15,11 +15,52 @@
   </div>
 
   <div class="card">
-    <label>Class name</label>
-    <input id="className" placeholder="e.g. BA 2nd" />
-    <label>Class Time</label>
-    <input id="period" placeholder="e.g. 9:00 AM - 10:00 AM" />
+    <label>Course / Year</label>
+    <select id="className">
+      <option value="">Select class</option>
+      <option>BA 1st</option>
+      <option>BA 2nd</option>
+      <option>BA 3rd</option>
+      <option>BSc 1st</option>
+      <option>BSc 2nd</option>
+      <option>BSc 3rd</option>
+      <option>BCom 1st</option>
+      <option>BCom 2nd</option>
+      <option>BCom 3rd</option>
+      <option>MA 1st</option>
+      <option>MA 2nd</option>
+    </select>
+
+    <label>Subject</label>
+    <select id="subjectSelect">
+      <option value="">Select subject</option>
+      <option>Political Science</option>
+      <option>History</option>
+      <option>Public Administration</option>
+      <option>Sociology</option>
+      <option>Economics</option>
+      <option>Hindi</option>
+      <option>English</option>
+      <option>Geography</option>
+      <option>Psychology</option>
+      <option>Philosophy</option>
+      <option>Mathematics</option>
+      <option>Physics</option>
+      <option>Chemistry</option>
+      <option>Biology</option>
+      <option>Commerce</option>
+      <option>Computer Science</option>
+      <option>Other</option>
+    </select>
+
     <button onclick="generateCode()">Generate New Code</button>
+  </div>
+
+  <div class="card">
+    <label>Upload Student List <span class="hint">(one-time setup — saves everyone's name & subject so it auto-fills for any roll number)</span></label>
+    <textarea id="rosterText" rows="6" placeholder="Paste one student per line, like:&#10;101,Priya Sharma,History&#10;102,Rahul Verma,Sociology&#10;103,Anjali Singh" style="width:100%; padding:11px 12px; font-family:'Inter',sans-serif; font-size:14.5px; border:1px solid var(--line); border-radius:4px; background:#fdfcf9; color:var(--ink);"></textarea>
+    <button class="secondary" onclick="uploadRoster()">Upload List</button>
+    <div id="uploadMsg"></div>
   </div>
 
   <div id="codeSection" style="display:none;" class="card">
@@ -53,13 +94,13 @@ let lastDate = '';
 
 async function generateCode() {
   const class_name = document.getElementById('className').value.trim();
-  const period = document.getElementById('period').value.trim();
-  if (!class_name || !period) { alert('Enter class name and period first'); return; }
+  const subject = document.getElementById('subjectSelect').value.trim();
+  if (!class_name || !subject) { alert('Select both class and subject first'); return; }
 
   const res = await fetch('/api/teacher/generate-code', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ class_name, period })
+    body: JSON.stringify({ class_name, subject })
   });
   const data = await res.json();
   if (data.error) { alert(data.error); return; }
@@ -92,12 +133,32 @@ function formatDateHeading(dateStr) {
   return d.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
 
+async function uploadRoster() {
+  const roster_text = document.getElementById('rosterText').value;
+  const msgDiv = document.getElementById('uploadMsg');
+  if (!roster_text.trim()) { alert('Paste the student list first.'); return; }
+
+  try {
+    const res = await fetch('/api/teacher/upload-roster', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ roster_text })
+    });
+    const data = await res.json();
+    if (data.success) {
+      msgDiv.innerHTML = `<div class="msg success">✅ Saved ${data.added} student(s). ${data.skipped ? data.skipped + ' line(s) skipped (missing roll no or name).' : ''}</div>`;
+    } else {
+      msgDiv.innerHTML = `<div class="msg error">✕ ${data.error}</div>`;
+    }
+  } catch (err) {
+    msgDiv.innerHTML = '<div class="msg error">✕ Network error. Try again.</div>';
+  }
+}
+
 async function loadAttendance() {
   const class_name = document.getElementById('className').value.trim();
-  const period = document.getElementById('period').value.trim();
   const params = new URLSearchParams();
   if (class_name) params.set('class_name', class_name);
-  if (period) params.set('period', period);
 
   const res = await fetch('/api/teacher/attendance?' + params.toString());
   const data = await res.json();
@@ -120,7 +181,6 @@ async function loadAttendance() {
 function printList() {
   if (!lastRecords.length) { alert('Refresh the attendance list first.'); return; }
   const className = document.getElementById('className').value.trim() || '-';
-  const period = document.getElementById('period').value.trim() || '-';
   const rows = lastRecords.map((r, i) =>
     `<tr><td>${i + 1}</td><td>${r.student_name || '-'}</td><td>${r.roll_no}</td><td>${r.subject || '-'}</td><td>${formatTime(r.marked_at)}</td></tr>`
   ).join('');
@@ -137,7 +197,7 @@ function printList() {
       tbody tr:nth-child(even) { background:#f6f4ee; }
     </style>
     </head><body>
-      <h1>Attendance Register — ${className} (${period})</h1>
+      <h1>Attendance Register — ${className}</h1>
       <div class="meta">${formatDateHeading(lastDate)} &nbsp;|&nbsp; Total present: ${lastRecords.length}</div>
       <table><thead><tr><th>S.No</th><th>Name</th><th>Roll No</th><th>Subject</th><th>Marked At</th></tr></thead>
       <tbody>${rows}</tbody></table>
