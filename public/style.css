@@ -1,0 +1,202 @@
+/* Shared design system for the Attendance Register app */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --navy: #1f2a44;
+  --navy-dark: #141b2e;
+  --gold: #c9a227;
+  --gold-dark: #a8871d;
+  --paper: #f6f4ee;
+  --paper-card: #ffffff;
+  --ink: #232733;
+  --ink-soft: #5b6070;
+  --line: #dfdbcf;
+  --success-bg: #e7f3ea;
+  --success-ink: #1f7a3d;
+  --error-bg: #fbeaea;
+  --error-ink: #a8332a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', -apple-system, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  margin: 0;
+  padding: 32px 16px 60px;
+}
+
+.wrap {
+  max-width: 480px;
+  margin: 0 auto;
+}
+.wrap.wide { max-width: 640px; }
+
+.masthead {
+  text-align: left;
+  border-bottom: 3px solid var(--navy);
+  padding-bottom: 14px;
+  margin-bottom: 26px;
+}
+.masthead .kicker {
+  font-size: 13px;
+  color: var(--gold-dark);
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.masthead h1 {
+  font-family: 'Fraunces', serif;
+  font-weight: 600;
+  font-size: 30px;
+  margin: 0;
+  color: var(--navy-dark);
+  line-height: 1.15;
+}
+.masthead p {
+  margin: 6px 0 0;
+  color: var(--ink-soft);
+  font-size: 14.5px;
+}
+
+.card {
+  background: var(--paper-card);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--navy);
+  border-radius: 4px;
+  padding: 22px;
+  margin-bottom: 18px;
+}
+
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin: 14px 0 5px;
+}
+label:first-child { margin-top: 0; }
+label .hint {
+  font-weight: 400;
+  color: #9a9584;
+  font-size: 12px;
+}
+
+input, select {
+  width: 100%;
+  padding: 11px 12px;
+  font-size: 15.5px;
+  font-family: 'Inter', sans-serif;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fdfcf9;
+  color: var(--ink);
+}
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--navy);
+  background: #fff;
+}
+
+button {
+  width: 100%;
+  padding: 13px;
+  margin-top: 18px;
+  font-size: 15.5px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--gold);
+  color: var(--navy-dark);
+  transition: background 0.15s ease;
+}
+button:hover { background: var(--gold-dark); }
+button:disabled { background: #d8d3c4; color: #8a8574; cursor: not-allowed; }
+
+button.secondary {
+  background: var(--navy);
+  color: #fff;
+}
+button.secondary:hover { background: var(--navy-dark); }
+
+button.ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+}
+button.ghost:hover { background: #f0eee6; }
+
+.msg {
+  margin-top: 16px;
+  padding: 13px 14px;
+  border-radius: 4px;
+  font-size: 14.5px;
+  border-left: 4px solid transparent;
+}
+.msg.success { background: var(--success-bg); color: var(--success-ink); border-left-color: var(--success-ink); }
+.msg.error { background: var(--error-bg); color: var(--error-ink); border-left-color: var(--error-ink); }
+
+.code-block {
+  background: var(--navy-dark);
+  color: var(--gold);
+  border-radius: 4px;
+  text-align: center;
+  padding: 26px 20px 20px;
+  margin-bottom: 8px;
+}
+.code-block .code-num {
+  font-family: 'Fraunces', serif;
+  font-size: 44px;
+  font-weight: 600;
+  letter-spacing: 8px;
+}
+.code-block .code-timer {
+  color: #d7cfa8;
+  font-size: 13px;
+  margin-top: 6px;
+}
+
+.list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+.list-header h2 {
+  font-family: 'Fraunces', serif;
+  font-size: 18px;
+  margin: 0;
+  color: var(--navy-dark);
+}
+.list-header .date {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+thead th {
+  background: var(--navy);
+  color: #f1ede0;
+  text-align: left;
+  padding: 9px 10px;
+  font-weight: 600;
+  font-size: 13px;
+}
+tbody td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+}
+tbody tr:nth-child(even) { background: #faf9f4; }
+
+.btn-row { display: flex; gap: 10px; margin-top: 4px; }
+.btn-row button { margin-top: 10px; }

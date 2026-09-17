@@ -4,35 +4,73 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Student — Mark Attendance</title>
-<style>
-  body { font-family: Arial, sans-serif; max-width: 420px; margin: 30px auto; padding: 0 15px; background:#f4f6f8; }
-  h1 { font-size: 22px; }
-  input, button { width: 100%; padding: 12px; margin: 6px 0; font-size: 16px; box-sizing: border-box; border-radius:6px; border:1px solid #ccc; }
-  button { background: #16a34a; color: white; border: none; cursor: pointer; font-weight:bold; }
-  button:hover { background:#128a3e; }
-  button:disabled { background:#999; }
-  .msg { margin-top:15px; padding:12px; border-radius:6px; font-size:14px; }
-  .success { background:#dcfce7; color:#166534; }
-  .error { background:#fee2e2; color:#991b1b; }
-  .card { background:white; padding:18px; border-radius:8px; }
-  .status { font-size:13px; color:#555; margin-top:5px; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>🎓 Mark Your Attendance</h1>
+<div class="wrap">
+  <div class="masthead">
+    <div class="kicker">Student Portal</div>
+    <h1>Mark Attendance</h1>
+    <p>Fill in your details below to record today's attendance.</p>
+  </div>
+
   <div class="card">
-    <input id="rollNo" placeholder="Roll Number" />
-    <input id="className" placeholder="Class (e.g. CS101)" />
-    <input id="period" placeholder="Period (e.g. 1)" />
-    <input id="code" placeholder="Code given by teacher" maxlength="5" />
+    <label>Roll Number</label>
+    <input id="rollNo" placeholder="e.g. 45678" />
+
+    <label>Your Name</label>
+    <input id="studentName" placeholder="e.g. Priya Sharma" />
+
+    <label>Class</label>
+    <select id="className">
+      <option value="">Select your class</option>
+      <option>BA 1st</option>
+      <option>BA 2nd</option>
+      <option>BA 3rd</option>
+      <option>BSc 1st</option>
+      <option>BSc 2nd</option>
+      <option>BSc 3rd</option>
+      <option>BCom 1st</option>
+      <option>BCom 2nd</option>
+      <option>BCom 3rd</option>
+      <option>MA 1st</option>
+      <option>MA 2nd</option>
+    </select>
+
+    <label>Class Time</label>
+    <input id="period" placeholder="e.g. 9:00 AM - 10:00 AM" />
+
+    <label>Subject <span class="hint">(optional)</span></label>
+    <select id="subject">
+      <option value="">Select subject</option>
+      <option>Political Science</option>
+      <option>History</option>
+      <option>Public Administration</option>
+      <option>Sociology</option>
+      <option>Economics</option>
+      <option>Hindi</option>
+      <option>English</option>
+      <option>Geography</option>
+      <option>Psychology</option>
+      <option>Philosophy</option>
+      <option>Mathematics</option>
+      <option>Physics</option>
+      <option>Chemistry</option>
+      <option>Biology</option>
+      <option>Commerce</option>
+      <option>Computer Science</option>
+      <option>Other</option>
+    </select>
+
+    <label>Code from teacher</label>
+    <input id="code" placeholder="5-digit code" maxlength="5" />
+
     <button id="submitBtn" onclick="submitAttendance()">Mark Attendance</button>
   </div>
   <div id="message"></div>
+</div>
 
 <script>
-// Generate (or reuse) a unique device ID stored in this browser, so the
-// server can tell if the same phone/browser is trying to mark attendance
-// for more than one roll number.
 function getDeviceId() {
   let id = localStorage.getItem('attendance_device_id');
   if (!id) {
@@ -43,16 +81,29 @@ function getDeviceId() {
 }
 const device_id = getDeviceId();
 
+document.getElementById('rollNo').addEventListener('blur', async () => {
+  const roll_no = document.getElementById('rollNo').value.trim();
+  const nameField = document.getElementById('studentName');
+  if (!roll_no || nameField.value.trim()) return;
+  try {
+    const res = await fetch('/api/student/lookup-name?roll_no=' + encodeURIComponent(roll_no));
+    const data = await res.json();
+    if (data.name) nameField.value = data.name;
+  } catch (err) {}
+});
+
 async function submitAttendance() {
   const roll_no = document.getElementById('rollNo').value.trim();
+  const name = document.getElementById('studentName').value.trim();
   const class_name = document.getElementById('className').value.trim();
   const period = document.getElementById('period').value.trim();
+  const subject = document.getElementById('subject').value.trim();
   const code = document.getElementById('code').value.trim();
   const msgDiv = document.getElementById('message');
   const btn = document.getElementById('submitBtn');
 
   if (!roll_no || !class_name || !period || !code) {
-    msgDiv.innerHTML = '<div class="msg error">Please fill all fields.</div>';
+    msgDiv.innerHTML = '<div class="msg error">Please fill all required fields.</div>';
     return;
   }
 
@@ -63,17 +114,17 @@ async function submitAttendance() {
     const res = await fetch('/api/student/mark-attendance', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ roll_no, class_name, period, code, device_id })
+      body: JSON.stringify({ roll_no, name, class_name, period, subject, code, device_id })
     });
     const data = await res.json();
 
     if (data.success) {
       msgDiv.innerHTML = `<div class="msg success">✅ ${data.message}</div>`;
     } else {
-      msgDiv.innerHTML = `<div class="msg error">❌ ${data.error}</div>`;
+      msgDiv.innerHTML = `<div class="msg error">✕ ${data.error}</div>`;
     }
   } catch (err) {
-    msgDiv.innerHTML = '<div class="msg error">❌ Network error. Check your connection and try again.</div>';
+    msgDiv.innerHTML = '<div class="msg error">✕ Network error. Check your connection and try again.</div>';
   }
 
   btn.disabled = false;

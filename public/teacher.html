@@ -3,46 +3,53 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Teacher — Attendance</title>
-<style>
-  body { font-family: Arial, sans-serif; max-width: 500px; margin: 30px auto; padding: 0 15px; background:#f4f6f8; }
-  h1 { font-size: 22px; }
-  input, button, select { width: 100%; padding: 10px; margin: 6px 0; font-size: 16px; box-sizing: border-box; }
-  button { background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; }
-  button:hover { background:#1e4fd1; }
-  .code-box { text-align:center; font-size: 40px; font-weight:bold; letter-spacing: 6px; background:white; border-radius:8px; padding:20px; margin:15px 0; }
-  .timer { text-align:center; color:#555; }
-  table { width:100%; border-collapse: collapse; background:white; margin-top:10px; }
-  th, td { border:1px solid #ddd; padding:8px; text-align:left; font-size:14px; }
-  .card { background:white; padding:15px; border-radius:8px; margin-bottom:15px; }
-</style>
+<title>Teacher — Attendance Register</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>👩‍🏫 Teacher — Attendance Code</h1>
+<div class="wrap wide">
+  <div class="masthead">
+    <div class="kicker">Teacher Portal</div>
+    <h1>Attendance Register</h1>
+    <p>Generate a code for your class, then review who has marked attendance.</p>
+  </div>
 
   <div class="card">
-    <input id="className" placeholder="Class name (e.g. CS101)" />
-    <input id="period" placeholder="Period (e.g. 1, 2, or 9AM-10AM)" />
+    <label>Class name</label>
+    <input id="className" placeholder="e.g. BA 2nd" />
+    <label>Class Time</label>
+    <input id="period" placeholder="e.g. 9:00 AM - 10:00 AM" />
     <button onclick="generateCode()">Generate New Code</button>
   </div>
 
   <div id="codeSection" style="display:none;" class="card">
-    <div class="code-box" id="codeDisplay">-----</div>
-    <div class="timer" id="timer"></div>
+    <div class="code-block">
+      <div class="code-num" id="codeDisplay">-----</div>
+      <div class="code-timer" id="timer"></div>
+    </div>
   </div>
 
   <div class="card">
-    <button onclick="loadAttendance()">🔄 Refresh Attendance List</button>
-    <div id="attendanceCount" style="margin-top:10px; font-weight:bold;"></div>
+    <div class="list-header">
+      <h2 id="attendanceCount">Total marked: 0</h2>
+      <span class="date" id="attendanceDate"></span>
+    </div>
     <table id="attendanceTable">
-      <thead><tr><th>Roll No</th><th>Marked At</th></tr></thead>
+      <thead><tr><th>S.No</th><th>Name</th><th>Roll No</th><th>Subject</th><th>Marked At</th></tr></thead>
       <tbody></tbody>
     </table>
+    <div class="btn-row">
+      <button class="secondary" onclick="loadAttendance()">Refresh List</button>
+      <button class="ghost" onclick="printList()">Print / Save as PDF</button>
+    </div>
   </div>
+</div>
 
 <script>
 let expiryTimestamp = null;
 let timerInterval = null;
+let lastRecords = [];
+let lastDate = '';
 
 async function generateCode() {
   const class_name = document.getElementById('className').value.trim();
@@ -76,6 +83,15 @@ function updateTimer() {
   if (remaining <= 0) clearInterval(timerInterval);
 }
 
+function formatTime(ms) {
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatDateHeading(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+}
+
 async function loadAttendance() {
   const class_name = document.getElementById('className').value.trim();
   const period = document.getElementById('period').value.trim();
@@ -86,15 +102,50 @@ async function loadAttendance() {
   const res = await fetch('/api/teacher/attendance?' + params.toString());
   const data = await res.json();
 
+  lastRecords = data.records;
+  lastDate = data.date;
+
   document.getElementById('attendanceCount').textContent = `Total marked: ${data.count}`;
+  document.getElementById('attendanceDate').textContent = formatDateHeading(data.date);
+
   const tbody = document.querySelector('#attendanceTable tbody');
   tbody.innerHTML = '';
-  data.records.forEach(r => {
+  data.records.forEach((r, i) => {
     const tr = document.createElement('tr');
-    const time = new Date(r.marked_at).toLocaleTimeString();
-    tr.innerHTML = `<td>${r.roll_no}</td><td>${time}</td>`;
+    tr.innerHTML = `<td>${i + 1}</td><td>${r.student_name || '-'}</td><td>${r.roll_no}</td><td>${r.subject || '-'}</td><td>${formatTime(r.marked_at)}</td>`;
     tbody.appendChild(tr);
   });
+}
+
+function printList() {
+  if (!lastRecords.length) { alert('Refresh the attendance list first.'); return; }
+  const className = document.getElementById('className').value.trim() || '-';
+  const period = document.getElementById('period').value.trim() || '-';
+  const rows = lastRecords.map((r, i) =>
+    `<tr><td>${i + 1}</td><td>${r.student_name || '-'}</td><td>${r.roll_no}</td><td>${r.subject || '-'}</td><td>${formatTime(r.marked_at)}</td></tr>`
+  ).join('');
+  const win = window.open('', '_blank');
+  win.document.write(`
+    <html><head><title>Attendance - ${formatDateHeading(lastDate)}</title>
+    <style>
+      body { font-family: 'Georgia', serif; padding: 30px; color: #232733; }
+      h1 { font-size: 20px; margin-bottom: 4px; }
+      .meta { color:#555; margin-bottom: 20px; font-family: Arial, sans-serif; font-size: 13px; }
+      table { width:100%; border-collapse: collapse; font-family: Arial, sans-serif; }
+      th, td { border:1px solid #999; padding:8px; text-align:left; font-size:14px; }
+      th { background:#1f2a44; color:#fff; }
+      tbody tr:nth-child(even) { background:#f6f4ee; }
+    </style>
+    </head><body>
+      <h1>Attendance Register — ${className} (${period})</h1>
+      <div class="meta">${formatDateHeading(lastDate)} &nbsp;|&nbsp; Total present: ${lastRecords.length}</div>
+      <table><thead><tr><th>S.No</th><th>Name</th><th>Roll No</th><th>Subject</th><th>Marked At</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+    </body></html>
+  `);
+  win.document.close();
+  win.focus();
+  win.print();
 }
 </script>
 </body>

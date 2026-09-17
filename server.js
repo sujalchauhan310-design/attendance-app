@@ -30,14 +30,16 @@ const DB_FILE = path.join(__dirname, "data.json");
 // ---------- SIMPLE JSON "DATABASE" ----------
 function loadData() {
   if (!fs.existsSync(DB_FILE)) {
-    return { activeCodes: [], attendance: [] };
+    return { activeCodes: [], attendance: [], names: {} };
   }
   try {
     const raw = fs.readFileSync(DB_FILE, "utf-8");
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!parsed.names) parsed.names = {}; // for older data files
+    return parsed;
   } catch (err) {
     console.error("Failed to read data file, starting fresh:", err);
-    return { activeCodes: [], attendance: [] };
+    return { activeCodes: [], attendance: [], names: {} };
   }
 }
 
@@ -86,6 +88,14 @@ app.post("/api/teacher/generate-code", (req, res) => {
   });
 });
 
+// Look up a student's saved name from their roll number (for auto-fill)
+app.get("/api/student/lookup-name", (req, res) => {
+  const { roll_no } = req.query;
+  const data = loadData();
+  const name = roll_no ? data.names[roll_no.trim()] || "" : "";
+  res.json({ name });
+});
+
 // Get today's attendance list for a class/period
 app.get("/api/teacher/attendance", (req, res) => {
   const { class_name, period } = req.query;
@@ -96,7 +106,13 @@ app.get("/api/teacher/attendance", (req, res) => {
   if (class_name) rows = rows.filter((r) => r.class_name === class_name);
   if (period) rows = rows.filter((r) => r.period === period);
 
-  rows.sort((a, b) => a.marked_at - b.marked_at);
+  // Sort by roll number, ascending (numeric if possible, else alphabetic)
+  rows.sort((a, b) => {
+    const numA = parseFloat(a.roll_no);
+    const numB = parseFloat(b.roll_no);
+    if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+    return String(a.roll_no).localeCompare(String(b.roll_no));
+  });
 
   res.json({ date, count: rows.length, records: rows });
 });
@@ -104,7 +120,7 @@ app.get("/api/teacher/attendance", (req, res) => {
 // ---------- STUDENT ROUTE ----------
 
 app.post("/api/student/mark-attendance", (req, res) => {
-  const { roll_no, class_name, period, code, device_id } = req.body;
+  const { roll_no, class_name, period, code, device_id, name, subject } = req.body;
 
   if (!roll_no || !class_name || !period || !code) {
     return res.status(400).json({ error: "All fields are required" });
@@ -158,9 +174,20 @@ app.post("/api/student/mark-attendance", (req, res) => {
     return res.status(409).json({ error: "Attendance has already been marked from this device for this period today." });
   }
 
-  // 3. Save attendance
+  // 3. Save/update the student's name (so future roll-no entries auto-fill it)
+  const cleanRoll = roll_no.trim();
+  let student_name = name ? name.trim() : "";
+  if (student_name) {
+    data.names[cleanRoll] = student_name; // remember it for next time
+  } else {
+    student_name = data.names[cleanRoll] || ""; // fall back to what we remember
+  }
+
+  // 4. Save attendance
   data.attendance.push({
-    roll_no: roll_no.trim(),
+    roll_no: cleanRoll,
+    student_name,
+    subject: subject ? subject.trim() : "",
     class_name,
     period,
     date,
