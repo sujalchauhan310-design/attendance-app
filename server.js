@@ -43,12 +43,12 @@ mongoose.connect(MONGODB_URI)
 
 // ---------- DATABASE MODELS ----------
 
-// Remembers a student's name and subject against their roll number, so it
-// can auto-fill next time — permanently, across any device.
+// Remembers a student's name and major subject against their roll number,
+// so it can auto-fill next time — permanently, across any device.
 const studentSchema = new mongoose.Schema({
   roll_no: { type: String, required: true, unique: true },
   name: { type: String, required: true },
-  subject: { type: String, default: "" },
+  major_subject: { type: String, default: "" },
 });
 const Student = mongoose.model("Student", studentSchema);
 
@@ -64,7 +64,8 @@ const ActiveCode = mongoose.model("ActiveCode", activeCodeSchema);
 const attendanceSchema = new mongoose.Schema({
   roll_no: String,
   student_name: String,
-  subject: String,
+  subject: String, // the subject actually being taught in this session (from the teacher's code)
+  major_subject: String, // the student's own primary/major subject (persisted, separate concept)
   class_name: String,
   date: String, // YYYY-MM-DD
   marked_at: Number,
@@ -118,25 +119,25 @@ app.post("/api/teacher/generate-code", async (req, res) => {
   }
 });
 
-// Look up a student's saved name and subject from their roll number (for auto-fill)
+// Look up a student's saved name and major subject from their roll number (for auto-fill)
 app.get("/api/student/lookup-name", async (req, res) => {
   try {
     const { roll_no } = req.query;
-    if (!roll_no) return res.json({ name: "", subject: "" });
+    if (!roll_no) return res.json({ name: "", major_subject: "" });
     const student = await Student.findOne({ roll_no: roll_no.trim() });
     res.json({
       name: student ? student.name : "",
-      subject: student ? student.subject || "" : "",
+      major_subject: student ? student.major_subject || "" : "",
     });
   } catch (err) {
     console.error(err);
-    res.json({ name: "", subject: "" });
+    res.json({ name: "", major_subject: "" });
   }
 });
 
-// Teacher uploads the full class roster in one go: roll_no, name, subject per line.
+// Teacher uploads the full class roster in one go: roll_no, name, major_subject per line.
 // Any roll number already known gets updated; new ones get added.
-// Accepted format per line: "rollno,name,subject" or "rollno,name" (tab-separated also works).
+// Accepted format per line: "rollno,name,major_subject" or "rollno,name" (tab-separated also works).
 app.post("/api/teacher/upload-roster", async (req, res) => {
   try {
     const { roster_text } = req.body;
@@ -150,14 +151,14 @@ app.post("/api/teacher/upload-roster", async (req, res) => {
 
     for (const line of lines) {
       const parts = line.split(/,|\t/).map((p) => p.trim());
-      const [roll_no, name, subject] = parts;
+      const [roll_no, name, major_subject] = parts;
       if (!roll_no || !name) {
         skipped++;
         continue;
       }
       await Student.findOneAndUpdate(
         { roll_no },
-        { roll_no, name, subject: subject || "" },
+        { roll_no, name, major_subject: major_subject || "" },
         { upsert: true }
       );
       added++;
@@ -200,9 +201,9 @@ app.get("/api/teacher/attendance", async (req, res) => {
 
 app.post("/api/student/mark-attendance", async (req, res) => {
   try {
-    const { roll_no, class_name, code, device_id, name, subject } = req.body;
+    const { roll_no, class_name, code, device_id, name, subject, major_subject } = req.body;
 
-    if (!roll_no || !class_name || !code) {
+    if (!roll_no || !class_name || !code || !subject) {
       return res.status(400).json({ error: "All fields are required" });
     }
     if (!device_id) {
@@ -212,13 +213,11 @@ app.post("/api/student/mark-attendance", async (req, res) => {
     const now = Date.now(); // SERVER time — client can't fake this
     const cleanRoll = roll_no.trim();
 
-    // 1. Find the latest active code for this class (matching subject too, if the student picked one)
-    const codeFilter = { class_name };
-    if (subject) codeFilter.subject = subject;
-    const activeCode = await ActiveCode.findOne(codeFilter).sort({ created_at: -1 });
+    // 1. Find the active code matching this exact class + subject (the session the teacher is running)
+    const activeCode = await ActiveCode.findOne({ class_name, subject }).sort({ created_at: -1 });
 
     if (!activeCode) {
-      return res.status(400).json({ error: "No active code found for this class. Ask your teacher to generate one." });
+      return res.status(400).json({ error: "No active code found for this class and subject. Ask your teacher to generate one." });
     }
     if (now > activeCode.expires_at) {
       return res.status(400).json({ error: "This code has expired. Ask your teacher for the current code." });
@@ -240,27 +239,27 @@ app.post("/api/student/mark-attendance", async (req, res) => {
       return res.status(409).json({ error: "Attendance has already been marked from this device today." });
     }
 
-    // 3. Save/update the student's name & subject (so future roll-no entries auto-fill, on any device)
+    // 3. Save/update the student's name & major subject (so future roll-no entries auto-fill, on any device)
     let student_name = name ? name.trim() : "";
-    let student_subject = subject ? subject.trim() : "";
-    if (!student_subject) student_subject = activeCode.subject || ""; // fall back to the subject the teacher tagged this code with
+    let student_major_subject = major_subject ? major_subject.trim() : "";
     if (student_name) {
       await Student.findOneAndUpdate(
         { roll_no: cleanRoll },
-        { roll_no: cleanRoll, name: student_name, subject: student_subject || undefined },
+        { roll_no: cleanRoll, name: student_name, major_subject: student_major_subject || undefined },
         { upsert: true }
       );
     } else {
       const existing = await Student.findOne({ roll_no: cleanRoll });
       student_name = existing ? existing.name : "";
-      if (!student_subject) student_subject = existing ? existing.subject || "" : "";
+      if (!student_major_subject) student_major_subject = existing ? existing.major_subject || "" : "";
     }
 
     // 4. Save attendance
     await Attendance.create({
       roll_no: cleanRoll,
       student_name,
-      subject: student_subject,
+      subject,
+      major_subject: student_major_subject,
       class_name,
       date,
       marked_at: now,

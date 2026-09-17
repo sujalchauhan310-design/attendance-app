@@ -37,9 +37,31 @@
       <option>MA 2nd</option>
     </select>
 
-    <label>Major Subject <span class="hint">(optional)</span></label>
+    <label>Subject <span class="hint">(the class currently being taught — must match your teacher's code)</span></label>
     <select id="subject">
       <option value="">Select subject</option>
+      <option>Political Science</option>
+      <option>History</option>
+      <option>Public Administration</option>
+      <option>Sociology</option>
+      <option>Economics</option>
+      <option>Hindi</option>
+      <option>English</option>
+      <option>Geography</option>
+      <option>Psychology</option>
+      <option>Philosophy</option>
+      <option>Mathematics</option>
+      <option>Physics</option>
+      <option>Chemistry</option>
+      <option>Biology</option>
+      <option>Commerce</option>
+      <option>Computer Science</option>
+      <option>Other</option>
+    </select>
+
+    <label>Major Subject <span class="hint">(optional — your own primary subject)</span></label>
+    <select id="majorSubject">
+      <option value="">Select major subject</option>
       <option>Political Science</option>
       <option>History</option>
       <option>Public Administration</option>
@@ -81,13 +103,13 @@ const device_id = getDeviceId();
 document.getElementById('rollNo').addEventListener('blur', async () => {
   const roll_no = document.getElementById('rollNo').value.trim();
   const nameField = document.getElementById('studentName');
-  const subjectField = document.getElementById('subject');
+  const majorField = document.getElementById('majorSubject');
   if (!roll_no) return;
   try {
     const res = await fetch('/api/student/lookup-name?roll_no=' + encodeURIComponent(roll_no));
     const data = await res.json();
     if (data.name && !nameField.value.trim()) nameField.value = data.name;
-    if (data.subject && !subjectField.value) subjectField.value = data.subject;
+    if (data.major_subject && !majorField.value) majorField.value = data.major_subject;
   } catch (err) {}
 });
 
@@ -96,11 +118,12 @@ async function submitAttendance() {
   const name = document.getElementById('studentName').value.trim();
   const class_name = document.getElementById('className').value.trim();
   const subject = document.getElementById('subject').value.trim();
+  const major_subject = document.getElementById('majorSubject').value.trim();
   const code = document.getElementById('code').value.trim();
   const msgDiv = document.getElementById('message');
   const btn = document.getElementById('submitBtn');
 
-  if (!roll_no || !class_name || !code) {
+  if (!roll_no || !class_name || !subject || !code) {
     msgDiv.innerHTML = '<div class="msg error">Please fill all required fields.</div>';
     return;
   }
@@ -112,7 +135,7 @@ async function submitAttendance() {
     const res = await fetch('/api/student/mark-attendance', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ roll_no, name, class_name, subject, code, device_id })
+      body: JSON.stringify({ roll_no, name, class_name, subject, major_subject, code, device_id })
     });
     const data = await res.json();
 
