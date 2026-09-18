@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Student — Mark Attendance</title>
 <link rel="stylesheet" href="style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1f2a44">
 </head>
 <body>
 <div class="wrap">
@@ -84,12 +86,21 @@
     <label>Code from teacher</label>
     <input id="code" placeholder="5-digit code" maxlength="5" />
 
+    <div class="status" id="locStatus">📍 Location: not fetched yet</div>
+    <button type="button" class="ghost" id="retryLocBtn" onclick="fetchLocation()" style="display:none;">🔄 Retry Location</button>
+
     <button id="submitBtn" onclick="submitAttendance()">Mark Attendance</button>
   </div>
   <div id="message"></div>
+  <div id="queueStatus"></div>
 </div>
 
 <script>
+// ---- Register the service worker so the page shell still loads offline ----
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
 function getDeviceId() {
   let id = localStorage.getItem('attendance_device_id');
   if (!id) {
@@ -99,6 +110,41 @@ function getDeviceId() {
   return id;
 }
 const device_id = getDeviceId();
+let coords = null;
+
+// On a weak signal, GPS (enableHighAccuracy) can take forever or time out.
+// Network-based location (enableHighAccuracy: false) uses cell towers/WiFi
+// instead of satellites — it's less precise but comes back much faster and
+// works even with a poor connection. A generous timeout and a retry button
+// cover the rest.
+function fetchLocation() {
+  const statusEl = document.getElementById('locStatus');
+  const retryBtn = document.getElementById('retryLocBtn');
+  retryBtn.style.display = 'none';
+
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      statusEl.textContent = '📍 Location not supported on this browser';
+      resolve(null);
+      return;
+    }
+    statusEl.textContent = '📍 Fetching location... (this can take a bit on a weak connection)';
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        statusEl.textContent = '📍 Location captured ✓';
+        resolve(coords);
+      },
+      (err) => {
+        statusEl.textContent = '📍 Could not get location (' + (err.message || 'timed out') + '). Tap retry, or move somewhere with better signal.';
+        retryBtn.style.display = 'block';
+        resolve(null);
+      },
+      { enableHighAccuracy: false, timeout: 30000, maximumAge: 60000 }
+    );
+  });
+}
+fetchLocation();
 
 document.getElementById('rollNo').addEventListener('blur', async () => {
   const roll_no = document.getElementById('rollNo').value.trim();
@@ -112,6 +158,81 @@ document.getElementById('rollNo').addEventListener('blur', async () => {
     if (data.major_subject && !majorField.value) majorField.value = data.major_subject;
   } catch (err) {}
 });
+
+// ---------------------------------------------------------------------
+// Reliability layer: retry on flaky connections, and queue offline so a
+// dropped connection never means lost attendance.
+// ---------------------------------------------------------------------
+const QUEUE_KEY = 'attendance_offline_queue';
+
+function getQueue() {
+  try { return JSON.parse(localStorage.getItem(QUEUE_KEY)) || []; } catch (e) { return []; }
+}
+function saveQueue(q) {
+  localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
+  updateQueueStatus();
+}
+function updateQueueStatus() {
+  const q = getQueue();
+  const el = document.getElementById('queueStatus');
+  el.innerHTML = q.length
+    ? `<div class="msg" style="background:#fff7e0;color:#8a6d1a;border-left-color:#c9a227;">⏳ ${q.length} attendance ${q.length === 1 ? 'entry' : 'entries'} waiting to send — will submit automatically once you're back online.</div>`
+    : '';
+}
+
+// One attempt: sends the request, retrying a couple of times on pure
+// network failure (no response at all — e.g. connection drops mid-request).
+// A response that came back — success or a real error like "already marked"
+// — is never retried, since retrying won't change that outcome.
+async function attemptSubmit(payload, retries) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetch('/api/student/mark-attendance', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      return { reached: true, data };
+    } catch (err) {
+      if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1))); // backoff: 1s, 2s...
+    }
+  }
+  return { reached: false };
+}
+
+// Tries to flush anything sitting in the offline queue. Called on load,
+// whenever the browser regains connectivity, and on a slow background timer
+// as a safety net.
+let flushing = false;
+async function flushQueue() {
+  if (flushing) return;
+  flushing = true;
+  const q = getQueue();
+  const remaining = [];
+  for (const payload of q) {
+    const result = await attemptSubmit(payload, 1);
+    if (!result.reached) {
+      remaining.push(payload); // still offline — keep it queued
+      continue;
+    }
+    if (result.data.success || (result.data.error && result.data.error.toLowerCase().includes('already marked'))) {
+      // Delivered (or turns out it was already recorded) — drop from queue either way
+      continue;
+    }
+    // Reached the server but got a real error (wrong code, expired, etc.) —
+    // no point retrying automatically, so it's dropped; the student will see
+    // this immediately for a live submit, but a queued one fails silently.
+    // We still surface it once here so it isn't lost unexplained.
+    console.warn('Queued attendance rejected:', result.data.error);
+  }
+  saveQueue(remaining);
+  flushing = false;
+}
+window.addEventListener('online', flushQueue);
+setInterval(flushQueue, 20000); // safety-net retry every 20s in case the 'online' event doesn't fire
+updateQueueStatus();
+flushQueue();
 
 async function submitAttendance() {
   const roll_no = document.getElementById('rollNo').value.trim();
@@ -128,24 +249,32 @@ async function submitAttendance() {
     return;
   }
 
+  if (!coords) {
+    coords = await fetchLocation();
+    if (!coords) {
+      msgDiv.innerHTML = '<div class="msg error">Location is required. Please allow location access (tap Retry Location above) and try again.</div>';
+      return;
+    }
+  }
+
   btn.disabled = true;
   btn.textContent = 'Submitting...';
 
-  try {
-    const res = await fetch('/api/student/mark-attendance', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ roll_no, name, class_name, subject, major_subject, code, device_id })
-    });
-    const data = await res.json();
+  const payload = { roll_no, name, class_name, subject, major_subject, code, device_id, lat: coords.lat, lng: coords.lng };
+  const result = await attemptSubmit(payload, 2); // try up to 3 times total before giving up on a live send
 
-    if (data.success) {
-      msgDiv.innerHTML = `<div class="msg success">✅ ${data.message}</div>`;
+  if (result.reached) {
+    if (result.data.success) {
+      msgDiv.innerHTML = `<div class="msg success">✅ ${result.data.message}</div>`;
     } else {
-      msgDiv.innerHTML = `<div class="msg error">✕ ${data.error}</div>`;
+      msgDiv.innerHTML = `<div class="msg error">✕ ${result.data.error}</div>`;
     }
-  } catch (err) {
-    msgDiv.innerHTML = '<div class="msg error">✕ Network error. Check your connection and try again.</div>';
+  } else {
+    // Couldn't reach the server at all after retries — queue it for later.
+    const q = getQueue();
+    q.push(payload);
+    saveQueue(q);
+    msgDiv.innerHTML = '<div class="msg" style="background:#fff7e0;color:#8a6d1a;border-left-color:#c9a227;">📴 No internet connection right now. Your attendance has been saved on this phone and will be submitted automatically the moment you\'re back online — no need to do anything else.</div>';
   }
 
   btn.disabled = false;

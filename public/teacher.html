@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Teacher — Attendance Register</title>
 <link rel="stylesheet" href="style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1f2a44">
 </head>
 <body>
 <div class="wrap wide">
@@ -98,12 +100,36 @@ let lastRecords = [];
 let lastDate = '';
 let lastSessionLabel = '';
 
+// ---- Teacher password handling ----
+// Kept only for this browser tab's session (sessionStorage), so it doesn't
+// linger forever on a shared computer. Sent as a header on every teacher request.
+function getTeacherPassword() {
+  let pw = sessionStorage.getItem('teacher_password');
+  if (!pw) {
+    pw = prompt('Enter the teacher password:') || '';
+    sessionStorage.setItem('teacher_password', pw);
+  }
+  return pw;
+}
+
+// Wraps fetch for teacher-only endpoints: attaches the password header, and if
+// the server says it's wrong, clears it and asks again so the next try can work.
+async function teacherFetch(url, options = {}) {
+  options.headers = Object.assign({}, options.headers, { 'X-Teacher-Password': getTeacherPassword() });
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    sessionStorage.removeItem('teacher_password');
+    alert('Incorrect teacher password. Please try again.');
+  }
+  return res;
+}
+
 async function generateCode() {
   const class_name = document.getElementById('className').value.trim();
   const subject = document.getElementById('subjectSelect').value.trim();
   if (!class_name || !subject) { alert('Select both class and subject first'); return; }
 
-  const res = await fetch('/api/teacher/generate-code', {
+  const res = await teacherFetch('/api/teacher/generate-code', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ class_name, subject })
@@ -132,7 +158,7 @@ async function loadSessions(selectId) {
   if (subject) params.set('subject', subject);
 
   try {
-    const res = await fetch('/api/teacher/sessions?' + params.toString());
+    const res = await teacherFetch('/api/teacher/sessions?' + params.toString());
     const data = await res.json();
     const sel = document.getElementById('sessionSelect');
     const previous = selectId || sel.value;
@@ -174,7 +200,7 @@ async function uploadRoster() {
   if (!roster_text.trim()) { alert('Paste the student list first.'); return; }
 
   try {
-    const res = await fetch('/api/teacher/upload-roster', {
+    const res = await teacherFetch('/api/teacher/upload-roster', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ roster_text })
@@ -204,7 +230,7 @@ async function loadAttendance() {
   if (subject) params.set('subject', subject);
   if (session_id) params.set('session_id', session_id);
 
-  const res = await fetch('/api/teacher/attendance?' + params.toString());
+  const res = await teacherFetch('/api/teacher/attendance?' + params.toString());
   const data = await res.json();
 
   lastRecords = data.records;
