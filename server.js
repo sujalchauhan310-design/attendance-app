@@ -75,6 +75,7 @@ const activeCodeSchema = new mongoose.Schema({
   subject: String,
   course_type: String, // DSC / SEC / GE / AEC / VAC / MDC — same subject under
                         // a different type is a different class, no clash
+require_location: {type: Boolean, default: true },
   created_at: Number,
   expires_at: Number,
 });
@@ -161,7 +162,7 @@ const generateCodeLimiter = rateLimit({
 // Generate a new attendance code for a class + subject + course type
 app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, async (req, res) => {
   try {
-    const { class_name, subject, course_type } = req.body;
+    const { class_name, subject, course_type, require_location } = req.body;
     if (!class_name || !subject || !course_type) {
       return res.status(400).json({ error: "class_name, subject and course_type are required" });
     }
@@ -172,6 +173,7 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       class_name,
       subject,
       course_type,
+require_location: require_location !==false,
       created_at: now,
       expires_at: now + CODE_EXPIRY_MS,
     });
@@ -369,9 +371,7 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
     if (!device_id) {
       return res.status(400).json({ error: "Device could not be identified. Please reload the page and try again." });
     }
-    if (typeof lat !== "number" || typeof lng !== "number") {
-      return res.status(400).json({ error: "Location is required. Please allow location access and try again." });
-    }
+    
 
     const now = Date.now(); // SERVER time — client can't fake this
     const cleanRoll = roll_no.trim();
@@ -389,12 +389,17 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       return res.status(400).json({ error: "Incorrect code." });
     }
 
-    // 1b. Validate location (geofencing) — must be within range of the classroom
-    const dist = distanceInMeters(CLASSROOM.lat, CLASSROOM.lng, lat, lng);
-    if (dist > RADIUS_METERS) {
-      return res.status(403).json({
-        error: `You appear to be too far from the classroom (${Math.round(dist)}m away). Attendance can only be marked inside class.`,
-      });
+   // 1b. Location is only required when the teacher turned the toggle ON for this session
+    if (activeCode.require_location) {
+      if (typeof lat !== "number" || typeof lng !== "number") {
+        return res.status(400).json({ error: "Location is required for this session. Please allow location access and try again." });
+      }
+      const dist = distanceInMeters(CLASSROOM.lat, CLASSROOM.lng, lat, lng);
+      if (dist > RADIUS_METERS) {
+        return res.status(403).json({
+          error: `You appear to be too far from the classroom (${Math.round(dist)}m away). Attendance can only be marked inside class.`,
+        });
+      }
     }
 
     // 2. Check for duplicate attendance
