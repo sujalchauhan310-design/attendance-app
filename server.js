@@ -19,6 +19,7 @@
 const express = require("express");
 const path = require("path");
 const mongoose = require("mongoose");
+const rateLimit = require("express-rate-limit");
 
 const app = express();
 app.use(express.json());
@@ -67,6 +68,7 @@ const attendanceSchema = new mongoose.Schema({
   subject: String, // the subject actually being taught in this session (from the teacher's code)
   major_subject: String, // the student's own primary/major subject (persisted, separate concept)
   class_name: String,
+  session_id: String, // which code-generation session this attendance belongs to
   date: String, // YYYY-MM-DD
   marked_at: Number,
   device_id: String,
@@ -86,10 +88,28 @@ function generateCode() {
   return Math.floor(10000 + Math.random() * 90000).toString(); // 5-digit code
 }
 
+// ---------- RATE LIMITING ----------
+// Slows down brute-force code guessing and repeated abuse from one IP.
+const markAttendanceLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // max 10 attendance attempts per IP per window
+  message: { error: "Too many attempts from this network. Please wait a few minutes and try again." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const generateCodeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30, // teachers may generate several codes across periods
+  message: { error: "Too many code generations. Please wait a few minutes." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ---------- TEACHER ROUTES ----------
 
 // Generate a new attendance code for a class + subject
-app.post("/api/teacher/generate-code", async (req, res) => {
+app.post("/api/teacher/generate-code", generateCodeLimiter, async (req, res) => {
   try {
     const { class_name, subject } = req.body;
     if (!class_name || !subject) {
@@ -99,7 +119,7 @@ app.post("/api/teacher/generate-code", async (req, res) => {
     const code = generateCode();
     const now = Date.now(); // SERVER time
 
-    await ActiveCode.create({
+    const session = await ActiveCode.create({
       code,
       class_name,
       subject,
@@ -109,6 +129,7 @@ app.post("/api/teacher/generate-code", async (req, res) => {
 
     res.json({
       code,
+      session_id: session._id.toString(),
       expires_in_seconds: CODE_EXPIRY_MS / 1000,
       class_name,
       subject,
@@ -171,14 +192,44 @@ app.post("/api/teacher/upload-roster", async (req, res) => {
   }
 });
 
-// Get today's attendance list for a class
+// List today's code-generation sessions, newest first, so the teacher can pick
+// which one's attendance list to view. Each generated code = one separate session.
+app.get("/api/teacher/sessions", async (req, res) => {
+  try {
+    const { class_name, subject } = req.query;
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const filter = { created_at: { $gte: startOfDay.getTime() } };
+    if (class_name) filter.class_name = class_name;
+    if (subject) filter.subject = subject;
+
+    const sessions = await ActiveCode.find(filter).sort({ created_at: -1 }).lean();
+
+    res.json({
+      sessions: sessions.map((s) => ({
+        session_id: s._id.toString(),
+        class_name: s.class_name,
+        subject: s.subject,
+        created_at: s.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong loading sessions." });
+  }
+});
+
+// Get today's attendance list for a class + subject (optionally one specific session)
 app.get("/api/teacher/attendance", async (req, res) => {
   try {
-    const { class_name } = req.query;
+    const { class_name, subject, session_id } = req.query;
     const date = todayDateString();
 
     const filter = { date };
     if (class_name) filter.class_name = class_name;
+    if (subject) filter.subject = subject;
+    if (session_id) filter.session_id = session_id;
 
     const rows = await Attendance.find(filter).lean();
 
@@ -199,7 +250,7 @@ app.get("/api/teacher/attendance", async (req, res) => {
 
 // ---------- STUDENT ROUTE ----------
 
-app.post("/api/student/mark-attendance", async (req, res) => {
+app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res) => {
   try {
     const { roll_no, class_name, code, device_id, name, subject, major_subject } = req.body;
 
@@ -261,6 +312,7 @@ app.post("/api/student/mark-attendance", async (req, res) => {
       subject,
       major_subject: student_major_subject,
       class_name,
+      session_id: activeCode._id.toString(),
       date,
       marked_at: now,
       device_id,

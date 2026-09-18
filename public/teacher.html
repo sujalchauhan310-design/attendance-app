@@ -71,6 +71,11 @@
   </div>
 
   <div class="card">
+    <label>Attendance List — pick a session <span class="hint">(each code you generate is a separate session with its own list &amp; PDF)</span></label>
+    <select id="sessionSelect">
+      <option value="">All sessions today</option>
+    </select>
+
     <div class="list-header">
       <h2 id="attendanceCount">Total marked: 0</h2>
       <span class="date" id="attendanceDate"></span>
@@ -91,6 +96,7 @@ let expiryTimestamp = null;
 let timerInterval = null;
 let lastRecords = [];
 let lastDate = '';
+let lastSessionLabel = '';
 
 async function generateCode() {
   const class_name = document.getElementById('className').value.trim();
@@ -112,6 +118,35 @@ async function generateCode() {
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = setInterval(updateTimer, 1000);
   updateTimer();
+
+  // Reload the session list and select the session we just created
+  await loadSessions(data.session_id);
+}
+
+// Loads today's sessions into the dropdown. Pass a session_id to pre-select it.
+async function loadSessions(selectId) {
+  const class_name = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subjectSelect').value.trim();
+  const params = new URLSearchParams();
+  if (class_name) params.set('class_name', class_name);
+  if (subject) params.set('subject', subject);
+
+  try {
+    const res = await fetch('/api/teacher/sessions?' + params.toString());
+    const data = await res.json();
+    const sel = document.getElementById('sessionSelect');
+    const previous = selectId || sel.value;
+
+    sel.innerHTML = '<option value="">All sessions today</option>';
+    (data.sessions || []).forEach((s, i) => {
+      const opt = document.createElement('option');
+      opt.value = s.session_id;
+      const time = new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      opt.textContent = `${s.class_name} — ${s.subject} — ${time}`;
+      sel.appendChild(opt);
+    });
+    if (previous) sel.value = previous;
+  } catch (err) {}
 }
 
 function updateTimer() {
@@ -157,8 +192,17 @@ async function uploadRoster() {
 
 async function loadAttendance() {
   const class_name = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subjectSelect').value.trim();
+  const sessionSel = document.getElementById('sessionSelect');
+  const session_id = sessionSel.value;
+  lastSessionLabel = session_id
+    ? sessionSel.options[sessionSel.selectedIndex].textContent
+    : 'All sessions today';
+
   const params = new URLSearchParams();
   if (class_name) params.set('class_name', class_name);
+  if (subject) params.set('subject', subject);
+  if (session_id) params.set('session_id', session_id);
 
   const res = await fetch('/api/teacher/attendance?' + params.toString());
   const data = await res.json();
@@ -181,12 +225,13 @@ async function loadAttendance() {
 function printList() {
   if (!lastRecords.length) { alert('Refresh the attendance list first.'); return; }
   const className = document.getElementById('className').value.trim() || '-';
+  const subject = document.getElementById('subjectSelect').value.trim() || '-';
   const rows = lastRecords.map((r, i) =>
     `<tr><td>${i + 1}</td><td>${r.student_name || '-'}</td><td>${r.roll_no}</td><td>${r.subject || '-'}</td><td>${formatTime(r.marked_at)}</td></tr>`
   ).join('');
   const win = window.open('', '_blank');
   win.document.write(`
-    <html><head><title>Attendance - ${formatDateHeading(lastDate)}</title>
+    <html><head><title>Attendance - ${className} - ${subject} - ${formatDateHeading(lastDate)}</title>
     <style>
       body { font-family: 'Georgia', serif; padding: 30px; color: #232733; }
       h1 { font-size: 20px; margin-bottom: 4px; }
@@ -197,8 +242,8 @@ function printList() {
       tbody tr:nth-child(even) { background:#f6f4ee; }
     </style>
     </head><body>
-      <h1>Attendance Register — ${className}</h1>
-      <div class="meta">${formatDateHeading(lastDate)} &nbsp;|&nbsp; Total present: ${lastRecords.length}</div>
+      <h1>Attendance Register — ${className} — ${subject}</h1>
+      <div class="meta">${formatDateHeading(lastDate)} &nbsp;|&nbsp; Session: ${lastSessionLabel || 'All sessions today'} &nbsp;|&nbsp; Total present: ${lastRecords.length}</div>
       <table><thead><tr><th>S.No</th><th>Name</th><th>Roll No</th><th>Subject</th><th>Marked At</th></tr></thead>
       <tbody>${rows}</tbody></table>
     </body></html>
@@ -207,6 +252,10 @@ function printList() {
   win.focus();
   win.print();
 }
+// Whenever the class or subject changes, refresh the list of sessions for it
+document.getElementById('className').addEventListener('change', () => loadSessions());
+document.getElementById('subjectSelect').addEventListener('change', () => loadSessions());
+loadSessions();
 </script>
 </body>
 </html>
