@@ -28,7 +28,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 // ---------- CONFIG ----------
-const CODE_EXPIRY_MS = 5 * 60 * 1000; // code is valid for 5 minutes
+const CODE_EXPIRY_MS = 7 * 60 * 1000; // code is valid for 5 minutes
 const MONGODB_URI = process.env.MONGODB_URI;
 
 // Simple shared password so only the teacher can generate codes / see attendance.
