@@ -131,7 +131,7 @@
             <th class="py-2 pr-2 font-medium">S.No</th>
             <th class="py-2 pr-2 font-medium">Name</th>
             <th class="py-2 pr-2 font-medium">Roll No</th>
-            <th class="py-2 pr-2 font-medium">Subject</th>
+            <th class="py-2 pr-2 font-medium">Major Subject</th>
             <th class="py-2 pr-2 font-medium">Type</th>
             <th class="py-2 pr-2 font-medium">Marked At</th>
             <th class="py-2 pr-0 font-medium text-right">Actions</th>
@@ -355,7 +355,7 @@ function renderTable() {
       <td class="py-2.5 pr-2 text-muted">${i + 1}</td>
       <td class="py-2.5 pr-2 text-ink">${r.student_name || '-'}</td>
       <td class="py-2.5 pr-2 text-ink">${r.roll_no}</td>
-      <td class="py-2.5 pr-2 text-ink">${r.subject || '-'}</td>
+      <td class="py-2.5 pr-2 text-ink">${r.major_subject || '-'}</td>
       <td class="py-2.5 pr-2 text-muted">${r.course_type || '-'}</td>
       <td class="py-2.5 pr-2 text-muted whitespace-nowrap">${formatTime(r.marked_at)}</td>
       <td class="py-2.5 pr-0 text-right whitespace-nowrap">
@@ -456,7 +456,7 @@ function printList() {
   const subject = document.getElementById('subjectSelect').value.trim() || '-';
   const courseType = document.getElementById('courseTypeSelect').value.trim() || '-';
   const rows = lastRecords.map((r, i) =>
-    `<tr><td>${i + 1}</td><td>${r.student_name || '-'}</td><td>${r.roll_no}</td><td>${r.subject || '-'}</td><td>${r.course_type || '-'}</td><td>${formatTime(r.marked_at)}</td></tr>`
+    `<tr><td>${i + 1}</td><td>${r.student_name || '-'}</td><td>${r.roll_no}</td><td>${r.major_subject || '-'}</td><td>${r.course_type || '-'}</td><td>${formatTime(r.marked_at)}</td></tr>`
   ).join('');
   const win = window.open('', '_blank');
   win.document.write(`
@@ -473,7 +473,7 @@ function printList() {
     </head><body>
       <h1>Attendance Register — ${className} — ${subject} (${courseType})</h1>
       <div class="meta">${formatDateHeading(lastDate)} &nbsp;|&nbsp; Session: ${lastSessionLabel || 'All sessions today'} &nbsp;|&nbsp; Total present: ${lastRecords.length}</div>
-      <table><thead><tr><th>S.No</th><th>Name</th><th>Roll No</th><th>Subject</th><th>Type</th><th>Marked At</th></tr></thead>
+      <table><thead><tr><th>S.No</th><th>Name</th><th>Roll No</th><th>Major Subject</th><th>Type</th><th>Marked At</th></tr></thead>
       <tbody>${rows}</tbody></table>
     </body></html>
   `);
