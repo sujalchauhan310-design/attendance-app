@@ -4,91 +4,188 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Teacher — Attendance Register</title>
-<link rel="stylesheet" href="style.css">
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#1f2a44">
+<meta name="theme-color" content="#0d111c">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lora:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          base: '#0d111c',
+          surface: '#161b29',
+          surface2: '#1e2436',
+          line: '#2b3348',
+          ink: '#ece9de',
+          muted: '#8b93a7',
+          gold: '#cda43f',
+          golddim: '#8a6d1a',
+          ok: '#34d399',
+          err: '#f87171',
+        },
+        fontFamily: {
+          serif: ['Lora', 'Georgia', 'serif'],
+          sans: ['Inter', 'system-ui', 'sans-serif'],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body { background: #0d111c; }
+  input, select, textarea { color-scheme: dark; }
+  ::selection { background: #cda43f; color: #0d111c; }
+  table { border-collapse: collapse; }
+</style>
 </head>
-<body>
-<div class="wrap wide">
-  <div class="masthead">
-    <div class="kicker">Teacher Portal</div>
-    <h1>Attendance Register</h1>
-    <p>Generate a code for your class, then review who has marked attendance.</p>
+<body class="bg-base text-ink font-sans min-h-screen">
+<div class="max-w-3xl mx-auto px-4 py-8 pb-16">
+
+  <div class="mb-6">
+    <div class="text-xs tracking-wide text-gold/80 font-medium mb-1">Teacher Portal</div>
+    <h1 class="font-serif text-2xl font-semibold text-ink">Attendance Register</h1>
+    <p class="text-sm text-muted mt-1">Generate a code for your class, then review who has marked attendance.</p>
   </div>
 
-  <div class="card">
-    <label>Course / Year</label>
-    <select id="className">
-      <option value="">Select class</option>
-      <option>BA 1st</option>
-      <option>BA 2nd</option>
-      <option>BA 3rd</option>
-      <option>BSc 1st</option>
-      <option>BSc 2nd</option>
-      <option>BSc 3rd</option>
-      <option>BCom 1st</option>
-      <option>BCom 2nd</option>
-      <option>BCom 3rd</option>
-      <option>MA 1st</option>
-      <option>MA 2nd</option>
-    </select>
+  <!-- Session setup card -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-4 shadow-lg shadow-black/20 mb-5">
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Course / Year</label>
+      <select id="className" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select class</option>
+        <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
+        <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
+        <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
+        <option>MA 1st</option><option>MA 2nd</option>
+      </select>
+    </div>
 
-    <label>Subject</label>
-    <select id="subjectSelect">
-      <option value="">Select subject</option>
-      <option>Political Science</option>
-      <option>History</option>
-      <option>Public Administration</option>
-      <option>Sociology</option>
-      <option>Economics</option>
-      <option>Hindi</option>
-      <option>English</option>
-      <option>Geography</option>
-      <option>Psychology</option>
-      <option>Philosophy</option>
-      <option>Mathematics</option>
-      <option>Physics</option>
-      <option>Chemistry</option>
-      <option>Biology</option>
-      <option>Commerce</option>
-      <option>Computer Science</option>
-      <option>Other</option>
-    </select>
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Subject</label>
+      <select id="subjectSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select subject</option>
+        <option>Political Science</option><option>History</option><option>Public Administration</option>
+        <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
+        <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
+        <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
+        <option>Computer Science</option><option>Other</option>
+      </select>
+    </div>
 
-    <button onclick="generateCode()">Generate New Code</button>
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Course Type <span class="text-xs font-normal text-muted">(same subject, different type = separate class)</span></label>
+      <select id="courseTypeSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select course type</option>
+        <option value="DSC">DSC — Discipline Specific Core</option>
+        <option value="SEC">SEC — Skill Enhancement Course</option>
+        <option value="GE">GE — Generic Elective</option>
+        <option value="AEC">AEC — Ability Enhancement Course</option>
+        <option value="VAC">VAC — Value Added Course</option>
+        <option value="MDC">MDC — Multi-Disciplinary Course</option>
+      </select>
+    </div>
+
+    <label class="flex items-center justify-between rounded-lg border border-line bg-surface2/60 px-3.5 py-3 cursor-pointer">
+      <span class="text-sm text-ink">📍 Require Location Verification <span class="block text-xs text-muted mt-0.5">Student must be near college to mark attendance</span></span>
+      <input type="checkbox" id="requireLocation" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
+    </label>
+
+    <button onclick="generateCode()" class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 transition">Generate New Code</button>
   </div>
 
-  <div class="card">
-    <label>Upload Student List <span class="hint">(one-time setup — saves everyone's name & subject so it auto-fills for any roll number)</span></label>
-    <textarea id="rosterText" rows="6" placeholder="Paste one student per line, like:&#10;101,Priya Sharma,History&#10;102,Rahul Verma,Sociology&#10;103,Anjali Singh" style="width:100%; padding:11px 12px; font-family:'Inter',sans-serif; font-size:14.5px; border:1px solid var(--line); border-radius:4px; background:#fdfcf9; color:var(--ink);"></textarea>
-    <button class="secondary" onclick="uploadRoster()">Upload List</button>
+  <!-- Roster upload card -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
+    <label class="block text-sm font-medium text-ink">Upload Student List <span class="block text-xs font-normal text-muted mt-0.5">One-time setup — saves everyone's name &amp; subject so it auto-fills for any roll number</span></label>
+    <textarea id="rosterText" rows="5" placeholder="Paste one student per line, like:&#10;101,Priya Sharma,History&#10;102,Rahul Verma,Sociology&#10;103,Anjali Singh"
+      class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-sm text-ink placeholder-muted/60 font-mono focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition"></textarea>
+    <button class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="uploadRoster()">Upload List</button>
     <div id="uploadMsg"></div>
   </div>
 
-  <div id="codeSection" style="display:none;" class="card">
-    <div class="code-block">
-      <div class="code-num" id="codeDisplay">-----</div>
-      <div class="code-timer" id="timer"></div>
-    </div>
+  <!-- Generated code card -->
+  <div id="codeSection" style="display:none;" class="bg-surface border border-gold/40 rounded-xl p-6 mb-5 shadow-lg shadow-black/20 text-center">
+    <div class="text-6xl font-serif font-bold tracking-[0.2em] text-gold" id="codeDisplay">-----</div>
+    <div class="text-sm text-muted mt-3" id="timer"></div>
+    <div class="text-xs text-muted mt-1" id="codeLocNote"></div>
   </div>
 
-  <div class="card">
-    <label>Attendance List — pick a session <span class="hint">(each code you generate is a separate session with its own list &amp; PDF)</span></label>
-    <select id="sessionSelect">
+  <!-- Attendance list card -->
+  <div class="bg-surface border border-line rounded-xl p-5 shadow-lg shadow-black/20">
+    <label class="block text-sm font-medium text-ink mb-1.5">Attendance List — pick a session <span class="block text-xs font-normal text-muted mt-0.5">Each code you generate is a separate session with its own list &amp; PDF</span></label>
+    <select id="sessionSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink mb-4 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
       <option value="">All sessions today</option>
     </select>
 
-    <div class="list-header">
-      <h2 id="attendanceCount">Total marked: 0</h2>
-      <span class="date" id="attendanceDate"></span>
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-serif text-lg font-semibold text-ink" id="attendanceCount">Total marked: 0</h2>
+      <span class="text-xs text-muted" id="attendanceDate"></span>
     </div>
-    <table id="attendanceTable">
-      <thead><tr><th>S.No</th><th>Name</th><th>Roll No</th><th>Subject</th><th>Marked At</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <div class="btn-row">
-      <button class="secondary" onclick="loadAttendance()">Refresh List</button>
-      <button class="ghost" onclick="printList()">Print / Save as PDF</button>
+
+    <div class="overflow-x-auto -mx-5 px-5">
+      <table id="attendanceTable" class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-line text-left text-muted">
+            <th class="py-2 pr-2 font-medium">S.No</th>
+            <th class="py-2 pr-2 font-medium">Name</th>
+            <th class="py-2 pr-2 font-medium">Roll No</th>
+            <th class="py-2 pr-2 font-medium">Subject</th>
+            <th class="py-2 pr-2 font-medium">Type</th>
+            <th class="py-2 pr-2 font-medium">Marked At</th>
+            <th class="py-2 pr-0 font-medium text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-line/60"></tbody>
+      </table>
+    </div>
+
+    <div class="flex flex-col sm:flex-row gap-3 mt-5">
+      <button class="flex-1 bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg py-2.5 transition" onclick="loadAttendance()">Refresh List</button>
+      <button class="flex-1 bg-transparent hover:bg-surface2 border border-line text-muted hover:text-ink font-medium rounded-lg py-2.5 transition" onclick="printList()">Print / Save as PDF</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit entry modal -->
+<div id="editModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
+    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Edit Entry</h2>
+    <p class="text-sm text-muted mb-4">Fix a roll number or subject entered wrong by the student.</p>
+    <div class="space-y-3">
+      <div>
+        <label class="block text-xs font-medium text-muted mb-1">Roll Number</label>
+        <input id="editRollNo" type="text" inputmode="numeric" pattern="[0-9]*"
+          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-muted mb-1">Name</label>
+        <input id="editName" type="text"
+          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-muted mb-1">Subject</label>
+        <input id="editSubject" type="text"
+          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      </div>
+    </div>
+    <div id="editModalErr" class="hidden text-xs text-err mt-3"></div>
+    <div class="flex gap-3 mt-5">
+      <button onclick="closeEditModal()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
+      <button onclick="saveEdit()" class="flex-1 py-2.5 rounded-lg bg-gold text-[#171208] font-semibold hover:bg-gold/90 transition">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete confirm modal -->
+<div id="deleteModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
+    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Delete this entry?</h2>
+    <p class="text-sm text-muted mb-4" id="deleteModalText">This will permanently remove the entry from the attendance list.</p>
+    <div class="flex gap-3">
+      <button onclick="closeDeleteModal()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
+      <button onclick="confirmDelete()" class="flex-1 py-2.5 rounded-lg bg-err text-[#2a0d0d] font-semibold hover:bg-err/90 transition">Delete</button>
     </div>
   </div>
 </div>
@@ -99,10 +196,10 @@ let timerInterval = null;
 let lastRecords = [];
 let lastDate = '';
 let lastSessionLabel = '';
+let editingRecordId = null;
+let deletingRecordId = null;
 
 // ---- Teacher password handling ----
-// Kept only for this browser tab's session (sessionStorage), so it doesn't
-// linger forever on a shared computer. Sent as a header on every teacher request.
 function getTeacherPassword() {
   let pw = sessionStorage.getItem('teacher_password');
   if (!pw) {
@@ -111,9 +208,6 @@ function getTeacherPassword() {
   }
   return pw;
 }
-
-// Wraps fetch for teacher-only endpoints: attaches the password header, and if
-// the server says it's wrong, clears it and asks again so the next try can work.
 async function teacherFetch(url, options = {}) {
   options.headers = Object.assign({}, options.headers, { 'X-Teacher-Password': getTeacherPassword() });
   const res = await fetch(url, options);
@@ -127,35 +221,41 @@ async function teacherFetch(url, options = {}) {
 async function generateCode() {
   const class_name = document.getElementById('className').value.trim();
   const subject = document.getElementById('subjectSelect').value.trim();
-  if (!class_name || !subject) { alert('Select both class and subject first'); return; }
+  const course_type = document.getElementById('courseTypeSelect').value.trim();
+  if (!class_name || !subject || !course_type) { alert('Select class, subject and course type first'); return; }
+
+  const require_location = document.getElementById('requireLocation').checked;
 
   const res = await teacherFetch('/api/teacher/generate-code', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ class_name, subject })
+    body: JSON.stringify({ class_name, subject, course_type, require_location })
   });
   const data = await res.json();
   if (data.error) { alert(data.error); return; }
 
   document.getElementById('codeSection').style.display = 'block';
   document.getElementById('codeDisplay').textContent = data.code;
+  document.getElementById('codeLocNote').textContent = require_location
+    ? '📍 Location check is ON for this session'
+    : '📍 Location check is OFF for this session';
   expiryTimestamp = Date.now() + data.expires_in_seconds * 1000;
 
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = setInterval(updateTimer, 1000);
   updateTimer();
 
-  // Reload the session list and select the session we just created
   await loadSessions(data.session_id);
 }
 
-// Loads today's sessions into the dropdown. Pass a session_id to pre-select it.
 async function loadSessions(selectId) {
   const class_name = document.getElementById('className').value.trim();
   const subject = document.getElementById('subjectSelect').value.trim();
+  const course_type = document.getElementById('courseTypeSelect').value.trim();
   const params = new URLSearchParams();
   if (class_name) params.set('class_name', class_name);
   if (subject) params.set('subject', subject);
+  if (course_type) params.set('course_type', course_type);
 
   try {
     const res = await teacherFetch('/api/teacher/sessions?' + params.toString());
@@ -168,7 +268,7 @@ async function loadSessions(selectId) {
       const opt = document.createElement('option');
       opt.value = s.session_id;
       const time = new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      opt.textContent = `${s.class_name} — ${s.subject} — ${time}`;
+      opt.textContent = `${s.class_name} — ${s.subject} (${s.course_type || '-'}) — ${time}`;
       sel.appendChild(opt);
     });
     if (previous) sel.value = previous;
@@ -188,7 +288,6 @@ function updateTimer() {
 function formatTime(ms) {
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
-
 function formatDateHeading(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   return d.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -207,18 +306,19 @@ async function uploadRoster() {
     });
     const data = await res.json();
     if (data.success) {
-      msgDiv.innerHTML = `<div class="msg success">✅ Saved ${data.added} student(s). ${data.skipped ? data.skipped + ' line(s) skipped (missing roll no or name).' : ''}</div>`;
+      msgDiv.innerHTML = `<div class="mt-2 rounded-lg border border-ok/40 bg-ok/10 text-ok text-sm px-3.5 py-2.5">✅ Saved ${data.added} student(s). ${data.skipped ? data.skipped + ' line(s) skipped (missing roll no or name).' : ''}</div>`;
     } else {
-      msgDiv.innerHTML = `<div class="msg error">✕ ${data.error}</div>`;
+      msgDiv.innerHTML = `<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ ${data.error}</div>`;
     }
   } catch (err) {
-    msgDiv.innerHTML = '<div class="msg error">✕ Network error. Try again.</div>';
+    msgDiv.innerHTML = '<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ Network error. Try again.</div>';
   }
 }
 
 async function loadAttendance() {
   const class_name = document.getElementById('className').value.trim();
   const subject = document.getElementById('subjectSelect').value.trim();
+  const course_type = document.getElementById('courseTypeSelect').value.trim();
   const sessionSel = document.getElementById('sessionSelect');
   const session_id = sessionSel.value;
   lastSessionLabel = session_id
@@ -228,6 +328,7 @@ async function loadAttendance() {
   const params = new URLSearchParams();
   if (class_name) params.set('class_name', class_name);
   if (subject) params.set('subject', subject);
+  if (course_type) params.set('course_type', course_type);
   if (session_id) params.set('session_id', session_id);
 
   const res = await teacherFetch('/api/teacher/attendance?' + params.toString());
@@ -239,25 +340,126 @@ async function loadAttendance() {
   document.getElementById('attendanceCount').textContent = `Total marked: ${data.count}`;
   document.getElementById('attendanceDate').textContent = formatDateHeading(data.date);
 
+  renderTable();
+}
+
+function renderTable() {
   const tbody = document.querySelector('#attendanceTable tbody');
   tbody.innerHTML = '';
-  data.records.forEach((r, i) => {
+  lastRecords.forEach((r, i) => {
+    const recordId = r.id ?? r.record_id ?? r._id ?? i;
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${i + 1}</td><td>${r.student_name || '-'}</td><td>${r.roll_no}</td><td>${r.subject || '-'}</td><td>${formatTime(r.marked_at)}</td>`;
+    tr.className = 'hover:bg-surface2/50 transition';
+    tr.innerHTML = `
+      <td class="py-2.5 pr-2 text-muted">${i + 1}</td>
+      <td class="py-2.5 pr-2 text-ink">${r.student_name || '-'}</td>
+      <td class="py-2.5 pr-2 text-ink">${r.roll_no}</td>
+      <td class="py-2.5 pr-2 text-ink">${r.subject || '-'}</td>
+      <td class="py-2.5 pr-2 text-muted">${r.course_type || '-'}</td>
+      <td class="py-2.5 pr-2 text-muted whitespace-nowrap">${formatTime(r.marked_at)}</td>
+      <td class="py-2.5 pr-0 text-right whitespace-nowrap">
+        <button class="text-xs font-medium text-gold hover:text-gold/80 transition mr-3" onclick="openEditModal('${recordId}')">Edit</button>
+        <button class="text-xs font-medium text-err hover:text-err/80 transition" onclick="openDeleteModal('${recordId}')">Delete</button>
+      </td>`;
     tbody.appendChild(tr);
   });
+}
+
+function findRecord(recordId) {
+  return lastRecords.find((r, i) => String(r.id ?? r.record_id ?? r._id ?? i) === String(recordId));
+}
+
+// ---- Edit entry ----
+function openEditModal(recordId) {
+  const r = findRecord(recordId);
+  if (!r) return;
+  editingRecordId = recordId;
+  document.getElementById('editRollNo').value = r.roll_no || '';
+  document.getElementById('editName').value = r.student_name || '';
+  document.getElementById('editSubject').value = r.subject || '';
+  document.getElementById('editModalErr').classList.add('hidden');
+  document.getElementById('editModal').classList.remove('hidden');
+}
+function closeEditModal() {
+  document.getElementById('editModal').classList.add('hidden');
+  editingRecordId = null;
+}
+async function saveEdit() {
+  const errEl = document.getElementById('editModalErr');
+  const roll_no = document.getElementById('editRollNo').value.trim();
+  const student_name = document.getElementById('editName').value.trim();
+  const subject = document.getElementById('editSubject').value.trim();
+
+  if (!/^[0-9]+$/.test(roll_no)) {
+    errEl.textContent = 'Roll number must contain digits only.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    const res = await teacherFetch('/api/teacher/attendance/update', {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ record_id: editingRecordId, roll_no, student_name, subject })
+    });
+    const data = await res.json();
+    if (!data.success) {
+      errEl.textContent = data.error || 'Could not save changes.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    closeEditModal();
+    await loadAttendance();
+  } catch (err) {
+    errEl.textContent = 'Network error. Try again.';
+    errEl.classList.remove('hidden');
+  }
+}
+
+// ---- Delete entry ----
+function openDeleteModal(recordId) {
+  const r = findRecord(recordId);
+  if (!r) return;
+  deletingRecordId = recordId;
+  document.getElementById('deleteModalText').textContent =
+    `Remove ${r.student_name || 'Roll No ' + r.roll_no}'s entry (Roll No ${r.roll_no}) from this list? This cannot be undone.`;
+  document.getElementById('deleteModal').classList.remove('hidden');
+}
+function closeDeleteModal() {
+  document.getElementById('deleteModal').classList.add('hidden');
+  deletingRecordId = null;
+}
+async function confirmDelete() {
+  try {
+    const res = await teacherFetch('/api/teacher/attendance/delete', {
+      method: 'DELETE',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ record_id: deletingRecordId })
+    });
+    const data = await res.json();
+    closeDeleteModal();
+    if (data.success) {
+      await loadAttendance();
+    } else {
+      alert(data.error || 'Could not delete entry.');
+    }
+  } catch (err) {
+    closeDeleteModal();
+    alert('Network error. Try again.');
+  }
 }
 
 function printList() {
   if (!lastRecords.length) { alert('Refresh the attendance list first.'); return; }
   const className = document.getElementById('className').value.trim() || '-';
   const subject = document.getElementById('subjectSelect').value.trim() || '-';
+  const courseType = document.getElementById('courseTypeSelect').value.trim() || '-';
   const rows = lastRecords.map((r, i) =>
-    `<tr><td>${i + 1}</td><td>${r.student_name || '-'}</td><td>${r.roll_no}</td><td>${r.subject || '-'}</td><td>${formatTime(r.marked_at)}</td></tr>`
+    `<tr><td>${i + 1}</td><td>${r.student_name || '-'}</td><td>${r.roll_no}</td><td>${r.subject || '-'}</td><td>${r.course_type || '-'}</td><td>${formatTime(r.marked_at)}</td></tr>`
   ).join('');
   const win = window.open('', '_blank');
   win.document.write(`
-    <html><head><title>Attendance - ${className} - ${subject} - ${formatDateHeading(lastDate)}</title>
+    <html><head><title>Attendance - ${className} - ${subject} (${courseType}) - ${formatDateHeading(lastDate)}</title>
     <style>
       body { font-family: 'Georgia', serif; padding: 30px; color: #232733; }
       h1 { font-size: 20px; margin-bottom: 4px; }
@@ -268,9 +470,9 @@ function printList() {
       tbody tr:nth-child(even) { background:#f6f4ee; }
     </style>
     </head><body>
-      <h1>Attendance Register — ${className} — ${subject}</h1>
+      <h1>Attendance Register — ${className} — ${subject} (${courseType})</h1>
       <div class="meta">${formatDateHeading(lastDate)} &nbsp;|&nbsp; Session: ${lastSessionLabel || 'All sessions today'} &nbsp;|&nbsp; Total present: ${lastRecords.length}</div>
-      <table><thead><tr><th>S.No</th><th>Name</th><th>Roll No</th><th>Subject</th><th>Marked At</th></tr></thead>
+      <table><thead><tr><th>S.No</th><th>Name</th><th>Roll No</th><th>Subject</th><th>Type</th><th>Marked At</th></tr></thead>
       <tbody>${rows}</tbody></table>
     </body></html>
   `);
@@ -278,9 +480,10 @@ function printList() {
   win.focus();
   win.print();
 }
-// Whenever the class or subject changes, refresh the list of sessions for it
+
 document.getElementById('className').addEventListener('change', () => loadSessions());
 document.getElementById('subjectSelect').addEventListener('change', () => loadSessions());
+document.getElementById('courseTypeSelect').addEventListener('change', () => loadSessions());
 loadSessions();
 </script>
 </body>

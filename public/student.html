@@ -2,97 +2,182 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
 <title>Student — Mark Attendance</title>
-<link rel="stylesheet" href="style.css">
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#1f2a44">
+<meta name="theme-color" content="#0d111c">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lora:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          base: '#0d111c',
+          surface: '#161b29',
+          surface2: '#1e2436',
+          line: '#2b3348',
+          ink: '#ece9de',
+          muted: '#8b93a7',
+          gold: '#cda43f',
+          golddim: '#8a6d1a',
+          ok: '#34d399',
+          err: '#f87171',
+        },
+        fontFamily: {
+          serif: ['Lora', 'Georgia', 'serif'],
+          sans: ['Inter', 'system-ui', 'sans-serif'],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  body { background: #0d111c; }
+  input, select { color-scheme: dark; }
+  ::selection { background: #cda43f; color: #0d111c; }
+</style>
 </head>
-<body>
-<div class="wrap">
-  <div class="masthead">
-    <div class="kicker">Student Portal</div>
-    <h1>Mark Attendance</h1>
-    <p>Fill in your details below to record today's attendance.</p>
+<body class="bg-base text-ink font-sans min-h-screen">
+<div class="max-w-md mx-auto px-4 py-8 pb-16">
+
+  <!-- Masthead -->
+  <div class="mb-6">
+    <div class="text-xs tracking-wide text-gold/80 font-medium mb-1">Student Portal</div>
+    <h1 class="font-serif text-2xl font-semibold text-ink">Mark Attendance</h1>
+    <p class="text-sm text-muted mt-1">Fill in your details below to record today's attendance.</p>
   </div>
 
-  <div class="card">
-    <label>Roll Number</label>
-    <input id="rollNo" placeholder="e.g. 45678" />
+  <!-- Form card -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-4 shadow-lg shadow-black/20">
 
-    <label>Your Name</label>
-    <input id="studentName" placeholder="e.g. Priya Sharma" />
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Roll Number</label>
+      <input id="rollNo" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+        placeholder="e.g. 45678"
+        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      <p id="rollNoErr" class="hidden text-xs text-err mt-1">Roll number can only contain digits (0–9).</p>
+    </div>
 
-    <label>Class</label>
-    <select id="className">
-      <option value="">Select your class</option>
-      <option>BA 1st</option>
-      <option>BA 2nd</option>
-      <option>BA 3rd</option>
-      <option>BSc 1st</option>
-      <option>BSc 2nd</option>
-      <option>BSc 3rd</option>
-      <option>BCom 1st</option>
-      <option>BCom 2nd</option>
-      <option>BCom 3rd</option>
-      <option>MA 1st</option>
-      <option>MA 2nd</option>
-    </select>
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Your Name</label>
+      <input id="studentName" type="text" placeholder="e.g. Priya Sharma"
+        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+    </div>
 
-    <label>Subject <span class="hint">(the class currently being taught — must match your teacher's code)</span></label>
-    <select id="subject">
-      <option value="">Select subject</option>
-      <option>Political Science</option>
-      <option>History</option>
-      <option>Public Administration</option>
-      <option>Sociology</option>
-      <option>Economics</option>
-      <option>Hindi</option>
-      <option>English</option>
-      <option>Geography</option>
-      <option>Psychology</option>
-      <option>Philosophy</option>
-      <option>Mathematics</option>
-      <option>Physics</option>
-      <option>Chemistry</option>
-      <option>Biology</option>
-      <option>Commerce</option>
-      <option>Computer Science</option>
-      <option>Other</option>
-    </select>
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Class</label>
+      <select id="className" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select your class</option>
+        <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
+        <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
+        <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
+        <option>MA 1st</option><option>MA 2nd</option>
+      </select>
+    </div>
 
-    <label>Major Subject <span class="hint">(optional — your own primary subject)</span></label>
-    <select id="majorSubject">
-      <option value="">Select major subject</option>
-      <option>Political Science</option>
-      <option>History</option>
-      <option>Public Administration</option>
-      <option>Sociology</option>
-      <option>Economics</option>
-      <option>Hindi</option>
-      <option>English</option>
-      <option>Geography</option>
-      <option>Psychology</option>
-      <option>Philosophy</option>
-      <option>Mathematics</option>
-      <option>Physics</option>
-      <option>Chemistry</option>
-      <option>Biology</option>
-      <option>Commerce</option>
-      <option>Computer Science</option>
-      <option>Other</option>
-    </select>
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Subject <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
+      <select id="subject" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select subject</option>
+        <option>Political Science</option><option>History</option><option>Public Administration</option>
+        <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
+        <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
+        <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
+        <option>Computer Science</option><option>Other</option>
+      </select>
+    </div>
 
-    <label>Code from teacher</label>
-    <input id="code" placeholder="5-digit code" maxlength="5" />
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Course Type <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
+      <select id="courseType" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select course type</option>
+        <option value="DSC">DSC — Discipline Specific Core</option>
+        <option value="SEC">SEC — Skill Enhancement Course</option>
+        <option value="GE">GE — Generic Elective</option>
+        <option value="AEC">AEC — Ability Enhancement Course</option>
+        <option value="VAC">VAC — Value Added Course</option>
+        <option value="MDC">MDC — Multi-Disciplinary Course</option>
+      </select>
+    </div>
 
-    <div class="status" id="locStatus">📍 Location: not fetched yet</div>
-    <button type="button" class="ghost" id="retryLocBtn" onclick="fetchLocation()" style="display:none;">🔄 Retry Location</button>
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Major Subject <span class="text-xs font-normal text-muted">(optional)</span></label>
+      <select id="majorSubject" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select major subject</option>
+        <option>Political Science</option><option>History</option><option>Public Administration</option>
+        <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
+        <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
+        <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
+        <option>Computer Science</option><option>Other</option>
+      </select>
+    </div>
 
-    <button id="submitBtn" onclick="submitAttendance()">Mark Attendance</button>
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Code from teacher</label>
+      <input id="code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="off"
+        placeholder="5-digit code"
+        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 tracking-widest focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      <p id="codeErr" class="hidden text-xs text-err mt-1">Code can only contain digits (0–9).</p>
+    </div>
+
+    <!-- Location status -->
+    <div id="locBox" class="rounded-lg border border-line bg-surface2/60 px-3.5 py-3">
+      <div class="text-sm text-muted" id="locStatus">📍 Location: not fetched yet</div>
+      <button type="button" id="retryLocBtn" onclick="fetchLocation()" style="display:none;"
+        class="mt-2 text-sm font-medium text-gold hover:text-gold/80 transition">🔄 Retry Location</button>
+
+      <!-- Permanently denied help panel -->
+      <div id="locHelp" class="hidden mt-3 pt-3 border-t border-line">
+        <p class="text-sm text-ink font-medium mb-2">Location is blocked for this site. Turn it on:</p>
+        <div class="flex gap-2 mb-3">
+          <button type="button" onclick="showLocTab('ios')" id="tabIosBtn"
+            class="flex-1 text-xs font-medium py-1.5 rounded-md border border-line text-muted hover:text-ink transition">iPhone (Safari)</button>
+          <button type="button" onclick="showLocTab('android')" id="tabAndroidBtn"
+            class="flex-1 text-xs font-medium py-1.5 rounded-md border border-line text-muted hover:text-ink transition">Android (Chrome)</button>
+        </div>
+        <ol id="locStepsIos" class="hidden list-decimal list-inside text-sm text-muted space-y-1">
+          <li>Open the <b class="text-ink">Settings</b> app on your iPhone</li>
+          <li>Scroll down and tap <b class="text-ink">Privacy &amp; Security</b></li>
+          <li>Tap <b class="text-ink">Location Services</b> — make sure it's turned ON</li>
+          <li>Scroll down, tap <b class="text-ink">Safari Websites</b></li>
+          <li>Set it to <b class="text-ink">"While Using the App"</b></li>
+          <li>Come back here and tap "Retry Location"</li>
+        </ol>
+        <ol id="locStepsAndroid" class="hidden list-decimal list-inside text-sm text-muted space-y-1">
+          <li>Tap the <b class="text-ink">🔒 lock / ⓘ info icon</b> next to the address bar</li>
+          <li>Tap <b class="text-ink">Permissions</b> → <b class="text-ink">Location</b></li>
+          <li>Select <b class="text-ink">Allow</b></li>
+          <li>If that option isn't there: open <b class="text-ink">Chrome menu (⋮)</b> → <b class="text-ink">Settings</b> → <b class="text-ink">Site settings</b> → <b class="text-ink">Location</b> → find this site → <b class="text-ink">Allow</b></li>
+          <li>Also check <b class="text-ink">Phone Settings → Apps → Chrome → Permissions → Location</b> is Allowed</li>
+          <li>Come back here and tap "Retry Location"</li>
+        </ol>
+      </div>
+    </div>
+
+    <button id="submitBtn" onclick="openConfirm()"
+      class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 mt-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
+      Mark Attendance
+    </button>
   </div>
-  <div id="message"></div>
-  <div id="queueStatus"></div>
+
+  <div id="message" class="mt-4"></div>
+  <div id="queueStatus" class="mt-4"></div>
+</div>
+
+<!-- Confirm modal -->
+<div id="confirmModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
+    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Confirm your details</h2>
+    <p class="text-sm text-muted mb-4">Please check before submitting — this can't be edited by your teacher later.</p>
+    <div class="space-y-2 text-sm bg-surface2 border border-line rounded-lg p-3.5" id="confirmSummary"></div>
+    <div class="flex gap-3 mt-5">
+      <button onclick="closeConfirm()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
+      <button onclick="confirmSubmit()" class="flex-1 py-2.5 rounded-lg bg-gold text-[#171208] font-semibold hover:bg-gold/90 transition">Yes, Submit</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -112,6 +197,38 @@ function getDeviceId() {
 const device_id = getDeviceId();
 let coords = null;
 
+// ---- Digits-only inputs (Roll Number & Code) ----
+function enforceDigitsOnly(inputEl, errEl) {
+  inputEl.addEventListener('input', () => {
+    const cleaned = inputEl.value.replace(/[^0-9]/g, '');
+    if (cleaned !== inputEl.value) {
+      inputEl.value = cleaned;
+      errEl.classList.remove('hidden');
+      setTimeout(() => errEl.classList.add('hidden'), 2000);
+    } else {
+      errEl.classList.add('hidden');
+    }
+  });
+}
+enforceDigitsOnly(document.getElementById('rollNo'), document.getElementById('rollNoErr'));
+enforceDigitsOnly(document.getElementById('code'), document.getElementById('codeErr'));
+
+// ---- Location handling ----
+function detectPlatform() {
+  const ua = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
+  if (/Android/i.test(ua)) return 'android';
+  return 'android'; // sensible default for a college's mostly-Android userbase
+}
+function showLocTab(which) {
+  document.getElementById('locStepsIos').classList.toggle('hidden', which !== 'ios');
+  document.getElementById('locStepsAndroid').classList.toggle('hidden', which !== 'android');
+  document.getElementById('tabIosBtn').className = 'flex-1 text-xs font-medium py-1.5 rounded-md border transition ' +
+    (which === 'ios' ? 'border-gold text-gold' : 'border-line text-muted hover:text-ink');
+  document.getElementById('tabAndroidBtn').className = 'flex-1 text-xs font-medium py-1.5 rounded-md border transition ' +
+    (which === 'android' ? 'border-gold text-gold' : 'border-line text-muted hover:text-ink');
+}
+
 // On a weak signal, GPS (enableHighAccuracy) can take forever or time out.
 // Network-based location (enableHighAccuracy: false) uses cell towers/WiFi
 // instead of satellites — it's less precise but comes back much faster and
@@ -120,7 +237,9 @@ let coords = null;
 function fetchLocation() {
   const statusEl = document.getElementById('locStatus');
   const retryBtn = document.getElementById('retryLocBtn');
+  const helpBox = document.getElementById('locHelp');
   retryBtn.style.display = 'none';
+  helpBox.classList.add('hidden');
 
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
@@ -136,8 +255,14 @@ function fetchLocation() {
         resolve(coords);
       },
       (err) => {
-        statusEl.textContent = '📍 Could not get location (' + (err.message || 'timed out') + '). Tap retry, or move somewhere with better signal.';
-        retryBtn.style.display = 'block';
+        retryBtn.style.display = 'inline-block';
+        if (err.code === 1 /* PERMISSION_DENIED */) {
+          statusEl.textContent = '📍 Location access is blocked for this site.';
+          helpBox.classList.remove('hidden');
+          showLocTab(detectPlatform());
+        } else {
+          statusEl.textContent = '📍 Could not get location (' + (err.message || 'timed out') + '). Tap retry, or move somewhere with better signal.';
+        }
         resolve(null);
       },
       { enableHighAccuracy: false, timeout: 30000, maximumAge: 60000 }
@@ -176,7 +301,7 @@ function updateQueueStatus() {
   const q = getQueue();
   const el = document.getElementById('queueStatus');
   el.innerHTML = q.length
-    ? `<div class="msg" style="background:#fff7e0;color:#8a6d1a;border-left-color:#c9a227;">⏳ ${q.length} attendance ${q.length === 1 ? 'entry' : 'entries'} waiting to send — will submit automatically once you're back online.</div>`
+    ? `<div class="rounded-lg border border-golddim/50 bg-golddim/10 text-[#e8c468] text-sm px-3.5 py-3">⏳ ${q.length} attendance ${q.length === 1 ? 'entry' : 'entries'} waiting to send — will submit automatically once you're back online.</div>`
     : '';
 }
 
@@ -220,10 +345,6 @@ async function flushQueue() {
       // Delivered (or turns out it was already recorded) — drop from queue either way
       continue;
     }
-    // Reached the server but got a real error (wrong code, expired, etc.) —
-    // no point retrying automatically, so it's dropped; the student will see
-    // this immediately for a live submit, but a queued one fails silently.
-    // We still surface it once here so it isn't lost unexplained.
     console.warn('Queued attendance rejected:', result.data.error);
   }
   saveQueue(remaining);
@@ -234,47 +355,82 @@ setInterval(flushQueue, 20000); // safety-net retry every 20s in case the 'onlin
 updateQueueStatus();
 flushQueue();
 
-async function submitAttendance() {
-  const roll_no = document.getElementById('rollNo').value.trim();
-  const name = document.getElementById('studentName').value.trim();
-  const class_name = document.getElementById('className').value.trim();
-  const subject = document.getElementById('subject').value.trim();
-  const major_subject = document.getElementById('majorSubject').value.trim();
-  const code = document.getElementById('code').value.trim();
-  const msgDiv = document.getElementById('message');
-  const btn = document.getElementById('submitBtn');
+// ---- Pre-submit validation + confirm modal ----
+function gatherPayload() {
+  return {
+    roll_no: document.getElementById('rollNo').value.trim(),
+    name: document.getElementById('studentName').value.trim(),
+    class_name: document.getElementById('className').value.trim(),
+    subject: document.getElementById('subject').value.trim(),
+    course_type: document.getElementById('courseType').value.trim(),
+    major_subject: document.getElementById('majorSubject').value.trim(),
+    code: document.getElementById('code').value.trim(),
+  };
+}
 
-  if (!roll_no || !class_name || !subject || !code) {
-    msgDiv.innerHTML = '<div class="msg error">Please fill all required fields.</div>';
+function openConfirm() {
+  const p = gatherPayload();
+  const msgDiv = document.getElementById('message');
+  msgDiv.innerHTML = '';
+
+  if (!/^[0-9]+$/.test(p.roll_no)) {
+    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Roll number must contain digits only.</div>';
+    return;
+  }
+  if (!p.class_name || !p.subject || !p.course_type) {
+    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Please fill all required fields.</div>';
+    return;
+  }
+  if (!/^[0-9]{5}$/.test(p.code)) {
+    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Code must be exactly 5 digits.</div>';
     return;
   }
 
+  const summary = document.getElementById('confirmSummary');
+  summary.innerHTML = `
+    <div class="flex justify-between"><span class="text-muted">Roll No</span><span class="font-medium text-ink">${p.roll_no}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Name</span><span class="font-medium text-ink">${p.name || '—'}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Class</span><span class="font-medium text-ink">${p.class_name}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Subject</span><span class="font-medium text-ink">${p.subject}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Course Type</span><span class="font-medium text-ink">${p.course_type}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Code</span><span class="font-medium text-ink">${p.code}</span></div>
+  `;
+  document.getElementById('confirmModal').classList.remove('hidden');
+}
+function closeConfirm() {
+  document.getElementById('confirmModal').classList.add('hidden');
+}
+
+async function confirmSubmit() {
+  closeConfirm();
+  const p = gatherPayload();
+  const msgDiv = document.getElementById('message');
+  const btn = document.getElementById('submitBtn');
+
+  // Try once more if we don't have coords yet — but don't block submission on
+  // it. Whether location is actually required depends on the teacher's
+  // per-session toggle, which only the server knows about.
   if (!coords) {
     coords = await fetchLocation();
-    if (!coords) {
-      msgDiv.innerHTML = '<div class="msg error">Location is required. Please allow location access (tap Retry Location above) and try again.</div>';
-      return;
-    }
   }
 
   btn.disabled = true;
   btn.textContent = 'Submitting...';
 
-  const payload = { roll_no, name, class_name, subject, major_subject, code, device_id, lat: coords.lat, lng: coords.lng };
+  const payload = Object.assign({}, p, { device_id, lat: coords ? coords.lat : null, lng: coords ? coords.lng : null });
   const result = await attemptSubmit(payload, 2); // try up to 3 times total before giving up on a live send
 
   if (result.reached) {
     if (result.data.success) {
-      msgDiv.innerHTML = `<div class="msg success">✅ ${result.data.message}</div>`;
+      msgDiv.innerHTML = `<div class="rounded-lg border border-ok/40 bg-ok/10 text-ok text-sm px-3.5 py-3">✅ ${result.data.message}</div>`;
     } else {
-      msgDiv.innerHTML = `<div class="msg error">✕ ${result.data.error}</div>`;
+      msgDiv.innerHTML = `<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ ${result.data.error}</div>`;
     }
   } else {
-    // Couldn't reach the server at all after retries — queue it for later.
     const q = getQueue();
     q.push(payload);
     saveQueue(q);
-    msgDiv.innerHTML = '<div class="msg" style="background:#fff7e0;color:#8a6d1a;border-left-color:#c9a227;">📴 No internet connection right now. Your attendance has been saved on this phone and will be submitted automatically the moment you\'re back online — no need to do anything else.</div>';
+    msgDiv.innerHTML = '<div class="rounded-lg border border-golddim/50 bg-golddim/10 text-[#e8c468] text-sm px-3.5 py-3">📴 No internet connection right now. Your attendance has been saved on this phone and will be submitted automatically the moment you\'re back online — no need to do anything else.</div>';
   }
 
   btn.disabled = false;
