@@ -53,6 +53,14 @@
   <!-- Form card -->
   <div class="bg-surface border border-line rounded-xl p-5 space-y-4 shadow-lg shadow-black/20">
 
+    <div class="bg-gold/10 border-2 border-gold rounded-lg p-3.5">
+      <label class="block text-base font-semibold text-gold mb-1.5">Code from teacher</label>
+      <input id="code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="off"
+        placeholder="5-digit code"
+        class="w-full bg-surface2 border-2 border-gold/60 rounded-lg px-4 py-3.5 text-2xl font-bold text-center text-gold placeholder-muted/60 tracking-[0.3em] focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold transition" />
+      <p id="codeErr" class="hidden text-xs text-err mt-1">Code can only contain digits (0–9).</p>
+    </div>
+
     <div>
       <label class="block text-sm font-medium text-ink mb-1.5">Roll Number</label>
       <input id="rollNo" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
@@ -113,14 +121,6 @@
         <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
         <option>Computer Science</option><option>Other</option>
       </select>
-    </div>
-
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Code from teacher</label>
-      <input id="code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="off"
-        placeholder="5-digit code"
-        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 tracking-widest focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
-      <p id="codeErr" class="hidden text-xs text-err mt-1">Code can only contain digits (0–9).</p>
     </div>
 
     <!-- Location status -->
