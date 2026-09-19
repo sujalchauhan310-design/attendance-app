@@ -202,6 +202,67 @@ let lastDate = '';
 let lastSessionLabel = '';
 let editingRecordId = null;
 let deletingRecordId = null;
+// ---- Persist selections + active session in localStorage ----
+const SELECTION_KEY = 'attendance_teacher_selection';
+const ACTIVE_SESSION_KEY = 'attendance_teacher_active_session';
+
+function saveSelection() {
+  try {
+    localStorage.setItem(SELECTION_KEY, JSON.stringify({
+      class_name: document.getElementById('className').value,
+      subject: document.getElementById('subjectSelect').value,
+      course_type: document.getElementById('courseTypeSelect').value,
+      require_location: document.getElementById('requireLocation').checked,
+    }));
+  } catch (err) {}
+}
+
+function restoreSelection() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SELECTION_KEY) || 'null');
+    if (!saved) return;
+    if (saved.class_name) document.getElementById('className').value = saved.class_name;
+    if (saved.subject) document.getElementById('subjectSelect').value = saved.subject;
+    if (saved.course_type) document.getElementById('courseTypeSelect').value = saved.course_type;
+    if (typeof saved.require_location === 'boolean') document.getElementById('requireLocation').checked = saved.require_location;
+  } catch (err) {}
+}
+
+function saveActiveSession(data, class_name, subject, course_type, require_location) {
+  try {
+    localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify({
+      code: data.code,
+      session_id: data.session_id,
+      class_name, subject, course_type, require_location,
+      expiry: expiryTimestamp,
+    }));
+  } catch (err) {}
+}
+
+function clearActiveSession() {
+  try { localStorage.removeItem(ACTIVE_SESSION_KEY); } catch (err) {}
+}
+
+async function restoreActiveSession() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(ACTIVE_SESSION_KEY) || 'null');
+    if (!saved || saved.expiry <= Date.now()) {
+      clearActiveSession();
+      return;
+    }
+    document.getElementById('codeSection').style.display = 'block';
+    document.getElementById('codeDisplay').textContent = saved.code;
+    document.getElementById('codeLocNote').textContent = saved.require_location
+      ? '📍 Location check is ON for this session'
+      : '📍 Location check is OFF for this session';
+    expiryTimestamp = saved.expiry;
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(updateTimer, 1000);
+    updateTimer();
+    await loadSessions(saved.session_id);
+    await loadAttendance();
+  } catch (err) {}
+}
 
 // ---- Teacher password handling ----
 function getTeacherPassword() {
@@ -246,6 +307,8 @@ const send_pdf = document.getElementById('autoSendPdf').checked;
     : '📍 Location check is OFF for this session';
   const CODE_VALID_SECONDS = 7 * 60; // 7 minutes
   expiryTimestamp = Date.now() + CODE_VALID_SECONDS * 1000;
+  saveActiveSession(data, class_name, subject, course_type, require_location);
+  saveSelection();
 
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = setInterval(updateTimer, 1000);
@@ -288,9 +351,10 @@ function updateTimer() {
   document.getElementById('timer').textContent = remaining > 0
     ? `Expires in ${min}:${sec.toString().padStart(2,'0')}`
     : 'Code expired — generate a new one';
-  if (remaining <= 0) clearInterval(timerInterval);
-}
-
+    if (remaining <= 0) {
+    clearInterval(timerInterval);
+    clearActiveSession();
+  }
 function formatTime(ms) {
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -487,9 +551,13 @@ function printList() {
   win.print();
 }
 
-document.getElementById('className').addEventListener('change', () => loadSessions());
-document.getElementById('subjectSelect').addEventListener('change', () => loadSessions());
-document.getElementById('courseTypeSelect').addEventListener('change', () => loadSessions());
+document.getElementById('className').addEventListener('change', () => { saveSelection(); loadSessions(); });
+document.getElementById('subjectSelect').addEventListener('change', () => { saveSelection(); loadSessions(); });
+document.getElementById('courseTypeSelect').addEventListener('change', () => { saveSelection(); loadSessions(); });
+document.getElementById('requireLocation').addEventListener('change', saveSelection);
+
+restoreSelection();
+restoreActiveSession();
 loadSessions();
 </script>
 </body>
