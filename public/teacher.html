@@ -93,6 +93,10 @@
       <input type="checkbox" id="requireLocation" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
     </label>
 
+<label class="flex items-center justify-between rounded-lg border border-line bg-surface2/60 px-3.5 py-3 cursor-pointer">
+  <span class="text-sm text-ink">📧 Email PDF Automatically <span class="block text-xs text-muted mt-0.5">Sends this session's attendance PDF to your inbox 20 min after generating the code</span></span>
+  <input type="checkbox" id="autoSendPdf" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
+</label>
     <button onclick="generateCode()" class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 transition">Generate New Code</button>
   </div>
 
@@ -225,11 +229,12 @@ async function generateCode() {
   if (!class_name || !subject || !course_type) { alert('Select class, subject and course type first'); return; }
 
   const require_location = document.getElementById('requireLocation').checked;
+const send_pdf = document.getElementById('autoSendPdf').checked;
 
   const res = await teacherFetch('/api/teacher/generate-code', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ class_name, subject, course_type, require_location })
+    body: JSON.stringify({ class_name, subject, course_type, require_location, send_pdf })
   });
   const data = await res.json();
   if (data.error) { alert(data.error); return; }
