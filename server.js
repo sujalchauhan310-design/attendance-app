@@ -23,7 +23,7 @@ const path = require("path");
 const mongoose = require("mongoose");
 const rateLimit = require("express-rate-limit");
 const PDFDocument = require("pdfkit");
-const { RESEND } = require("resend");
+const { Resend } = require("resend");
 const dns = require("dns");
 dns.setDefaultResultOrder("ipv4first"); //render's IPv6 route to gmail is broken; force ipv4
 
@@ -62,9 +62,6 @@ if (!resend) {
   console.warn("RESEND_API_KEY not set — automatic PDF emails are disabled.");
 }
 
-if (!mailTransporter) {
-  console.warn("GMAIL_USER / GMAIL_APP_PASSWORD not set — automatic PDF emails are disabled.");
-}
 
 if (!MONGODB_URI) {
   console.error("ERROR: MONGODB_URI environment variable is not set.");
