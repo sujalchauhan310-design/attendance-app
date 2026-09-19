@@ -355,6 +355,9 @@ function updateTimer() {
     clearInterval(timerInterval);
     clearActiveSession();
   }
+}
+
+
 function formatTime(ms) {
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
