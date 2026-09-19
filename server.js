@@ -23,7 +23,7 @@ const path = require("path");
 const mongoose = require("mongoose");
 const rateLimit = require("express-rate-limit");
 const PDFDocument = require("pdfkit");
-const nodemailer = require("nodemailer");
+const { RESEND } = require("resend");
 const dns = require("dns");
 dns.setDefaultResultOrder("ipv4first"); //render's IPv6 route to gmail is broken; force ipv4
 
@@ -51,22 +51,16 @@ const RADIUS_METERS = 150; // a bit generous, since network-based location
 // How long after a code is generated the attendance PDF is auto-emailed
 const PDF_EMAIL_DELAY_MS = 20 * 60 * 1000; // 20 minutes
 
-// Gmail account that SENDS the PDF (needs an App Password, not the normal password)
-const GMAIL_USER = process.env.GMAIL_USER;
-const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
+// Resend sends over HTTPS (not SMTP), so it isn't blocked on Render's free tier
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
 // Gmail address that RECEIVES the PDF (the teacher/sir's inbox)
 const TEACHER_EMAIL = process.env.TEACHER_EMAIL;
 
-const mailTransporter = (GMAIL_USER && GMAIL_APP_PASSWORD)
-  ? nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 587,
-      secure: false, // STARTTLS on port 587 — port 465 is often blocked on free hosting
-      requireTLS: true,
-      auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
-      connectionTimeout: 10000, // fail fast (10s) instead of hanging till cron's timeout
-    })
-  : null;
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
+
+if (!resend) {
+  console.warn("RESEND_API_KEY not set — automatic PDF emails are disabled.");
+}
 
 if (!mailTransporter) {
   console.warn("GMAIL_USER / GMAIL_APP_PASSWORD not set — automatic PDF emails are disabled.");
@@ -212,7 +206,7 @@ async function sendAttendancePdfEmail(sessionId) {
   try {
     const session = await ActiveCode.findById(sessionId);
     if (!session || session.pdf_sent || !session.send_pdf) return;
-    if (!mailTransporter || !TEACHER_EMAIL) {
+        if (!resend || !TEACHER_EMAIL) {
       console.warn(`Skipping PDF email for session ${sessionId} — email is not configured.`);
       return;
     }
@@ -230,8 +224,8 @@ async function sendAttendancePdfEmail(sessionId) {
       records
     );
 
-    await mailTransporter.sendMail({
-      from: `"Attendance App" <${GMAIL_USER}>`,
+        await resend.emails.send({
+      from: "Attendance App <onboarding@resend.dev>",
       to: TEACHER_EMAIL,
       subject: `Attendance — ${session.class_name} — ${session.subject} (${session.course_type})`,
       text: `Attached: attendance for ${session.class_name} — ${session.subject} (${session.course_type}), ${records.length} student(s) marked present. Generated automatically 20 minutes after the code was created.`,
