@@ -22,6 +22,8 @@ const express = require("express");
 const path = require("path");
 const mongoose = require("mongoose");
 const rateLimit = require("express-rate-limit");
+const PDFDocument = require("pdfkit");
+const nodemailer = require("nodemailer");
 
 const app = express();
 app.use(express.json());
@@ -44,6 +46,25 @@ const CLASSROOM = {
 };
 const RADIUS_METERS = 150; // a bit generous, since network-based location
                             // (used for weak signal) is less precise than GPS
+// How long after a code is generated the attendance PDF is auto-emailed
+const PDF_EMAIL_DELAY_MS = 20 * 60 * 1000; // 20 minutes
+
+// Gmail account that SENDS the PDF (needs an App Password, not the normal password)
+const GMAIL_USER = process.env.GMAIL_USER;
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
+// Gmail address that RECEIVES the PDF (the teacher/sir's inbox)
+const TEACHER_EMAIL = process.env.TEACHER_EMAIL;
+
+const mailTransporter = (GMAIL_USER && GMAIL_APP_PASSWORD)
+  ? nodemailer.createTransport({
+      service: "gmail",
+      auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+    })
+  : null;
+
+if (!mailTransporter) {
+  console.warn("GMAIL_USER / GMAIL_APP_PASSWORD not set — automatic PDF emails are disabled.");
+}
 
 if (!MONGODB_URI) {
   console.error("ERROR: MONGODB_URI environment variable is not set.");
@@ -76,6 +97,8 @@ const activeCodeSchema = new mongoose.Schema({
   course_type: String, // DSC / SEC / GE / AEC / VAC / MDC — same subject under
                         // a different type is a different class, no clash
 require_location: {type: Boolean, default: true },
+send_pdf: { type: Boolean, default: true }, // auto-email attendance PDF 20 min after generation
+pdf_sent: { type: Boolean, default: false }, // prevents sending twice if server restarts
   created_at: Number,
   expires_at: Number,
 });
@@ -125,6 +148,100 @@ function distanceInMeters(lat1, lng1, lat2, lng2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
+// Builds a simple attendance-table PDF (as a Buffer) for one session.
+function buildAttendancePdfBuffer(session, records) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 40, size: "A4" });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    doc.fontSize(16).font("Helvetica-Bold").text(
+      `Attendance Register — ${session.class_name} — ${session.subject} (${session.course_type})`,
+      { align: "center" }
+    );
+    doc.moveDown(0.3);
+    doc.fontSize(10).font("Helvetica").fillColor("#555").text(
+      `Date: ${session.dateForPdf}   |   Total present: ${records.length}`,
+      { align: "center" }
+    );
+    doc.moveDown(1);
+    doc.fillColor("#000");
+
+    const startX = 40;
+    const colWidths = [40, 150, 70, 110, 50, 80];
+    const headers = ["S.No", "Name", "Roll No", "Subject", "Type", "Marked At"];
+
+    function drawRow(values, y, bold) {
+      doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(9);
+      let x = startX;
+      values.forEach((v, i) => {
+        doc.text(String(v), x, y, { width: colWidths[i] });
+        x += colWidths[i];
+      });
+    }
+
+    let y = doc.y;
+    drawRow(headers, y, true);
+    y += 18;
+    doc.moveTo(startX, y - 4).lineTo(555, y - 4).strokeColor("#999").stroke();
+
+    records.forEach((r, idx) => {
+      if (y > 760) { doc.addPage(); y = 40; }
+      drawRow(
+        [idx + 1, r.student_name || "-", r.roll_no, r.subject || "-", r.course_type || "-", new Date(r.marked_at).toLocaleTimeString()],
+        y,
+        false
+      );
+      y += 16;
+    });
+
+    doc.end();
+  });
+}
+
+// Generates the PDF for a session and emails it to TEACHER_EMAIL.
+async function sendAttendancePdfEmail(sessionId) {
+  try {
+    const session = await ActiveCode.findById(sessionId);
+    if (!session || session.pdf_sent || !session.send_pdf) return;
+    if (!mailTransporter || !TEACHER_EMAIL) {
+      console.warn(`Skipping PDF email for session ${sessionId} — email is not configured.`);
+      return;
+    }
+
+    const records = await Attendance.find({ session_id: sessionId }).lean();
+    records.sort((a, b) => {
+      const numA = parseFloat(a.roll_no);
+      const numB = parseFloat(b.roll_no);
+      if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+      return String(a.roll_no).localeCompare(String(b.roll_no));
+    });
+
+    const pdfBuffer = await buildAttendancePdfBuffer(
+      { ...session.toObject(), dateForPdf: todayDateString() },
+      records
+    );
+
+    await mailTransporter.sendMail({
+      from: `"Attendance App" <${GMAIL_USER}>`,
+      to: TEACHER_EMAIL,
+      subject: `Attendance — ${session.class_name} — ${session.subject} (${session.course_type})`,
+      text: `Attached: attendance for ${session.class_name} — ${session.subject} (${session.course_type}), ${records.length} student(s) marked present. Generated automatically 20 minutes after the code was created.`,
+      attachments: [{
+        filename: `attendance-${session.class_name}-${session.subject}-${session.course_type}.pdf`.replace(/\s+/g, "_"),
+        content: pdfBuffer,
+      }],
+    });
+
+    session.pdf_sent = true;
+    await session.save();
+    console.log(`Attendance PDF emailed for session ${sessionId}`);
+  } catch (err) {
+    console.error(`Failed to email attendance PDF for session ${sessionId}:`, err.message);
+  }
+}
 
 // ---------- TEACHER AUTH ----------
 // A simple shared password, sent as a header on every teacher request.
@@ -162,7 +279,7 @@ const generateCodeLimiter = rateLimit({
 // Generate a new attendance code for a class + subject + course type
 app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, async (req, res) => {
   try {
-    const { class_name, subject, course_type, require_location } = req.body;
+    const { class_name, subject, course_type, require_location, send_pdf } = req.body;
     if (!class_name || !subject || !course_type) {
       return res.status(400).json({ error: "class_name, subject and course_type are required" });
     }
@@ -173,17 +290,24 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       class_name,
       subject,
       course_type,
-require_location: require_location !==false,
-      created_at: now,
+require_location: require_location !== false, // defaults to true unless explicitly turned off
+send_pdf: send_pdf !== false, // defaults to true unless explicitly turned off
+created_at: now,
       expires_at: now + CODE_EXPIRY_MS,
     });
-    res.json({
+  // Auto-email the attendance PDF 20 minutes after this code was generated
+if (session.send_pdf) {
+  setTimeout(() => sendAttendancePdfEmail(session._id.toString()), PDF_EMAIL_DELAY_MS);
+} 
+ res.json({
       code,
       session_id: session._id.toString(),
       expires_in_seconds: CODE_EXPIRY_MS / 1000,
       class_name,
       subject,
       course_type,
+  require_location: session.require_location,
+  send_pdf: session.send_pdf,
     });
   } catch (err) {
     console.error(err);
