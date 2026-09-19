@@ -28,6 +28,7 @@ const dns = require("dns");
 dns.setDefaultResultOrder("ipv4first"); //render's IPv6 route to gmail is broken; force ipv4
 
 const app = express();
+app.set("trust proxy",1);
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
