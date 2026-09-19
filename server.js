@@ -59,8 +59,12 @@ const TEACHER_EMAIL = process.env.TEACHER_EMAIL;
 
 const mailTransporter = (GMAIL_USER && GMAIL_APP_PASSWORD)
   ? nodemailer.createTransport({
-      service: "gmail",
+      host: "smtp.gmail.com",
+      port: 587,
+      secure: false, // STARTTLS on port 587 — port 465 is often blocked on free hosting
+      requireTLS: true,
       auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+      connectionTimeout: 10000, // fail fast (10s) instead of hanging till cron's timeout
     })
   : null;
 
