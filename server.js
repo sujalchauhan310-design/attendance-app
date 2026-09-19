@@ -24,6 +24,8 @@ const mongoose = require("mongoose");
 const rateLimit = require("express-rate-limit");
 const PDFDocument = require("pdfkit");
 const nodemailer = require("nodemailer");
+const dns = require("dns");
+dns.setDefaultResultOrder("ip4first"); //render's IPv6 route to gmail is broken; force ipv4
 
 const app = express();
 app.use(express.json());
