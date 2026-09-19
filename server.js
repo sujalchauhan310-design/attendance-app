@@ -592,10 +592,16 @@ app.get("/api/check-and-send-pdfs", async (req, res) => {
       send_pdf: true,
       pdf_sent: false,
       created_at: { $lte: now - PDF_EMAIL_DELAY_MS },
-    });
+    }).limit(3); // ek baar mein sirf 3 — taaki timeout kabhi na ho
+
+    console.log(`check-and-send-pdfs: ${dueSessions.length} session(s) is baar process ho rahe hain`);
 
     for (const session of dueSessions) {
-      await sendAttendancePdfEmail(session._id.toString());
+      try {
+        await sendAttendancePdfEmail(session._id.toString());
+      } catch (err) {
+        console.error(`Session ${session._id} fail hua:`, err.message);
+      }
     }
 
     res.json({ checked: dueSessions.length });
