@@ -581,7 +581,29 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
     res.status(500).json({ error: "Something went wrong. Try again." });
   }
 });
+// Checks for any session whose 20-minute PDF window has passed but the PDF
+// hasn't been sent yet, and sends it. Meant to be called every few minutes by
+// an external cron service (like cron-job.org) — unlike setTimeout, this
+// survives the server spinning down and restarting before the timer fires.
+app.get("/api/check-and-send-pdfs", async (req, res) => {
+  try {
+    const now = Date.now();
+    const dueSessions = await ActiveCode.find({
+      send_pdf: true,
+      pdf_sent: false,
+      created_at: { $lte: now - PDF_EMAIL_DELAY_MS },
+    });
 
+    for (const session of dueSessions) {
+      await sendAttendancePdfEmail(session._id.toString());
+    }
+
+    res.json({ checked: dueSessions.length });
+  } catch (err) {
+    console.error("check-and-send-pdfs failed:", err.message);
+    res.status(500).json({ error: "Something went wrong checking pending PDFs." });
+  }
+});
 // ---------- START SERVER ----------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
