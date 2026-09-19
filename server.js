@@ -598,9 +598,13 @@ app.get("/api/check-and-send-pdfs", async (req, res) => {
       send_pdf: true,
       pdf_sent: false,
       created_at: { $lte: now - PDF_EMAIL_DELAY_MS },
-    }).limit(3); // ek baar mein sirf 3 — taaki timeout kabhi na ho
+    }).limit(3);
 
     console.log(`check-and-send-pdfs: ${dueSessions.length} session(s) is baar process ho rahe hain`);
+
+    // Respond immediately so cron-job.org's short timeout never trips — the
+    // actual email sending continues in the background after this.
+    res.json({ checked: dueSessions.length });
 
     for (const session of dueSessions) {
       try {
@@ -609,11 +613,11 @@ app.get("/api/check-and-send-pdfs", async (req, res) => {
         console.error(`Session ${session._id} fail hua:`, err.message);
       }
     }
-
-    res.json({ checked: dueSessions.length });
   } catch (err) {
     console.error("check-and-send-pdfs failed:", err.message);
-    res.status(500).json({ error: "Something went wrong checking pending PDFs." });
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Something went wrong checking pending PDFs." });
+    }
   }
 });
 // ---------- START SERVER ----------
