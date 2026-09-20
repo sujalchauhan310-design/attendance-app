@@ -97,7 +97,7 @@
   <span class="text-sm text-ink">📧 Email PDF Automatically <span class="block text-xs text-muted mt-0.5">Sends this session's attendance PDF to your inbox 20 min after generating the code</span></span>
   <input type="checkbox" id="autoSendPdf" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
 </label>
-    <button onclick="generateCode()" class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 transition">Generate New Code</button>
+    <button id="generateBtn" onclick="openGenerateConfirm()" class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 transition disabled:opacity-50 disabled:cursor-not-allowed">Generate New Code</button>
   </div>
 
   <!-- Generated code card -->
@@ -167,6 +167,19 @@
     <div class="flex flex-col sm:flex-row gap-3 mt-5">
       <button class="flex-1 bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg py-2.5 transition" onclick="loadAttendance()">Refresh List</button>
       <button class="flex-1 bg-transparent hover:bg-surface2 border border-line text-muted hover:text-ink font-medium rounded-lg py-2.5 transition" onclick="printList()">Print / Save as PDF</button>
+    </div>
+  </div>
+</div>
+
+<!-- Generate code confirm modal -->
+<div id="generateModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
+    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Confirm this class</h2>
+    <p class="text-sm text-muted mb-4">Double-check before generating — this is what students will need to match.</p>
+    <div class="space-y-2 text-sm bg-surface2 border border-line rounded-lg p-3.5" id="generateSummary"></div>
+    <div class="flex gap-3 mt-5">
+      <button onclick="closeGenerateConfirm()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
+      <button onclick="confirmGenerate()" class="flex-1 py-2.5 rounded-lg bg-gold text-[#171208] font-semibold hover:bg-gold/90 transition">Yes, Generate</button>
     </div>
   </div>
 </div>
@@ -302,14 +315,37 @@ async function teacherFetch(url, options = {}) {
   return res;
 }
 
-async function generateCode() {
+function openGenerateConfirm() {
   const class_name = document.getElementById('className').value.trim();
   const subject = document.getElementById('subjectSelect').value.trim();
   const course_type = document.getElementById('courseTypeSelect').value.trim();
   if (!class_name || !subject || !course_type) { alert('Select class, subject and course type first'); return; }
 
   const require_location = document.getElementById('requireLocation').checked;
-const send_pdf = document.getElementById('autoSendPdf').checked;
+  const send_pdf = document.getElementById('autoSendPdf').checked;
+
+  document.getElementById('generateSummary').innerHTML = `
+    <div class="flex justify-between"><span class="text-muted">Class</span><span class="font-medium text-ink">${class_name}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Subject</span><span class="font-medium text-ink">${subject}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Course Type</span><span class="font-medium text-ink">${course_type}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Location Check</span><span class="font-medium text-ink">${require_location ? 'ON' : 'OFF'}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Auto-Email PDF</span><span class="font-medium text-ink">${send_pdf ? 'ON' : 'OFF'}</span></div>
+  `;
+  document.getElementById('generateModal').classList.remove('hidden');
+}
+
+function closeGenerateConfirm() {
+  document.getElementById('generateModal').classList.add('hidden');
+}
+
+async function confirmGenerate() {
+  closeGenerateConfirm();
+
+  const class_name = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subjectSelect').value.trim();
+  const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const require_location = document.getElementById('requireLocation').checked;
+  const send_pdf = document.getElementById('autoSendPdf').checked;
 
   const res = await teacherFetch('/api/teacher/generate-code', {
     method: 'POST',
