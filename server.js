@@ -852,12 +852,24 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       } else if (student_major_subject) {
         await Student.findOneAndUpdate({ roll_no: cleanRoll }, { major_subject: student_major_subject });
       }
-    } else {
+   } else {
       student_name = name ? name.trim() : "";
       if (!student_name) {
         return res.status(400).json({ error: "Please enter your name — this is your first time marking attendance." });
       }
-      await Student.create({ roll_no: cleanRoll, name: student_name, class_name, major_subject: student_major_subject });
+      try {
+        await Student.create({ roll_no: cleanRoll, name: student_name, class_name, major_subject: student_major_subject });
+      } catch (createErr) {
+        if (createErr.code === 11000) {
+          // A retry from a flaky connection already created this student a
+          // moment ago — that's fine, just continue with the existing record
+          // instead of failing the whole request.
+          const raceStudent = await Student.findOne({ roll_no: cleanRoll });
+          student_name = raceStudent ? raceStudent.name : student_name;
+        } else {
+          throw createErr;
+        }
+      }
     }
 
     // 4. Save attendance
