@@ -905,7 +905,9 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       // "subject and course type", since that was misleading whenever the
       // real clash was something else (e.g. a duplicate roll_no/device_id
       // race from a double submit).
-      const dupFields = err.keyPattern ? Object.keys(err.keyPattern) : [];
+      const dupFields = err.keyPattern
+        ? Object.keys(err.keyPattern)
+        : (err.keyValue ? Object.keys(err.keyValue) : []);
       console.error("Duplicate key on fields:", dupFields, err.keyValue);
       if (dupFields.includes("subject") && dupFields.includes("course_type")) {
         return res.status(409).json({ error: "Attendance already marked for this subject and course type today." });
