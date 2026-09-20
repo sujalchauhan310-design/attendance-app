@@ -887,10 +887,18 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
     }
 
     res.json({ success: true, message: "Attendance marked successfully!", roll_no, date });
-  } catch (err) {
+ } catch (err) {
     if (err.code === 11000) {
-      // Duplicate key error from the unique index — a race condition safety net
-      return res.status(409).json({ error: "Attendance already marked for this subject and course type today." });
+      // Figure out WHICH unique index actually clashed — don't always blame
+      // "subject and course type", since that was misleading whenever the
+      // real clash was something else (e.g. a duplicate roll_no/device_id
+      // race from a double submit).
+      const dupFields = err.keyPattern ? Object.keys(err.keyPattern) : [];
+      console.error("Duplicate key on fields:", dupFields, err.keyValue);
+      if (dupFields.includes("subject") && dupFields.includes("course_type")) {
+        return res.status(409).json({ error: "Attendance already marked for this subject and course type today." });
+      }
+      return res.status(409).json({ error: "That didn't go through due to a temporary conflict. Please try submitting again." });
     }
     console.error(err);
     res.status(500).json({ error: "Something went wrong. Try again." });
