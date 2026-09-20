@@ -271,6 +271,12 @@ function fetchLocation() {
 }
 fetchLocation();
 
+document.getElementById('rollNo').addEventListener('input', () => {
+  const nameField = document.getElementById('studentName');
+  nameField.readOnly = false;
+  nameField.classList.remove('opacity-70', 'cursor-not-allowed');
+});
+
 document.getElementById('rollNo').addEventListener('blur', async () => {
   const roll_no = document.getElementById('rollNo').value.trim();
   const nameField = document.getElementById('studentName');
@@ -279,7 +285,19 @@ document.getElementById('rollNo').addEventListener('blur', async () => {
   try {
     const res = await fetch('/api/student/lookup-name?roll_no=' + encodeURIComponent(roll_no));
     const data = await res.json();
-    if (data.name && !nameField.value.trim()) nameField.value = data.name;
+    if (data.name) {
+      // Roster match — name is locked, can't be edited (server ignores any
+      // client-sent name for a known roll number anyway; this just makes
+      // that visible so students don't wonder why their edit didn't stick).
+      nameField.value = data.name;
+      nameField.readOnly = true;
+      nameField.classList.add('opacity-70', 'cursor-not-allowed');
+      nameField.title = 'Name is locked to your roll number. Ask your teacher if this needs to change.';
+    } else {
+      nameField.readOnly = false;
+      nameField.classList.remove('opacity-70', 'cursor-not-allowed');
+      nameField.title = '';
+    }
     if (data.major_subject && !majorField.value) majorField.value = data.major_subject;
   } catch (err) {}
 });

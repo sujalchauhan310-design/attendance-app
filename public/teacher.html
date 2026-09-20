@@ -116,6 +116,25 @@
     <div id="uploadMsg"></div>
   </div>
 
+  <!-- Unlock device card -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
+    <label class="block text-sm font-medium text-ink">Unlock Device <span class="block text-xs font-normal text-muted mt-0.5">A phone/device permanently locks to the first roll number used on it. Enter that roll number to free it up again.</span></label>
+    <div class="flex gap-2">
+      <input id="unlockRollNo" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Roll number to unlock"
+        class="flex-1 bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      <button class="bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="unlockDevice()">Unlock</button>
+    </div>
+    <div id="unlockMsg"></div>
+  </div>
+
+  <!-- 30-day report card -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
+    <label class="block text-sm font-medium text-ink">30-Day Attendance % Report <span class="block text-xs font-normal text-muted mt-0.5">Downloads a PDF for the class/subject/course-type selected above — one row per student, day-by-day P/A, and overall %</span></label>
+    <button class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="downloadOverallReport()">Download 30-Day Report</button>
+    <div id="reportMsg"></div>
+  </div>
+
+
   <!-- Attendance list card -->
   <div class="bg-surface border border-line rounded-xl p-5 shadow-lg shadow-black/20">
     <label class="block text-sm font-medium text-ink mb-1.5">Attendance List — pick a session <span class="block text-xs font-normal text-muted mt-0.5">Each code you generate is a separate session with its own list &amp; PDF</span></label>
@@ -387,6 +406,65 @@ async function uploadRoster() {
     msgDiv.innerHTML = '<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ Network error. Try again.</div>';
   }
 }
+
+async function unlockDevice() {
+  const roll_no = document.getElementById('unlockRollNo').value.trim();
+  const msgDiv = document.getElementById('unlockMsg');
+  if (!roll_no) { alert('Enter the roll number to unlock.'); return; }
+
+  try {
+    const res = await teacherFetch('/api/teacher/device-lock', {
+      method: 'DELETE',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ roll_no })
+    });
+    const data = await res.json();
+    if (data.success) {
+      msgDiv.innerHTML = data.removed
+        ? `<div class="mt-2 rounded-lg border border-ok/40 bg-ok/10 text-ok text-sm px-3.5 py-2.5">✅ Unlocked. Roll No ${roll_no} can now mark attendance from a new device.</div>`
+        : `<div class="mt-2 rounded-lg border border-golddim/50 bg-golddim/10 text-[#e8c468] text-sm px-3.5 py-2.5">No device lock was found for Roll No ${roll_no}.</div>`;
+      document.getElementById('unlockRollNo').value = '';
+    } else {
+      msgDiv.innerHTML = `<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ ${data.error}</div>`;
+    }
+  } catch (err) {
+    msgDiv.innerHTML = '<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ Network error. Try again.</div>';
+  }
+}
+
+async function downloadOverallReport() {
+  const class_name = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subjectSelect').value.trim();
+  const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const msgDiv = document.getElementById('reportMsg');
+  if (!class_name || !subject || !course_type) {
+    alert('Select class, subject and course type first (top card) — the report is generated for that combination.');
+    return;
+  }
+  msgDiv.innerHTML = '<div class="mt-2 text-sm text-muted">Generating PDF...</div>';
+  try {
+    const params = new URLSearchParams({ class_name, subject, course_type, days: 30 });
+    const res = await teacherFetch('/api/teacher/reports/overall-download?' + params.toString());
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      msgDiv.innerHTML = `<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ ${data.error || 'Could not generate report.'}</div>`;
+      return;
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `30day-report-${class_name}-${subject}-${course_type}.pdf`.replace(/\s+/g, '_');
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+    msgDiv.innerHTML = '';
+  } catch (err) {
+    msgDiv.innerHTML = '<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ Network error. Try again.</div>';
+  }
+}
+
 
 async function loadAttendance() {
   const class_name = document.getElementById('className').value.trim();
