@@ -273,18 +273,26 @@ fetchLocation();
 
 document.getElementById('rollNo').addEventListener('input', () => {
   const nameField = document.getElementById('studentName');
+  const classField = document.getElementById('className');
+  const majorField = document.getElementById('majorSubject');
   nameField.readOnly = false;
   nameField.classList.remove('opacity-70', 'cursor-not-allowed');
+  classField.disabled = false;
+  classField.classList.remove('opacity-70', 'cursor-not-allowed');
+  majorField.disabled = false;
+  majorField.classList.remove('opacity-70', 'cursor-not-allowed');
 });
 
 document.getElementById('rollNo').addEventListener('blur', async () => {
   const roll_no = document.getElementById('rollNo').value.trim();
   const nameField = document.getElementById('studentName');
+  const classField = document.getElementById('className');
   const majorField = document.getElementById('majorSubject');
   if (!roll_no) return;
   try {
     const res = await fetch('/api/student/lookup-name?roll_no=' + encodeURIComponent(roll_no));
     const data = await res.json();
+
     if (data.name) {
       // Roster match — name is locked, can't be edited (server ignores any
       // client-sent name for a known roll number anyway; this just makes
@@ -298,7 +306,28 @@ document.getElementById('rollNo').addEventListener('blur', async () => {
       nameField.classList.remove('opacity-70', 'cursor-not-allowed');
       nameField.title = '';
     }
-    if (data.major_subject && !majorField.value) majorField.value = data.major_subject;
+
+    if (data.class_name) {
+      classField.value = data.class_name;
+      classField.disabled = true;
+      classField.classList.add('opacity-70', 'cursor-not-allowed');
+      classField.title = 'Class is locked to your roll number. Ask your teacher if this needs to change.';
+    } else {
+      classField.disabled = false;
+      classField.classList.remove('opacity-70', 'cursor-not-allowed');
+      classField.title = '';
+    }
+
+    if (data.major_subject) {
+      majorField.value = data.major_subject;
+      majorField.disabled = true;
+      majorField.classList.add('opacity-70', 'cursor-not-allowed');
+      majorField.title = 'Major subject is locked to your roll number. Ask your teacher if this needs to change.';
+    } else {
+      majorField.disabled = false;
+      majorField.classList.remove('opacity-70', 'cursor-not-allowed');
+      majorField.title = '';
+    }
   } catch (err) {}
 });
 

@@ -109,8 +109,8 @@
 
   <!-- Roster upload card -->
   <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
-    <label class="block text-sm font-medium text-ink">Upload Student List <span class="block text-xs font-normal text-muted mt-0.5">One-time setup — saves everyone's name &amp; subject so it auto-fills for any roll number</span></label>
-    <textarea id="rosterText" rows="5" placeholder="Paste one student per line, like:&#10;101,Priya Sharma,History&#10;102,Rahul Verma,Sociology&#10;103,Anjali Singh"
+    <label class="block text-sm font-medium text-ink">Upload Student List <span class="block text-xs font-normal text-muted mt-0.5">One-time setup — saves everyone's name, class &amp; major subject so it auto-fills (and locks) for any roll number. Also how you fix a locked value later — just re-paste that student's corrected line.</span></label>
+    <textarea id="rosterText" rows="5" placeholder="Paste one student per line, like:&#10;101,Priya Sharma,BA 1st,History&#10;102,Rahul Verma,BA 1st,Sociology&#10;103,Anjali Singh,BSc 2nd"
       class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-sm text-ink placeholder-muted/60 font-mono focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition"></textarea>
     <button class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="uploadRoster()">Upload List</button>
     <div id="uploadMsg"></div>

@@ -79,11 +79,12 @@ mongoose.connect(MONGODB_URI)
 
 // ---------- DATABASE MODELS ----------
 
-// Remembers a student's name and major subject against their roll number,
-// so it can auto-fill next time — permanently, across any device.
+// Remembers a student's name, class and major subject against their roll
+// number, so it can auto-fill (and lock) next time — permanently, across any device.
 const studentSchema = new mongoose.Schema({
   roll_no: { type: String, required: true, unique: true },
   name: { type: String, required: true },
+  class_name: { type: String, default: "" },
   major_subject: { type: String, default: "" },
 });
 const Student = mongoose.model("Student", studentSchema);
@@ -538,25 +539,30 @@ if (session.send_pdf) {
   }
 });
 
-// Look up a student's saved name and major subject from their roll number (for auto-fill)
+// Look up a student's saved name, class and major subject from their roll
+// number (for auto-fill + lock on the student form)
 app.get("/api/student/lookup-name", async (req, res) => {
   try {
     const { roll_no } = req.query;
-    if (!roll_no) return res.json({ name: "", major_subject: "" });
+    if (!roll_no) return res.json({ name: "", class_name: "", major_subject: "" });
     const student = await Student.findOne({ roll_no: roll_no.trim() });
     res.json({
       name: student ? student.name : "",
+      class_name: student ? student.class_name || "" : "",
       major_subject: student ? student.major_subject || "" : "",
     });
   } catch (err) {
     console.error(err);
-    res.json({ name: "", major_subject: "" });
+    res.json({ name: "", class_name: "", major_subject: "" });
   }
 });
 
-// Teacher uploads the full class roster in one go: roll_no, name, major_subject per line.
-// Any roll number already known gets updated; new ones get added.
-// Accepted format per line: "rollno,name,major_subject" or "rollno,name" (tab-separated also works).
+// Teacher uploads the full class roster in one go: roll_no, name, class_name,
+// major_subject per line. Any roll number already known gets updated; new
+// ones get added. This is also how a teacher FIXES a locked name/class/major
+// subject later — just re-upload the corrected line for that roll number.
+// Accepted format per line: "rollno,name,class_name,major_subject"
+// (tab-separated also works; class_name and major_subject may be left blank).
 app.post("/api/teacher/upload-roster", requireTeacherAuth, async (req, res) => {
   try {
     const { roster_text } = req.body;
@@ -568,14 +574,14 @@ app.post("/api/teacher/upload-roster", requireTeacherAuth, async (req, res) => {
     let skipped = 0;
     for (const line of lines) {
       const parts = line.split(/,|\t/).map((p) => p.trim());
-      const [roll_no, name, major_subject] = parts;
+      const [roll_no, name, class_name, major_subject] = parts;
       if (!roll_no || !name) {
         skipped++;
         continue;
       }
       await Student.findOneAndUpdate(
         { roll_no },
-        { roll_no, name, major_subject: major_subject || "" },
+        { roll_no, name, class_name: class_name || "", major_subject: major_subject || "" },
         { upsert: true }
       );
       added++;
@@ -814,19 +820,36 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       return res.status(409).json({ error: "Attendance has already been marked from this device for this subject and course type today." });
     }
 
-    // 3. Roster name-lock: if this roll number already exists (student has
-    //    marked attendance before / was in an uploaded roster), ALWAYS use
-    //    the stored name — the client's name field is ignored so nobody can
-    //    edit someone else's name by typing over it. Major subject can still
-    //    be filled in/updated normally.
+    // 3. Roster locks: if this roll number already exists (student has
+    //    marked attendance before / was in an uploaded roster):
+    //      - Name is ALWAYS the stored one — client's name field is ignored.
+    //      - Major subject is ALWAYS the stored one, once set — ignored too.
+    //      - Class is checked for a match, not silently swapped (silently
+    //        overriding it here could point this attendance at the wrong
+    //        session/class than what was actually validated above).
+    //    First time we see this roll number, whatever the student sends is
+    //    saved and becomes the locked value from then on.
     const existingStudent = await Student.findOne({ roll_no: cleanRoll });
     let student_name;
     let student_major_subject = major_subject ? major_subject.trim() : "";
 
     if (existingStudent) {
       student_name = existingStudent.name;
-      if (!student_major_subject) student_major_subject = existingStudent.major_subject || "";
-      if (student_major_subject && student_major_subject !== (existingStudent.major_subject || "")) {
+
+      if (existingStudent.class_name) {
+        if (existingStudent.class_name !== class_name) {
+          return res.status(403).json({
+            error: `Your class is locked to "${existingStudent.class_name}". If this is wrong, ask your teacher to correct it.`,
+          });
+        }
+      } else {
+        // First time we're seeing a class for this roll number — lock it in.
+        await Student.findOneAndUpdate({ roll_no: cleanRoll }, { class_name });
+      }
+
+      if (existingStudent.major_subject) {
+        student_major_subject = existingStudent.major_subject;
+      } else if (student_major_subject) {
         await Student.findOneAndUpdate({ roll_no: cleanRoll }, { major_subject: student_major_subject });
       }
     } else {
@@ -834,7 +857,7 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       if (!student_name) {
         return res.status(400).json({ error: "Please enter your name — this is your first time marking attendance." });
       }
-      await Student.create({ roll_no: cleanRoll, name: student_name, major_subject: student_major_subject });
+      await Student.create({ roll_no: cleanRoll, name: student_name, class_name, major_subject: student_major_subject });
     }
 
     // 4. Save attendance
