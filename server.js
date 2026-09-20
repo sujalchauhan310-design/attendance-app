@@ -150,6 +150,24 @@ attendanceSchema.index(
 // is generated and emailed long before MongoDB deletes the underlying data.
 attendanceSchema.index({ createdAtDate: 1 }, { expireAfterSeconds: 60 * 24 * 60 * 60 });
 const Attendance = mongoose.model("Attendance", attendanceSchema);
+// One-time cleanup: an old unique index (roll_no+class_name+period+date) is
+// still sitting in the database from before subject/course_type existed.
+// Mongoose never drops old indexes on its own, so it was silently blocking
+// every second attendance for the same roll_no+class_name+date, no matter
+// what subject/course_type the student picked. Drop it once at startup.
+mongoose.connection.once("open", async () => {
+  try {
+    const indexes = await Attendance.collection.indexes();
+    for (const idx of indexes) {
+      if (idx.key && idx.key.period !== undefined) {
+        await Attendance.collection.dropIndex(idx.name);
+        console.log("Dropped stale index:", idx.name);
+      }
+    }
+  } catch (e) {
+    console.error("Index cleanup failed:", e.message);
+  }
+});
 
 // ---------- HELPERS ----------
 function todayDateString() {
