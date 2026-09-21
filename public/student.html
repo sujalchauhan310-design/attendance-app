@@ -87,6 +87,20 @@
     </div>
 
     <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">System <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
+      <div class="grid grid-cols-2 gap-2" id="systemGroup">
+        <label class="cursor-pointer">
+          <input type="radio" name="system" value="Annual" class="peer sr-only">
+          <span class="block text-center rounded-lg border border-line bg-surface2 px-3.5 py-2.5 text-sm font-medium text-muted transition peer-checked:border-gold peer-checked:bg-gold/10 peer-checked:text-gold peer-focus-visible:ring-2 peer-focus-visible:ring-gold/60">Annual</span>
+        </label>
+        <label class="cursor-pointer">
+          <input type="radio" name="system" value="Semester" class="peer sr-only">
+          <span class="block text-center rounded-lg border border-line bg-surface2 px-3.5 py-2.5 text-sm font-medium text-muted transition peer-checked:border-gold peer-checked:bg-gold/10 peer-checked:text-gold peer-focus-visible:ring-2 peer-focus-visible:ring-gold/60">Semester</span>
+        </label>
+      </div>
+    </div>
+
+    <div>
       <label class="block text-sm font-medium text-ink mb-1.5">Subject <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
       <select id="subject" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
         <option value="">Select subject</option>
@@ -94,7 +108,7 @@
         <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
         <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
         <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
-        <option>Computer Science</option><option>Other</option>
+        <option>Computer Science</option><option>Physical Education</option><option>Other</option>
       </select>
     </div>
 
@@ -119,7 +133,7 @@
         <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
         <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
         <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
-        <option>Computer Science</option><option>Other</option>
+        <option>Computer Science</option><option>Physical Education</option><option>Other</option>
       </select>
     </div>
 
@@ -145,6 +159,7 @@
           <li>Scroll down, tap <b class="text-ink">Safari Websites</b></li>
           <li>Set it to <b class="text-ink">"While Using the App"</b></li>
           <li>Come back here and tap "Retry Location"</li>
+          <li class="list-none -ml-1 mt-1 text-xs">Still failing? Try turning off <b class="text-ink">iCloud Private Relay</b> (Settings → your name → iCloud → Private Relay) or switch between WiFi and mobile data, then retry.</li>
         </ol>
         <ol id="locStepsAndroid" class="hidden list-decimal list-inside text-sm text-muted space-y-1">
           <li>Tap the <b class="text-ink">🔒 lock / ⓘ info icon</b> next to the address bar</li>
@@ -186,11 +201,21 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// localStorage can throw (Safari private mode, storage blocked) — never let
+// that break the whole page.
+let memoryDeviceId = null;
 function getDeviceId() {
-  let id = localStorage.getItem('attendance_device_id');
+  let id = null;
+  try { id = localStorage.getItem('attendance_device_id'); } catch (e) {}
+  if (!id) id = memoryDeviceId;
   if (!id) {
     id = 'dev-' + Date.now() + '-' + Math.random().toString(36).slice(2, 12);
-    localStorage.setItem('attendance_device_id', id);
+    memoryDeviceId = id;
+    try { localStorage.setItem('attendance_device_id', id); } catch (e) {}
   }
   return id;
 }
@@ -234,16 +259,18 @@ function showLocTab(which) {
 // instead of satellites — it's less precise but comes back much faster and
 // works even with a poor connection. A generous timeout and a retry button
 // cover the rest.
-function fetchLocation() {
+function fetchLocation(timeoutMs) {
   const statusEl = document.getElementById('locStatus');
   const retryBtn = document.getElementById('retryLocBtn');
   const helpBox = document.getElementById('locHelp');
   retryBtn.style.display = 'none';
   helpBox.classList.add('hidden');
+  const timeout = (typeof timeoutMs === 'number') ? timeoutMs : 30000;
 
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
       statusEl.textContent = '📍 Location not supported on this browser';
+      retryBtn.style.display = 'inline-block';
       resolve(null);
       return;
     }
@@ -265,10 +292,11 @@ function fetchLocation() {
         }
         resolve(null);
       },
-      { enableHighAccuracy: false, timeout: 30000, maximumAge: 60000 }
+      { enableHighAccuracy: false, timeout: timeout, maximumAge: 60000 }
     );
   });
 }
+
 fetchLocation();
 
 document.getElementById('rollNo').addEventListener('input', () => {
@@ -341,7 +369,7 @@ function getQueue() {
   try { return JSON.parse(localStorage.getItem(QUEUE_KEY)) || []; } catch (e) { return []; }
 }
 function saveQueue(q) {
-  localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
+  try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch (e) {}
   updateQueueStatus();
 }
 function updateQueueStatus() {
@@ -408,6 +436,7 @@ function gatherPayload() {
     roll_no: document.getElementById('rollNo').value.trim(),
     name: document.getElementById('studentName').value.trim(),
     class_name: document.getElementById('className').value.trim(),
+    system: (document.querySelector('input[name="system"]:checked') || {}).value || '',
     subject: document.getElementById('subject').value.trim(),
     course_type: document.getElementById('courseType').value.trim(),
     major_subject: document.getElementById('majorSubject').value.trim(),
@@ -424,8 +453,8 @@ function openConfirm() {
     msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Roll number must contain digits only.</div>';
     return;
   }
-  if (!p.class_name || !p.subject || !p.course_type) {
-    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Please fill all required fields.</div>';
+  if (!p.class_name || !p.system || !p.subject || !p.course_type) {
+    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Please fill all required fields (including Annual / Semester).</div>';
     return;
   }
   if (!/^[0-9]{5}$/.test(p.code)) {
@@ -435,12 +464,13 @@ function openConfirm() {
 
   const summary = document.getElementById('confirmSummary');
   summary.innerHTML = `
-    <div class="flex justify-between"><span class="text-muted">Roll No</span><span class="font-medium text-ink">${p.roll_no}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Name</span><span class="font-medium text-ink">${p.name || '—'}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Class</span><span class="font-medium text-ink">${p.class_name}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Subject</span><span class="font-medium text-ink">${p.subject}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Course Type</span><span class="font-medium text-ink">${p.course_type}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Code</span><span class="font-medium text-ink">${p.code}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Roll No</span><span class="font-medium text-ink">${esc(p.roll_no)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Name</span><span class="font-medium text-ink">${esc(p.name) || '—'}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Class</span><span class="font-medium text-ink">${esc(p.class_name)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">System</span><span class="font-medium text-ink">${esc(p.system)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Subject</span><span class="font-medium text-ink">${esc(p.subject)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Course Type</span><span class="font-medium text-ink">${esc(p.course_type)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Code</span><span class="font-medium text-ink">${esc(p.code)}</span></div>
   `;
   document.getElementById('confirmModal').classList.remove('hidden');
 }
@@ -454,11 +484,12 @@ async function confirmSubmit() {
   const msgDiv = document.getElementById('message');
   const btn = document.getElementById('submitBtn');
 
-  // Try once more if we don't have coords yet — but don't block submission on
-  // it. Whether location is actually required depends on the teacher's
-  // per-session toggle, which only the server knows about.
+  // No coords yet? Give location one quick last try (8s, not the full 30s).
+  // Whatever happens, the request is sent — the server decides what to do.
   if (!coords) {
-    coords = await fetchLocation();
+    btn.disabled = true;
+    btn.textContent = 'Checking location...';
+    await fetchLocation(8000);
   }
 
   btn.disabled = true;
@@ -471,7 +502,7 @@ async function confirmSubmit() {
     if (result.data.success) {
       msgDiv.innerHTML = `<div class="rounded-lg border border-ok/40 bg-ok/10 text-ok text-sm px-3.5 py-3">✅ ${result.data.message}</div>`;
     } else {
-      msgDiv.innerHTML = `<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ ${result.data.error}</div>`;
+      msgDiv.innerHTML = `<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ ${esc(result.data.error)}</div>`;
     }
   } else {
     const q = getQueue();

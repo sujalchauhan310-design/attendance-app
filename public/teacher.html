@@ -64,6 +64,15 @@
     </div>
 
     <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">System <span class="text-xs font-normal text-muted">(Annual or Semester — also decides the report period)</span></label>
+      <select id="systemSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select system</option>
+        <option value="Annual">Annual</option>
+        <option value="Semester">Semester</option>
+      </select>
+    </div>
+
+    <div>
       <label class="block text-sm font-medium text-ink mb-1.5">Subject</label>
       <select id="subjectSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
         <option value="">Select subject</option>
@@ -71,7 +80,7 @@
         <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
         <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
         <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
-        <option>Computer Science</option><option>Other</option>
+        <option>Computer Science</option><option>Physical Education</option><option>Other</option>
       </select>
     </div>
 
@@ -129,8 +138,8 @@
 
   <!-- 30-day report card -->
   <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
-    <label class="block text-sm font-medium text-ink">30-Day Attendance % Report <span class="block text-xs font-normal text-muted mt-0.5">Downloads a PDF for the class/subject/course-type selected above — one row per student, day-by-day P/A, and overall %</span></label>
-    <button class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="downloadOverallReport()">Download 30-Day Report</button>
+    <label class="block text-sm font-medium text-ink">Attendance % Report <span class="block text-xs font-normal text-muted mt-0.5">Downloads a PDF for the class/subject/course-type/system selected above — one row per student with classes attended, classes held and overall %. Annual = last 365 days, Semester = last 180 days.</span></label>
+    <button id="reportBtn" class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="downloadOverallReport()">Download Report</button>
     <div id="reportMsg"></div>
   </div>
 
@@ -227,6 +236,10 @@
 </div>
 
 <script>
+// Student names are typed by students — always escape before putting in HTML.
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 let expiryTimestamp = null;
 let timerInterval = null;
 let lastRecords = [];
@@ -244,6 +257,7 @@ function saveSelection() {
       class_name: document.getElementById('className').value,
       subject: document.getElementById('subjectSelect').value,
       course_type: document.getElementById('courseTypeSelect').value,
+      system: document.getElementById('systemSelect').value,
       require_location: document.getElementById('requireLocation').checked,
     }));
   } catch (err) {}
@@ -256,16 +270,17 @@ function restoreSelection() {
     if (saved.class_name) document.getElementById('className').value = saved.class_name;
     if (saved.subject) document.getElementById('subjectSelect').value = saved.subject;
     if (saved.course_type) document.getElementById('courseTypeSelect').value = saved.course_type;
+    if (saved.system) document.getElementById('systemSelect').value = saved.system;
     if (typeof saved.require_location === 'boolean') document.getElementById('requireLocation').checked = saved.require_location;
   } catch (err) {}
 }
 
-function saveActiveSession(data, class_name, subject, course_type, require_location) {
+function saveActiveSession(data, class_name, subject, course_type, require_location, system) {
   try {
     localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify({
       code: data.code,
       session_id: data.session_id,
-      class_name, subject, course_type, require_location,
+      class_name, subject, course_type, require_location, system,
       expiry: expiryTimestamp,
     }));
   } catch (err) {}
@@ -319,13 +334,15 @@ function openGenerateConfirm() {
   const class_name = document.getElementById('className').value.trim();
   const subject = document.getElementById('subjectSelect').value.trim();
   const course_type = document.getElementById('courseTypeSelect').value.trim();
-  if (!class_name || !subject || !course_type) { alert('Select class, subject and course type first'); return; }
+  const system = document.getElementById('systemSelect').value.trim();
+  if (!class_name || !system || !subject || !course_type) { alert('Select class, system (Annual/Semester), subject and course type first'); return; }
 
   const require_location = document.getElementById('requireLocation').checked;
   const send_pdf = document.getElementById('autoSendPdf').checked;
 
   document.getElementById('generateSummary').innerHTML = `
     <div class="flex justify-between"><span class="text-muted">Class</span><span class="font-medium text-ink">${class_name}</span></div>
+    <div class="flex justify-between"><span class="text-muted">System</span><span class="font-medium text-ink">${system}</span></div>
     <div class="flex justify-between"><span class="text-muted">Subject</span><span class="font-medium text-ink">${subject}</span></div>
     <div class="flex justify-between"><span class="text-muted">Course Type</span><span class="font-medium text-ink">${course_type}</span></div>
     <div class="flex justify-between"><span class="text-muted">Location Check</span><span class="font-medium text-ink">${require_location ? 'ON' : 'OFF'}</span></div>
@@ -344,15 +361,16 @@ async function confirmGenerate() {
   const class_name = document.getElementById('className').value.trim();
   const subject = document.getElementById('subjectSelect').value.trim();
   const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const system = document.getElementById('systemSelect').value.trim();
   const require_location = document.getElementById('requireLocation').checked;
   const send_pdf = document.getElementById('autoSendPdf').checked;
 
   const res = await teacherFetch('/api/teacher/generate-code', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ class_name, subject, course_type, require_location, send_pdf })
+    body: JSON.stringify({ class_name, subject, course_type, system, require_location, send_pdf })
   });
-  const data = await res.json();
+  const data = await res.json().catch(() => ({ error: 'Something went wrong. Try again.' }));
   if (data.error) { alert(data.error); return; }
 
   document.getElementById('codeSection').style.display = 'block';
@@ -360,9 +378,9 @@ async function confirmGenerate() {
   document.getElementById('codeLocNote').textContent = require_location
     ? '📍 Location check is ON for this session'
     : '📍 Location check is OFF for this session';
-  const CODE_VALID_SECONDS = 7 * 60; // 7 minutes
+  const CODE_VALID_SECONDS = data.expires_in_seconds || 7 * 60;
   expiryTimestamp = Date.now() + CODE_VALID_SECONDS * 1000;
-  saveActiveSession(data, class_name, subject, course_type, require_location);
+  saveActiveSession(data, class_name, subject, course_type, require_location, system);
   saveSelection();
 
   if (timerInterval) clearInterval(timerInterval);
@@ -376,13 +394,16 @@ async function loadSessions(selectId) {
   const class_name = document.getElementById('className').value.trim();
   const subject = document.getElementById('subjectSelect').value.trim();
   const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const system = document.getElementById('systemSelect').value.trim();
   const params = new URLSearchParams();
   if (class_name) params.set('class_name', class_name);
   if (subject) params.set('subject', subject);
   if (course_type) params.set('course_type', course_type);
+  if (system) params.set('system', system);
 
   try {
     const res = await teacherFetch('/api/teacher/sessions?' + params.toString());
+    if (!res.ok) return;
     const data = await res.json();
     const sel = document.getElementById('sessionSelect');
     const previous = selectId || sel.value;
@@ -391,8 +412,8 @@ async function loadSessions(selectId) {
     (data.sessions || []).forEach((s, i) => {
       const opt = document.createElement('option');
       opt.value = s.session_id;
-      const time = new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      opt.textContent = `${s.class_name} — ${s.subject} (${s.course_type || '-'}) — ${time}`;
+      const time = formatTime(s.created_at);
+      opt.textContent = `${s.class_name} — ${s.subject} (${s.course_type || '-'}, ${s.system || 'Annual'}) — ${time}`;
       sel.appendChild(opt);
     });
     if (previous) sel.value = previous;
@@ -413,12 +434,15 @@ function updateTimer() {
 }
 
 
+// All times are shown in IST regardless of the device's own timezone.
 function formatTime(ms) {
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(ms).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
 }
+// dateStr is already an IST calendar date (YYYY-MM-DD) from the server, so
+// format it as-is in UTC to avoid any device-timezone shift.
 function formatDateHeading(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const d = new Date(dateStr + 'T00:00:00Z');
+  return d.toLocaleDateString('en-IN', { timeZone: 'UTC', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 async function uploadRoster() {
@@ -472,14 +496,15 @@ async function downloadOverallReport() {
   const class_name = document.getElementById('className').value.trim();
   const subject = document.getElementById('subjectSelect').value.trim();
   const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const system = document.getElementById('systemSelect').value.trim();
   const msgDiv = document.getElementById('reportMsg');
-  if (!class_name || !subject || !course_type) {
-    alert('Select class, subject and course type first (top card) — the report is generated for that combination.');
+  if (!class_name || !system || !subject || !course_type) {
+    alert('Select class, system (Annual/Semester), subject and course type first (top card) — the report is generated for that combination.');
     return;
   }
   msgDiv.innerHTML = '<div class="mt-2 text-sm text-muted">Generating PDF...</div>';
   try {
-    const params = new URLSearchParams({ class_name, subject, course_type, days: 30 });
+    const params = new URLSearchParams({ class_name, subject, course_type, system });
     const res = await teacherFetch('/api/teacher/reports/overall-download?' + params.toString());
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -490,7 +515,7 @@ async function downloadOverallReport() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `30day-report-${class_name}-${subject}-${course_type}.pdf`.replace(/\s+/g, '_');
+    a.download = `${system === 'Semester' ? 180 : 365}day-report-${class_name}-${subject}-${course_type}-${system}.pdf`.replace(/\s+/g, '_');
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -506,6 +531,7 @@ async function loadAttendance() {
   const class_name = document.getElementById('className').value.trim();
   const subject = document.getElementById('subjectSelect').value.trim();
   const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const system = document.getElementById('systemSelect').value.trim();
   const sessionSel = document.getElementById('sessionSelect');
   const session_id = sessionSel.value;
   lastSessionLabel = session_id
@@ -516,12 +542,14 @@ async function loadAttendance() {
   if (class_name) params.set('class_name', class_name);
   if (subject) params.set('subject', subject);
   if (course_type) params.set('course_type', course_type);
+  if (system) params.set('system', system);
   if (session_id) params.set('session_id', session_id);
 
   const res = await teacherFetch('/api/teacher/attendance?' + params.toString());
+  if (!res.ok) return; // e.g. wrong password — teacherFetch already alerted
   const data = await res.json();
 
-  lastRecords = data.records;
+  lastRecords = data.records || [];
   lastDate = data.date;
 
   document.getElementById('attendanceCount').textContent = `Total marked: ${data.count}`;
@@ -539,10 +567,10 @@ function renderTable() {
     tr.className = 'hover:bg-surface2/50 transition';
     tr.innerHTML = `
       <td class="py-2.5 pr-2 text-muted">${i + 1}</td>
-      <td class="py-2.5 pr-2 text-ink">${r.student_name || '-'}</td>
-      <td class="py-2.5 pr-2 text-ink">${r.roll_no}</td>
-      <td class="py-2.5 pr-2 text-ink">${r.major_subject || '-'}</td>
-      <td class="py-2.5 pr-2 text-muted">${r.course_type || '-'}</td>
+      <td class="py-2.5 pr-2 text-ink">${esc(r.student_name) || '-'}</td>
+      <td class="py-2.5 pr-2 text-ink">${esc(r.roll_no)}</td>
+      <td class="py-2.5 pr-2 text-ink">${esc(r.major_subject) || '-'}</td>
+      <td class="py-2.5 pr-2 text-muted">${esc(r.course_type) || '-'}</td>
       <td class="py-2.5 pr-2 text-muted whitespace-nowrap">${formatTime(r.marked_at)}</td>
       <td class="py-2.5 pr-0 text-right whitespace-nowrap">
         <button class="text-xs font-medium text-gold hover:text-gold/80 transition mr-3" onclick="openEditModal('${recordId}')">Edit</button>
@@ -641,12 +669,14 @@ function printList() {
   const className = document.getElementById('className').value.trim() || '-';
   const subject = document.getElementById('subjectSelect').value.trim() || '-';
   const courseType = document.getElementById('courseTypeSelect').value.trim() || '-';
+  const system = document.getElementById('systemSelect').value.trim();
   const rows = lastRecords.map((r, i) =>
-    `<tr><td>${i + 1}</td><td>${r.student_name || '-'}</td><td>${r.roll_no}</td><td>${r.major_subject || '-'}</td><td>${r.course_type || '-'}</td><td>${formatTime(r.marked_at)}</td></tr>`
+    `<tr><td>${i + 1}</td><td>${esc(r.student_name) || '-'}</td><td>${esc(r.roll_no)}</td><td>${esc(r.major_subject) || '-'}</td><td>${esc(r.course_type) || '-'}</td><td>${formatTime(r.marked_at)}</td></tr>`
   ).join('');
   const win = window.open('', '_blank');
+  if (!win) { alert('Popup blocked — allow popups for this site and try again.'); return; }
   win.document.write(`
-    <html><head><title>Attendance - ${className} - ${subject} (${courseType}) - ${formatDateHeading(lastDate)}</title>
+    <html><head><title>Attendance - ${className} - ${subject} (${courseType}${system ? ', ' + system : ''}) - ${formatDateHeading(lastDate)}</title>
     <style>
       body { font-family: 'Georgia', serif; padding: 30px; color: #232733; }
       h1 { font-size: 20px; margin-bottom: 4px; }
@@ -657,7 +687,7 @@ function printList() {
       tbody tr:nth-child(even) { background:#f6f4ee; }
     </style>
     </head><body>
-      <h1>Attendance Register — ${className} — ${subject} (${courseType})</h1>
+      <h1>Attendance Register — ${className} — ${subject} (${courseType}${system ? ', ' + system : ''})</h1>
       <div class="meta">${formatDateHeading(lastDate)} &nbsp;|&nbsp; Session: ${lastSessionLabel || 'All sessions today'} &nbsp;|&nbsp; Total present: ${lastRecords.length}</div>
       <table><thead><tr><th>S.No</th><th>Name</th><th>Roll No</th><th>Major Subject</th><th>Type</th><th>Marked At</th></tr></thead>
       <tbody>${rows}</tbody></table>
@@ -671,9 +701,19 @@ function printList() {
 document.getElementById('className').addEventListener('change', () => { saveSelection(); loadSessions(); });
 document.getElementById('subjectSelect').addEventListener('change', () => { saveSelection(); loadSessions(); });
 document.getElementById('courseTypeSelect').addEventListener('change', () => { saveSelection(); loadSessions(); });
+document.getElementById('systemSelect').addEventListener('change', () => { saveSelection(); loadSessions(); updateReportLabel(); });
+
+function updateReportLabel() {
+  const s = document.getElementById('systemSelect').value;
+  document.getElementById('reportBtn').textContent =
+    s === 'Annual' ? 'Download Annual Report (365 days)'
+    : s === 'Semester' ? 'Download Semester Report (180 days)'
+    : 'Download Report';
+}
 document.getElementById('requireLocation').addEventListener('change', saveSelection);
 
 restoreSelection();
+updateReportLabel();
 restoreActiveSession();
 loadSessions();
 </script>

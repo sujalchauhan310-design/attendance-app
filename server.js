@@ -52,6 +52,27 @@ const RADIUS_METERS = 150; // a bit generous, since network-based location
 // How long after a code is generated the attendance PDF is auto-emailed
 const PDF_EMAIL_DELAY_MS = 20 * 60 * 1000; // 20 minutes
 
+// India Standard Time = UTC+5:30 (no daylight saving). Render's servers run in
+// UTC, so every "today" / "start of day" / displayed time must be shifted to IST.
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const IST_TIMEZONE = "Asia/Kolkata";
+
+// Annual vs Semester system. Each has its own report window.
+const REPORT_DAYS = { Annual: 365, Semester: 180 };
+// Up to this many days the report shows the day-by-day P/A grid. Longer
+// ranges (Annual/Semester) don't fit on a page as a grid, so they use a
+// compact summary table instead.
+const GRID_MAX_DAYS = 45;
+// Attendance records are auto-deleted after this many days. Must be longer
+// than the longest report window (Annual = 365 days), otherwise the Annual
+// report would silently be missing older data.
+const ATTENDANCE_RETENTION_DAYS = 400;
+
+// If a student's phone can't give a location, they must retry. After this many
+// failed-location submissions in a day from the same device, the next one is
+// accepted anyway (silently — the student just sees the normal success message).
+const MAX_LOCATION_ATTEMPTS = 15;
+
 // Resend sends over HTTPS (not SMTP), so it isn't blocked on Render's free tier
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 // Gmail address that RECEIVES the PDF (the teacher/sir's inbox)
@@ -108,12 +129,24 @@ const monthlyReportLogSchema = new mongoose.Schema({
 });
 const MonthlyReportLog = mongoose.model("MonthlyReportLog", monthlyReportLogSchema);
 
+// Counts "no location came through" submissions per device per day (stored in
+// the DB so a server restart doesn't reset the count). Auto-deleted after 2 days.
+const locationAttemptSchema = new mongoose.Schema({
+  device_id: { type: String, required: true },
+  date: { type: String, required: true },
+  count: { type: Number, default: 0 },
+  createdAtDate: { type: Date, default: Date.now, expires: 2 * 24 * 60 * 60 },
+});
+locationAttemptSchema.index({ device_id: 1, date: 1 }, { unique: true });
+const LocationAttempt = mongoose.model("LocationAttempt", locationAttemptSchema);
+
 const activeCodeSchema = new mongoose.Schema({
   code: String,
   class_name: String,
   subject: String,
   course_type: String, // DSC / SEC / GE / AEC / VAC / MDC — same subject under
                         // a different type is a different class, no clash
+system: { type: String, enum: ["Annual", "Semester"], default: "Annual" }, // Annual / Semester system
 require_location: {type: Boolean, default: true },
 send_pdf: { type: Boolean, default: true }, // auto-email attendance PDF 20 min after generation
 pdf_sent: { type: Boolean, default: false }, // prevents sending twice if server restarts
@@ -127,6 +160,7 @@ const attendanceSchema = new mongoose.Schema({
   student_name: String,
   subject: String,       // the subject actually being taught in this session (from the teacher's code)
   course_type: String,   // DSC / SEC / GE / AEC / VAC / MDC for this session
+  system: { type: String, enum: ["Annual", "Semester"], default: "Annual" }, // Annual / Semester system
   major_subject: String, // the student's own primary/major subject (persisted, separate concept)
   class_name: String,    // course + year, e.g. "BA 1st"
   session_id: String,    // which code-generation session this attendance belongs to
@@ -140,15 +174,17 @@ const attendanceSchema = new mongoose.Schema({
 // Same roll number can't mark attendance twice for the same
 // class + subject + course type on the same day.
 // (roll_no + subject + course_type + class_name + date, as requested)
+// `system` is part of the key so the same roll number in the Annual and
+// Semester systems never clash.
 attendanceSchema.index(
-  { roll_no: 1, class_name: 1, subject: 1, course_type: 1, date: 1 },
+  { roll_no: 1, class_name: 1, subject: 1, course_type: 1, system: 1, date: 1 },
   { unique: true }
 );
-// Auto-delete attendance records 60 days after they were created. IMPORTANT:
+// Auto-delete attendance records ATTENDANCE_RETENTION_DAYS (400) days after they were created. IMPORTANT:
 // the monthly combined report (sent on/around the 1st of each month, covering
 // the previous month) always runs well within this 60-day window, so the PDF
 // is generated and emailed long before MongoDB deletes the underlying data.
-attendanceSchema.index({ createdAtDate: 1 }, { expireAfterSeconds: 60 * 24 * 60 * 60 });
+attendanceSchema.index({ createdAtDate: 1 }, { expireAfterSeconds: ATTENDANCE_RETENTION_DAYS * 24 * 60 * 60 });
 const Attendance = mongoose.model("Attendance", attendanceSchema);
 // One-time cleanup: an old unique index (roll_no+class_name+period+date) is
 // still sitting in the database from before subject/course_type existed.
@@ -158,33 +194,74 @@ const Attendance = mongoose.model("Attendance", attendanceSchema);
 mongoose.connection.once("open", async () => {
   try {
     const indexes = await Attendance.collection.indexes();
+    const wantedTtl = ATTENDANCE_RETENTION_DAYS * 24 * 60 * 60;
     for (const idx of indexes) {
-      if (idx.key && idx.key.period !== undefined) {
+      const k = idx.key || {};
+      const isOldPeriodIndex = k.period !== undefined;
+      // Old unique index from before `system` existed — it would wrongly block
+      // the same roll number in Annual vs Semester on the same day.
+      const isOldUniqueWithoutSystem =
+        idx.unique && k.roll_no !== undefined && k.date !== undefined && k.system === undefined;
+      // Old 60-day TTL index — replaced by the longer retention window.
+      const isOldTtl =
+        k.createdAtDate !== undefined && idx.expireAfterSeconds !== undefined && idx.expireAfterSeconds !== wantedTtl;
+      if (isOldPeriodIndex || isOldUniqueWithoutSystem || isOldTtl) {
         await Attendance.collection.dropIndex(idx.name);
         console.log("Dropped stale index:", idx.name);
       }
     }
+    await Attendance.createIndexes(); // (re)create the current indexes from the schema
   } catch (e) {
     console.error("Index cleanup failed:", e.message);
   }
 });
 
 // ---------- HELPERS ----------
+// A Date shifted so that its getUTC*/toISOString values read as IST wall-clock.
+function istNow() {
+  return new Date(Date.now() + IST_OFFSET_MS);
+}
+
 function todayDateString() {
-  // Uses SERVER date, not client date
-  const now = new Date();
-  return now.toISOString().slice(0, 10); // YYYY-MM-DD
+  // Uses SERVER date in IST, not client date and not UTC
+  return istNow().toISOString().slice(0, 10); // YYYY-MM-DD
+}
+
+// Epoch ms of today's 00:00 IST
+function startOfTodayIstMs() {
+  const shifted = Date.now() + IST_OFFSET_MS;
+  return Math.floor(shifted / 86400000) * 86400000 - IST_OFFSET_MS;
+}
+
+function formatIstTime(ms) {
+  return new Date(ms).toLocaleTimeString("en-IN", { timeZone: IST_TIMEZONE, hour: "2-digit", minute: "2-digit" });
+}
+
+// Accepts "Annual" / "Semester" (any case). Missing/empty → "Annual" (older
+// cached pages that don't send it yet). Anything else → null (invalid).
+function normalizeSystem(raw) {
+  if (raw === undefined || raw === null || raw === "") return "Annual";
+  const s = String(raw).trim().toLowerCase();
+  if (s === "annual") return "Annual";
+  if (s === "semester") return "Semester";
+  return null;
+}
+
+// Mongo filter value for `system`. Records saved before this feature existed
+// have no `system` field at all — they were all Annual, so Annual also matches those.
+function systemMatch(system) {
+  return system === "Annual" ? { $in: ["Annual", null] } : system;
 }
 
 function generateCode() {
   return Math.floor(10000 + Math.random() * 90000).toString(); // 5-digit code
 }
 
-// Returns the last n YYYY-MM-DD date strings (server/UTC date, same convention
+// Returns the last n YYYY-MM-DD date strings (IST date, same convention
 // as todayDateString), oldest first, ending today.
 function lastNDates(n) {
   const dates = [];
-  const now = new Date();
+  const now = istNow();
   for (let i = n - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setUTCDate(d.getUTCDate() - i);
@@ -196,7 +273,7 @@ function lastNDates(n) {
 // Returns every YYYY-MM-DD date in the previous calendar month, plus a
 // "YYYY-MM" label for that month — used by the automatic monthly report.
 function datesInPreviousMonth() {
-  const now = new Date();
+  const now = istNow();
   const firstOfThisMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const lastOfPrevMonth = new Date(firstOfThisMonth.getTime() - 24 * 60 * 60 * 1000);
   const year = lastOfPrevMonth.getUTCFullYear();
@@ -231,7 +308,7 @@ function buildAttendancePdfBuffer(session, records) {
     doc.on("error", reject);
 
     doc.fontSize(16).font("Helvetica-Bold").text(
-      `Attendance Register — ${session.class_name} — ${session.subject} (${session.course_type})`,
+      `Attendance Register — ${session.class_name} — ${session.subject} (${session.course_type}, ${session.system || "Annual"})`,
       { align: "center" }
     );
     doc.moveDown(0.3);
@@ -263,7 +340,7 @@ function buildAttendancePdfBuffer(session, records) {
     records.forEach((r, idx) => {
       if (y > 760) { doc.addPage(); y = 40; }
       drawRow(
-        [idx + 1, r.student_name || "-", r.roll_no, r.subject || "-", r.course_type || "-", new Date(r.marked_at).toLocaleTimeString()],
+        [idx + 1, r.student_name || "-", r.roll_no, r.subject || "-", r.course_type || "-", formatIstTime(r.marked_at)],
         y,
         false
       );
@@ -274,15 +351,24 @@ function buildAttendancePdfBuffer(session, records) {
   });
 }
 
-// Builds S.No/Name/Roll-No/day-by-day P-A rows for one class+subject+course
-// combination, over the given list of YYYY-MM-DD dates.
-async function buildOverallReportRows(class_name, subject, course_type, dates) {
+// Builds one row per student for one class+subject+course+system combination,
+// over the given list of YYYY-MM-DD dates. Also returns how many distinct days
+// a class was actually held (used as the denominator for long-range reports).
+async function buildOverallReportRows(class_name, subject, course_type, system, dates) {
   const records = await Attendance.find({
     class_name,
     subject,
     course_type,
+    system: systemMatch(system),
     date: { $in: dates },
   }).lean();
+
+  const classDays = new Set(records.map((r) => r.date)).size;
+  // Short ranges (monthly report): % of calendar days, as before.
+  // Long ranges (Annual/Semester): % of days a class was actually held —
+  // dividing by 365 calendar days would include Sundays, holidays and
+  // vacations and make every % look tiny.
+  const denominator = dates.length <= GRID_MAX_DAYS ? dates.length : classDays;
 
   const byRoll = new Map();
   for (const r of records) {
@@ -296,7 +382,7 @@ async function buildOverallReportRows(class_name, subject, course_type, dates) {
 
   const rows = Array.from(byRoll.values()).map((s) => {
     const totalPresent = s.present.size;
-    const pct = dates.length ? ((totalPresent / dates.length) * 100).toFixed(1) : "0.0";
+    const pct = denominator ? ((totalPresent / denominator) * 100).toFixed(1) : "0.0";
     return {
       roll_no: s.roll_no,
       student_name: s.student_name,
@@ -313,11 +399,13 @@ async function buildOverallReportRows(class_name, subject, course_type, dates) {
     return String(a.roll_no).localeCompare(String(b.roll_no));
   });
 
-  return rows;
+  return { rows, classDays };
 }
 
 // Builds the landscape "N-day overall attendance %" PDF (as a Buffer) for one
-// class+subject+course combination.
+// class+subject+course+system combination. Up to GRID_MAX_DAYS it shows the
+// day-by-day P/A grid; beyond that (Annual = 365, Semester = 180 days) it
+// shows a compact summary table, since that many columns can't fit on a page.
 function buildOverallReportPdfBuffer(meta, rows) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 30, size: "A4", layout: "landscape" });
@@ -326,19 +414,65 @@ function buildOverallReportPdfBuffer(meta, rows) {
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
+    const grid = meta.dates.length <= GRID_MAX_DAYS;
+    const sysLabel = meta.system ? ` (${meta.system})` : "";
+
     doc.fontSize(14).font("Helvetica-Bold").text(
-      `${meta.dates.length}-Day Attendance % Report — ${meta.class_name} — ${meta.subject} (${meta.course_type})`,
+      `${meta.dates.length}-Day Attendance % Report${sysLabel} — ${meta.class_name} — ${meta.subject} (${meta.course_type})`,
       { align: "center" }
     );
     doc.moveDown(0.3);
+    const heldInfo = grid ? "" : `   |   Classes held: ${meta.classDays || 0}`;
     doc.fontSize(9).font("Helvetica").fillColor("#555").text(
-      `Period: ${meta.dates[0]} to ${meta.dates[meta.dates.length - 1]}   |   Students: ${rows.length}`,
+      `Period: ${meta.dates[0]} to ${meta.dates[meta.dates.length - 1]}${heldInfo}   |   Students: ${rows.length}`,
       { align: "center" }
     );
     doc.moveDown(0.8);
     doc.fillColor("#000");
 
     const startX = 30;
+
+    if (!grid) {
+      // ---- Summary table (long ranges) ----
+      const cols = { sno: 35, name: 260, roll: 80, present: 110, held: 110, pct: 80 };
+      function drawSummaryRow(y, bold, c) {
+        doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(bold ? 9 : 8.5);
+        let x = startX;
+        doc.text(String(c.sno), x, y, { width: cols.sno }); x += cols.sno;
+        doc.text(String(c.name), x, y, { width: cols.name }); x += cols.name;
+        doc.text(String(c.roll), x, y, { width: cols.roll }); x += cols.roll;
+        doc.text(String(c.present), x, y, { width: cols.present, align: "center" }); x += cols.present;
+        doc.text(String(c.held), x, y, { width: cols.held, align: "center" }); x += cols.held;
+        doc.text(String(c.pct), x, y, { width: cols.pct, align: "center" });
+      }
+      const header = { sno: "S.No", name: "Name", roll: "Roll No", present: "Classes Attended", held: "Classes Held", pct: "%" };
+      let y = doc.y;
+      drawSummaryRow(y, true, header);
+      y += 16;
+      doc.moveTo(startX, y - 4).lineTo(doc.page.width - 30, y - 4).strokeColor("#999").stroke();
+      rows.forEach((r, idx) => {
+        if (y > doc.page.height - 40) {
+          doc.addPage();
+          y = 30;
+          drawSummaryRow(y, true, header);
+          y += 16;
+          doc.moveTo(startX, y - 4).lineTo(doc.page.width - 30, y - 4).strokeColor("#999").stroke();
+        }
+        drawSummaryRow(y, false, {
+          sno: idx + 1,
+          name: r.student_name || "-",
+          roll: r.roll_no,
+          present: r.totalPresent,
+          held: meta.classDays || 0,
+          pct: r.pct + "%",
+        });
+        y += 14;
+      });
+      doc.end();
+      return;
+    }
+
+    // ---- Day-by-day grid (short ranges) ----
     const pageWidth = doc.page.width - 60;
     const fixed = { sno: 22, name: 110, roll: 45, total: 34, pct: 34 };
     const fixedSum = fixed.sno + fixed.name + fixed.roll + fixed.total + fixed.pct;
@@ -406,20 +540,20 @@ async function sendMonthlyCombinedReport() {
 
   const combosAgg = await Attendance.aggregate([
     { $match: { date: { $in: dates } } },
-    { $group: { _id: { class_name: "$class_name", subject: "$subject", course_type: "$course_type" } } },
+    { $group: { _id: { class_name: "$class_name", subject: "$subject", course_type: "$course_type", system: { $ifNull: ["$system", "Annual"] } } } },
   ]);
   const combos = combosAgg.map((c) => c._id);
 
   const attachments = [];
   for (const combo of combos) {
-    const rows = await buildOverallReportRows(combo.class_name, combo.subject, combo.course_type, dates);
+    const { rows, classDays } = await buildOverallReportRows(combo.class_name, combo.subject, combo.course_type, combo.system, dates);
     if (!rows.length) continue;
     const pdfBuffer = await buildOverallReportPdfBuffer(
-      { class_name: combo.class_name, subject: combo.subject, course_type: combo.course_type, dates },
+      { class_name: combo.class_name, subject: combo.subject, course_type: combo.course_type, system: combo.system, dates, classDays },
       rows
     );
     attachments.push({
-      filename: `${label}-${combo.class_name}-${combo.subject}-${combo.course_type}.pdf`.replace(/\s+/g, "_"),
+      filename: `${label}-${combo.class_name}-${combo.subject}-${combo.course_type}-${combo.system}.pdf`.replace(/\s+/g, "_"),
       content: pdfBuffer,
     });
   }
@@ -429,14 +563,15 @@ async function sendMonthlyCombinedReport() {
     return { skipped: true, reason: "no attendance data for " + label };
   }
 
-  await resend.emails.send({
+  const { error: monthlyError } = await resend.emails.send({
     from: "Attendance App <onboarding@resend.dev>",
     to: TEACHER_EMAIL,
     subject: `Monthly Attendance Reports — ${label}`,
-    text: `Attached: ${attachments.length} attendance report(s) covering ${label}, one PDF per class/subject/course-type combination.`,
+    text: `Attached: ${attachments.length} attendance report(s) covering ${label}, one PDF per class/subject/course-type/system combination.`,
     attachments,
   });
 
+  if (monthlyError) throw new Error(monthlyError.message || "Resend rejected the email");
   await MonthlyReportLog.create({ month: label, sent_at: Date.now() });
   console.log(`Monthly combined report emailed for ${label} (${attachments.length} attachment(s))`);
   return { sent: true, month: label, count: attachments.length };
@@ -445,13 +580,21 @@ async function sendMonthlyCombinedReport() {
 
 // Generates the PDF for a session and emails it to TEACHER_EMAIL.
 async function sendAttendancePdfEmail(sessionId) {
+  let claimed = false;
   try {
-    const session = await ActiveCode.findById(sessionId);
-    if (!session || session.pdf_sent || !session.send_pdf) return;
-        if (!resend || !TEACHER_EMAIL) {
+    if (!resend || !TEACHER_EMAIL) {
       console.warn(`Skipping PDF email for session ${sessionId} — email is not configured.`);
       return;
     }
+    // Atomically claim this session, so the setTimeout and the cron endpoint
+    // can never both send the same PDF.
+    const session = await ActiveCode.findOneAndUpdate(
+      { _id: sessionId, send_pdf: true, pdf_sent: false },
+      { pdf_sent: true },
+      { new: true }
+    );
+    if (!session) return;
+    claimed = true;
 
     const records = await Attendance.find({ session_id: sessionId }).lean();
     records.sort((a, b) => {
@@ -466,10 +609,10 @@ async function sendAttendancePdfEmail(sessionId) {
       records
     );
 
-        await resend.emails.send({
+    const { error: sendError } = await resend.emails.send({
       from: "Attendance App <onboarding@resend.dev>",
       to: TEACHER_EMAIL,
-      subject: `Attendance — ${session.class_name} — ${session.subject} (${session.course_type})`,
+      subject: `Attendance — ${session.class_name} — ${session.subject} (${session.course_type}, ${session.system || "Annual"})`,
       text: `Attached: attendance for ${session.class_name} — ${session.subject} (${session.course_type}), ${records.length} student(s) marked present. Generated automatically 20 minutes after the code was created.`,
       attachments: [{
         filename: `attendance-${session.class_name}-${session.subject}-${session.course_type}.pdf`.replace(/\s+/g, "_"),
@@ -477,11 +620,12 @@ async function sendAttendancePdfEmail(sessionId) {
       }],
     });
 
-    session.pdf_sent = true;
-    await session.save();
+    if (sendError) throw new Error(sendError.message || "Resend rejected the email");
     console.log(`Attendance PDF emailed for session ${sessionId}`);
   } catch (err) {
     console.error(`Failed to email attendance PDF for session ${sessionId}:`, err.message);
+    // Un-claim so the cron retries it later
+    if (claimed) await ActiveCode.updateOne({ _id: sessionId }, { pdf_sent: false }).catch(() => {});
   }
 }
 
@@ -499,11 +643,22 @@ function requireTeacherAuth(req, res, next) {
 // ---------- RATE LIMITING ----------
 // Keyed by device_id (not IP) so one phone can't spam attempts, without
 // blocking an entire college's worth of students who share the same WiFi IP.
+//
+// Deliberately set high (15) so this NEVER fires for normal use — typos,
+// retries, a slow network causing a few genuine re-submits. It's only meant
+// to catch a genuinely abusive pattern (e.g. a script hammering the code
+// guess). And when it does fire, the response is worded identically to the
+// app's ordinary generic error, and the RateLimit-* headers are turned off —
+// nothing here reveals that a limiter exists or was tripped. Someone
+// running a script gets the same non-answer a normal server hiccup gives,
+// with no signal to slow down, back off differently, or that they've been
+// specifically detected.
 const markAttendanceLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // max 10 attendance attempts per device per window
-  message: { error: "Too many attempts from this device. Please wait a few minutes and try again." },
-  standardHeaders: true,
+  max: 60, // must stay well above MAX_LOCATION_ATTEMPTS, else it would cut off students before the location fallback can apply
+  statusCode: 500, // matches the app's ordinary error status — 429 would give it away
+  message: { error: "Something went wrong. Try again." },
+  standardHeaders: false,
   legacyHeaders: false,
   keyGenerator: (req) => (req.body && req.body.device_id) || req.ip,
 });
@@ -511,8 +666,9 @@ const markAttendanceLimiter = rateLimit({
 const generateCodeLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30, // teachers may generate several codes across periods
-  message: { error: "Too many code generations. Please wait a few minutes." },
-  standardHeaders: true,
+  statusCode: 500,
+  message: { error: "Something went wrong. Try again." },
+  standardHeaders: false,
   legacyHeaders: false,
 });
 
@@ -525,6 +681,10 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
     if (!class_name || !subject || !course_type) {
       return res.status(400).json({ error: "class_name, subject and course_type are required" });
     }
+    const system = normalizeSystem(req.body.system);
+    if (!system) {
+      return res.status(400).json({ error: "system must be either Annual or Semester" });
+    }
     const code = generateCode();
     const now = Date.now(); // SERVER time
     const session = await ActiveCode.create({
@@ -532,6 +692,7 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       class_name,
       subject,
       course_type,
+      system,
 require_location: require_location !== false, // defaults to true unless explicitly turned off
 send_pdf: send_pdf !== false, // defaults to true unless explicitly turned off
 created_at: now,
@@ -548,6 +709,7 @@ if (session.send_pdf) {
       class_name,
       subject,
       course_type,
+      system,
   require_location: session.require_location,
   send_pdf: session.send_pdf,
     });
@@ -615,13 +777,15 @@ app.post("/api/teacher/upload-roster", requireTeacherAuth, async (req, res) => {
 // which one's attendance list to view. Each generated code = one separate session.
 app.get("/api/teacher/sessions", requireTeacherAuth, async (req, res) => {
   try {
-    const { class_name, subject, course_type } = req.query;
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const filter = { created_at: { $gte: startOfDay.getTime() } };
+    const { class_name, subject, course_type, system } = req.query;
+    const filter = { created_at: { $gte: startOfTodayIstMs() } }; // today, in IST
     if (class_name) filter.class_name = class_name;
     if (subject) filter.subject = subject;
     if (course_type) filter.course_type = course_type;
+    if (system) {
+      const sys = normalizeSystem(system);
+      if (sys) filter.system = systemMatch(sys);
+    }
     const sessions = await ActiveCode.find(filter).sort({ created_at: -1 }).lean();
     res.json({
       sessions: sessions.map((s) => ({
@@ -629,6 +793,7 @@ app.get("/api/teacher/sessions", requireTeacherAuth, async (req, res) => {
         class_name: s.class_name,
         subject: s.subject,
         course_type: s.course_type,
+        system: s.system || "Annual",
         created_at: s.created_at,
       })),
     });
@@ -641,12 +806,16 @@ app.get("/api/teacher/sessions", requireTeacherAuth, async (req, res) => {
 // Get today's attendance list for a class + subject + course type (optionally one specific session)
 app.get("/api/teacher/attendance", requireTeacherAuth, async (req, res) => {
   try {
-    const { class_name, subject, course_type, session_id } = req.query;
+    const { class_name, subject, course_type, session_id, system } = req.query;
     const date = todayDateString();
     const filter = { date };
     if (class_name) filter.class_name = class_name;
     if (subject) filter.subject = subject;
     if (course_type) filter.course_type = course_type;
+    if (system) {
+      const sys = normalizeSystem(system);
+      if (sys) filter.system = systemMatch(sys);
+    }
     if (session_id) filter.session_id = session_id;
     const rows = await Attendance.find(filter).lean();
     // Sort by roll number, ascending (numeric if possible, else alphabetic)
@@ -692,6 +861,7 @@ app.patch("/api/teacher/attendance/update", requireTeacherAuth, async (req, res)
       class_name: existing.class_name,
       subject: finalSubject,
       course_type: existing.course_type,
+      system: systemMatch(existing.system || "Annual"),
       date: existing.date,
     });
     if (clash) {
@@ -745,19 +915,24 @@ app.delete("/api/teacher/device-lock", requireTeacherAuth, async (req, res) => {
   }
 });
 
-// Manual download: the last N days' (default 30) overall attendance % PDF
-// for one class + subject + course type combination.
+// Manual download: overall attendance % PDF for one class + subject + course
+// type + system combination. The window depends on the system:
+// Annual = last 365 days, Semester = last 180 days.
 app.get("/api/teacher/reports/overall-download", requireTeacherAuth, async (req, res) => {
   try {
-    const { class_name, subject, course_type, days } = req.query;
+    const { class_name, subject, course_type } = req.query;
     if (!class_name || !subject || !course_type) {
       return res.status(400).json({ error: "class_name, subject and course_type are required." });
     }
-    const n = Math.min(90, Math.max(1, parseInt(days, 10) || 30));
+    const system = normalizeSystem(req.query.system);
+    if (!system) {
+      return res.status(400).json({ error: "system must be either Annual or Semester." });
+    }
+    const n = REPORT_DAYS[system];
     const dates = lastNDates(n);
-    const rows = await buildOverallReportRows(class_name, subject, course_type, dates);
-    const pdfBuffer = await buildOverallReportPdfBuffer({ class_name, subject, course_type, dates }, rows);
-    const filename = `${n}day-report-${class_name}-${subject}-${course_type}.pdf`.replace(/\s+/g, "_");
+    const { rows, classDays } = await buildOverallReportRows(class_name, subject, course_type, system, dates);
+    const pdfBuffer = await buildOverallReportPdfBuffer({ class_name, subject, course_type, system, dates, classDays }, rows);
+    const filename = `${n}day-report-${class_name}-${subject}-${course_type}-${system}.pdf`.replace(/\s+/g, "_");
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.send(pdfBuffer);
@@ -775,22 +950,25 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
     if (!roll_no || !class_name || !code || !subject || !course_type) {
       return res.status(400).json({ error: "All fields are required" });
     }
-    if (!/^[0-9]+$/.test(roll_no.trim())) {
+    if (!/^[0-9]+$/.test(String(roll_no).trim())) {
       return res.status(400).json({ error: "Roll number must contain digits only." });
     }
     if (!device_id) {
       return res.status(400).json({ error: "Device could not be identified. Please reload the page and try again." });
     }
-    
+    const system = normalizeSystem(req.body.system);
+    if (!system) {
+      return res.status(400).json({ error: "Please choose Annual or Semester." });
+    }
 
     const now = Date.now(); // SERVER time — client can't fake this
-    const cleanRoll = roll_no.trim();
+    const cleanRoll = String(roll_no).trim();
 
     // 1. Find the active code matching this exact class + subject + course type
     //    (the session the teacher is running)
-    const activeCode = await ActiveCode.findOne({ class_name, subject, course_type }).sort({ created_at: -1 });
+    const activeCode = await ActiveCode.findOne({ class_name, subject, course_type, system: systemMatch(system) }).sort({ created_at: -1 });
     if (!activeCode) {
-      return res.status(400).json({ error: "No active code found for this class, subject and course type. Ask your teacher to generate one." });
+      return res.status(400).json({ error: "No active code found for this class, subject, course type and system (Annual/Semester). Check your selections, or ask your teacher to generate a code." });
     }
     if (now > activeCode.expires_at) {
       return res.status(400).json({ error: "This code has expired. Ask your teacher for the current code." });
@@ -799,17 +977,38 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       return res.status(400).json({ error: "Incorrect code." });
     }
 
-   // 1b. Location is only required when the teacher turned the toggle ON for this session
-    if (activeCode.require_location) {
-      if (typeof lat !== "number" || typeof lng !== "number") {
-        return res.status(400).json({ error: "Location is required for this session. Please allow location access and try again." });
-      }
+    // 1b. Location.
+    //   (a) A location came through and is outside the radius → ALWAYS reject.
+    //   (b) A location came through and is inside → fine.
+    //   (c) NO location came through (denied / timed out / Safari quirk) and
+    //       the teacher has location check ON → ask the student to retry. Once
+    //       the same device has failed MAX_LOCATION_ATTEMPTS times today, the
+    //       next submission is accepted silently, with the normal success
+    //       message (nothing tells the student location wasn't used).
+    //   (d) NO location and the teacher turned location check OFF → accept.
+    const hasLocation =
+      typeof lat === "number" && typeof lng === "number" &&
+      Number.isFinite(lat) && Number.isFinite(lng) &&
+      Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+    if (hasLocation) {
       const dist = distanceInMeters(CLASSROOM.lat, CLASSROOM.lng, lat, lng);
       if (dist > RADIUS_METERS) {
         return res.status(403).json({
           error: `You appear to be too far from the classroom (${Math.round(dist)}m away). Attendance can only be marked inside class.`,
         });
       }
+    } else if (activeCode.require_location !== false) {
+      const attempt = await LocationAttempt.findOneAndUpdate(
+        { device_id, date: todayDateString() },
+        { $inc: { count: 1 } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      if (attempt.count <= MAX_LOCATION_ATTEMPTS) {
+        return res.status(403).json({
+          error: "Your location could not be verified. Turn on location for your browser, tap \"Retry Location\", and try again.",
+        });
+      }
+      // else: over the limit → fall through and mark attendance normally
     }
 
     // 1c. Permanent device lock — a device binds to whichever roll number
@@ -826,14 +1025,14 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
     //    (roll_no + class_name + subject + course_type + date — DSC and SEC of
     //    the same subject are different classes and never clash)
     const date = todayDateString();
-    const alreadyMarked = await Attendance.findOne({ roll_no: cleanRoll, class_name, subject, course_type, date });
+    const alreadyMarked = await Attendance.findOne({ roll_no: cleanRoll, class_name, subject, course_type, system: systemMatch(system), date });
     if (alreadyMarked) {
       return res.status(409).json({ error: "Attendance already marked for this subject and course type today." });
     }
 
     // 2b. Check if this same device already marked someone's attendance for
     //     this exact class + subject + course_type + date
-    const deviceAlreadyUsed = await Attendance.findOne({ device_id, class_name, subject, course_type, date });
+    const deviceAlreadyUsed = await Attendance.findOne({ device_id, class_name, subject, course_type, system: systemMatch(system), date });
     if (deviceAlreadyUsed) {
       return res.status(409).json({ error: "Attendance has already been marked from this device for this subject and course type today." });
     }
@@ -896,6 +1095,7 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       student_name,
       subject,
       course_type,
+      system,
       major_subject: student_major_subject,
       class_name,
       session_id: activeCode._id.toString(),
