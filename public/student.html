@@ -205,18 +205,18 @@ document.querySelectorAll('input[name="system"]').forEach(radio => {
     
     if (system === 'Annual') {
       courseTypeSelect.innerHTML += `
-        <option value="Core">Core</option>
-        <option value="Elective">Elective</option>
-        <option value="Foundation">Foundation</option>
-      `;
-    } else if (system === 'Semester') {
-      courseTypeSelect.innerHTML += `
         <option value="DSC">DSC — Discipline Specific Core</option>
         <option value="SEC">SEC — Skill Enhancement Course</option>
         <option value="GE">GE — Generic Elective</option>
         <option value="AEC">AEC — Ability Enhancement Course</option>
         <option value="VAC">VAC — Value Added Course</option>
         <option value="MDC">MDC — Multi-Disciplinary Course</option>
+      `;
+    } else if (system === 'Semester') {
+      courseTypeSelect.innerHTML += `
+        <option value="Core">Core</option>
+        <option value="Elective">Elective</option>
+        <option value="Foundation">Foundation</option>
       `;
     }
 
