@@ -33,7 +33,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 // ---------- CONFIG ----------
-const CODE_EXPIRY_MS = 7 * 60 * 1000; // code is valid for 5 minutes
+const CODE_EXPIRY_MS = 7 * 60 * 1000; // code is valid for 7 minutes
 const MONGODB_URI = process.env.MONGODB_URI;
 
 // Simple shared password so only the teacher can generate codes / see attendance.
@@ -58,13 +58,13 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const IST_TIMEZONE = "Asia/Kolkata";
 
 // Annual vs Semester system. Each has its own report window.
-const REPORT_DAYS = { Annual: 365, Semester: 180 };
+const REPORT_DAYS = { Annual: 30, Semester: 30 };
 // Up to this many days the report shows the day-by-day P/A grid. Longer
 // ranges (Annual/Semester) don't fit on a page as a grid, so they use a
 // compact summary table instead.
 const GRID_MAX_DAYS = 45;
 // Attendance records are auto-deleted after this many days. Must be longer
-// than the longest report window (Annual = 365 days), otherwise the Annual
+// than the longest report window (Annual = 30 days), otherwise the Annual
 // report would silently be missing older data.
 const ATTENDANCE_RETENTION_DAYS = 400;
 
@@ -916,8 +916,7 @@ app.delete("/api/teacher/device-lock", requireTeacherAuth, async (req, res) => {
 });
 
 // Manual download: overall attendance % PDF for one class + subject + course
-// type + system combination. The window depends on the system:
-// Annual = last 365 days, Semester = last 180 days.
+// type + system combination. The window is 30 days for both Annual and Semester.
 app.get("/api/teacher/reports/overall-download", requireTeacherAuth, async (req, res) => {
   try {
     const { class_name, subject, course_type } = req.query;
@@ -977,28 +976,12 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       return res.status(400).json({ error: "Incorrect code." });
     }
 
-    // 1b. Location.
-    //   (a) A location came through and is outside the radius → ALWAYS reject.
-    //   (b) A location came through and is inside → fine.
-    //   (c) NO location came through (denied / timed out / Safari quirk) and
-    //       the teacher has location check ON → ask the student to retry. Once
-    //       the same device has failed MAX_LOCATION_ATTEMPTS times today, the
-    //       next submission is accepted silently, with the normal success
-    //       message (nothing tells the student location wasn't used).
-    //   (d) NO location and the teacher turned location check OFF → accept.
+    // 1b. Location validation with spoofing detection
     const hasLocation =
       typeof lat === "number" && typeof lng === "number" &&
       Number.isFinite(lat) && Number.isFinite(lng) &&
       Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
     if (hasLocation) {
-      // Location spoofing detection
-const accuracy = req.body.accuracy;
-if (accuracy !== undefined && accuracy < 5) {
-  return res.status(403).json({
-    error: "Location verification failed. Please ensure location services are working properly and try again.",
-  });
-}
-        if (hasLocation) {
       // Location spoofing detection: Check for suspiciously perfect accuracy
       // Real GPS typically gives 10-50m accuracy, fake tools often give < 5m
       const accuracy = req.body.accuracy;
@@ -1008,9 +991,6 @@ if (accuracy !== undefined && accuracy < 5) {
         });
       }
       
-      const dist = distanceInMeters(CLASSROOM.lat, CLASSROOM.lng, lat, lng);
-      if (dist > RADIUS_METERS) {
-  
       const dist = distanceInMeters(CLASSROOM.lat, CLASSROOM.lng, lat, lng);
       if (dist > RADIUS_METERS) {
         return res.status(403).json({
