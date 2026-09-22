@@ -157,6 +157,19 @@ let capturedCoords = null;
 let locationAttempts = 0;
 const MAX_LOCATION_RETRIES = 3;
 
+// Every device needs a stable, persistent device_id — the server uses this
+// to lock one device to one roll number and to rate-limit location retries.
+// Generated once and stored in localStorage so it survives reloads.
+function getDeviceId() {
+  let id = localStorage.getItem('device_id');
+  if (!id) {
+    id = (crypto.randomUUID ? crypto.randomUUID() : 'dev-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+    localStorage.setItem('device_id', id);
+  }
+  return id;
+}
+const deviceId = getDeviceId();
+
 // Progressive form reveal: Code → System → Main form
 document.getElementById('code').addEventListener('input', function() {
   const code = this.value.trim();
@@ -358,12 +371,13 @@ async function submitAttendance() {
     const payload = {
       code,
       roll_no: rollNo,
-      student_name: studentName,
+      name: studentName,
       class_name: className,
       subject,
       course_type: courseType,
       major_subject: majorSubject || null,
       system,
+      device_id: deviceId,
       lat: capturedCoords ? capturedCoords.latitude : null,
       lng: capturedCoords ? capturedCoords.longitude : null,
       accuracy: capturedCoords ? capturedCoords.accuracy : null
