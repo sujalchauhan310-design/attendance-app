@@ -87,6 +87,7 @@
           placeholder="e.g. 45678"
           class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
         <p id="rollNoErr" class="hidden text-xs text-err mt-1">Roll number can only contain digits (0–9).</p>
+        <p id="rollNoLookupStatus" class="hidden text-xs text-gold mt-1"></p>
       </div>
 
       <div>
@@ -146,6 +147,19 @@
 
   <!-- Success/Error message -->
   <div id="message" class="hidden mt-4"></div>
+</div>
+
+<!-- Confirm submission modal -->
+<div id="submitModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
+    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Confirm your details</h2>
+    <p class="text-sm text-muted mb-4">Double-check before submitting — this cannot be edited afterwards.</p>
+    <div class="space-y-2 text-sm bg-surface2 border border-line rounded-lg p-3.5" id="submitSummary"></div>
+    <div class="flex gap-3 mt-5">
+      <button onclick="closeSubmitConfirm()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Edit</button>
+      <button id="confirmSubmitBtn" onclick="confirmSubmit()" class="flex-1 py-2.5 rounded-lg bg-gold text-[#171208] font-semibold hover:bg-gold/90 transition">Yes, Submit</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -246,6 +260,45 @@ document.querySelectorAll('input[name="system"]').forEach(radio => {
   });
 });
 
+// Auto-fill + lock name / class / major subject when this roll number is
+// already known (from a roster upload or an earlier submission), matching
+// what the server treats as locked.
+let lookupTimeout = null;
+async function lookupRollNo(rollNo) {
+  const statusEl = document.getElementById('rollNoLookupStatus');
+  const nameInput = document.getElementById('studentName');
+  const classSelect = document.getElementById('className');
+  const majorSelect = document.getElementById('majorSubject');
+
+  try {
+    const res = await fetch('/api/student/lookup-name?roll_no=' + encodeURIComponent(rollNo));
+    const data = await res.json();
+
+    if (data.name) {
+      nameInput.value = data.name;
+      nameInput.readOnly = true;
+      statusEl.textContent = `✅ Welcome back, ${data.name}! Name is locked from your earlier submission.`;
+      statusEl.classList.remove('hidden');
+
+      // Only lock the class/major-subject value if the current system's list
+      // (Annual vs Semester, chosen in Step 2) actually contains it.
+      if (data.class_name && [...classSelect.options].some(o => o.value === data.class_name)) {
+        classSelect.value = data.class_name;
+        classSelect.disabled = true;
+      }
+      if (data.major_subject && [...majorSelect.options].some(o => o.value === data.major_subject)) {
+        majorSelect.value = data.major_subject;
+        majorSelect.disabled = true;
+      }
+    } else {
+      statusEl.textContent = 'First time marking attendance — please fill in your details below.';
+      statusEl.classList.remove('hidden');
+    }
+  } catch (err) {
+    statusEl.classList.add('hidden');
+  }
+}
+
 // Roll number validation
 document.getElementById('rollNo').addEventListener('input', function() {
   const rollNo = this.value.trim();
@@ -256,10 +309,21 @@ document.getElementById('rollNo').addEventListener('input', function() {
   } else {
     errEl.classList.add('hidden');
   }
+
+  // Reset any previous lock while the roll number is still being edited
+  clearTimeout(lookupTimeout);
+  document.getElementById('studentName').readOnly = false;
+  document.getElementById('className').disabled = false;
+  document.getElementById('majorSubject').disabled = false;
+  document.getElementById('rollNoLookupStatus').classList.add('hidden');
+
+  if (rollNo && /^[0-9]+$/.test(rollNo)) {
+    lookupTimeout = setTimeout(() => lookupRollNo(rollNo), 600);
+  }
 });
 
 // Capture location
-function captureLocation() {
+async function captureLocation() {
   const statusEl = document.getElementById('locStatus');
   const retryBtn = document.getElementById('retryLocBtn');
   
@@ -268,13 +332,45 @@ function captureLocation() {
     retryBtn.style.display = 'none';
     return;
   }
+
+  // Check the site's location permission up front — if it was denied
+  // earlier, getCurrentPosition would otherwise fail silently/instantly
+  // with no clear explanation, or on some browsers just hang.
+  if (navigator.permissions && navigator.permissions.query) {
+    try {
+      const status = await navigator.permissions.query({ name: 'geolocation' });
+      if (status.state === 'denied') {
+        statusEl.innerHTML = '<div class="text-err">⚠️ Location: blocked for this site. Tap the 🔒/ⓘ icon next to the address bar → Permissions → turn Location ON, then tap Retry.</div>';
+        retryBtn.style.display = 'block';
+        capturedCoords = null;
+        return;
+      }
+    } catch (permErr) {
+      // Permissions API unsupported/failed — fall through and just try getCurrentPosition normally.
+    }
+  }
   
   statusEl.innerHTML = '📍 Location: fetching...';
   retryBtn.style.display = 'none';
   locationAttempts++;
+
+  let settled = false;
+  // Safety net: some browsers occasionally never call either callback at
+  // all (a known bug on a few Android/Chrome combinations). Without this,
+  // the status would stay stuck on "fetching..." forever with no way to retry.
+  const safetyTimer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    statusEl.innerHTML = '<div class="text-err">⚠️ Location: browser did not respond. Check that Location is ON for Chrome in your phone\'s Settings → Apps → Chrome → Permissions, then tap Retry.</div>';
+    retryBtn.style.display = 'block';
+    capturedCoords = null;
+  }, 12000);
   
   navigator.geolocation.getCurrentPosition(
     (position) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(safetyTimer);
       const coords = position.coords;
       
       // Speed validation - reject if moving too fast (>50 m/s = 180 km/h)
@@ -290,15 +386,18 @@ function captureLocation() {
       retryBtn.style.display = 'none';
     },
     (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(safetyTimer);
       let msg = '⚠️ Location: ';
       if (error.code === 1) {
-        msg += 'permission denied';
+        msg += 'permission denied. Tap the 🔒/ⓘ icon next to the address bar → Permissions → turn Location ON.';
       } else if (error.code === 2) {
-        msg += 'unavailable';
+        msg += 'unavailable. Make sure Location/GPS is ON in your phone\'s quick settings, then tap Retry.';
       } else if (error.code === 3) {
-        msg += 'timeout';
+        msg += 'timed out. Try moving near a window or outdoors, then tap Retry.';
       } else {
-        msg += 'error';
+        msg += 'error. ' + (error.message || '');
       }
       
       statusEl.innerHTML = msg;
@@ -320,11 +419,15 @@ function captureLocation() {
   );
 }
 
-// Submit attendance
-async function submitAttendance() {
-  const messageEl = document.getElementById('message');
-  const submitBtn = document.getElementById('submitBtn');
-  
+// Student name is typed by the student — escape before putting in HTML.
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+let pendingSubmitPayload = null;
+
+// Validate the form, then show a confirmation popup before actually submitting
+function submitAttendance() {
   // Get form values
   const code = document.getElementById('code').value.trim();
   const system = document.querySelector('input[name="system"]:checked')?.value;
@@ -380,34 +483,63 @@ async function submitAttendance() {
     showMessage('Please select the course type.', 'error');
     return;
   }
-  
-  // Disable submit button
+
+  document.getElementById('message').classList.add('hidden');
+
+  // Stash the validated values — the actual submit happens after the
+  // student taps "Yes, Submit" in the confirmation popup.
+  pendingSubmitPayload = {
+    code,
+    roll_no: rollNo,
+    name: studentName,
+    class_name: className,
+    subject,
+    course_type: courseType,
+    major_subject: majorSubject || null,
+    system,
+    device_id: deviceId,
+    lat: capturedCoords ? capturedCoords.latitude : null,
+    lng: capturedCoords ? capturedCoords.longitude : null,
+    accuracy: capturedCoords ? capturedCoords.accuracy : null
+  };
+
+  document.getElementById('submitSummary').innerHTML = `
+    <div class="flex justify-between"><span class="text-muted">Name</span><span class="font-medium text-ink">${esc(studentName)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Roll No</span><span class="font-medium text-ink">${esc(rollNo)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">System</span><span class="font-medium text-ink">${esc(system)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Class</span><span class="font-medium text-ink">${esc(className)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Subject</span><span class="font-medium text-ink">${esc(subject)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Course Type</span><span class="font-medium text-ink">${esc(courseType)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Location</span><span class="font-medium text-ink">${capturedCoords ? '✅ Captured' : '⚠️ Not captured'}</span></div>
+  `;
+  document.getElementById('submitModal').classList.remove('hidden');
+}
+
+function closeSubmitConfirm() {
+  document.getElementById('submitModal').classList.add('hidden');
+}
+
+// Actually sends the attendance to the server, called after the student
+// confirms their details in the popup.
+async function confirmSubmit() {
+  const messageEl = document.getElementById('message');
+  const submitBtn = document.getElementById('submitBtn');
+  const confirmBtn = document.getElementById('confirmSubmitBtn');
+  if (!pendingSubmitPayload) { closeSubmitConfirm(); return; }
+
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = 'Submitting...';
   submitBtn.disabled = true;
-  submitBtn.textContent = 'Submitting...';
-  
+
   try {
-    const payload = {
-      code,
-      roll_no: rollNo,
-      name: studentName,
-      class_name: className,
-      subject,
-      course_type: courseType,
-      major_subject: majorSubject || null,
-      system,
-      device_id: deviceId,
-      lat: capturedCoords ? capturedCoords.latitude : null,
-      lng: capturedCoords ? capturedCoords.longitude : null,
-      accuracy: capturedCoords ? capturedCoords.accuracy : null
-    };
-    
     const response = await fetch('/api/student/mark-attendance', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(pendingSubmitPayload)
     });
     
     const data = await response.json();
+    closeSubmitConfirm();
     
     if (response.ok && data.success) {
       showMessage('✅ Attendance marked successfully!', 'success');
@@ -417,10 +549,14 @@ async function submitAttendance() {
         document.getElementById('code').value = '';
         document.getElementById('rollNo').value = '';
         document.getElementById('studentName').value = '';
+        document.getElementById('studentName').readOnly = false;
         document.getElementById('className').value = '';
+        document.getElementById('className').disabled = false;
         document.getElementById('subject').value = '';
         document.getElementById('courseType').value = '';
         document.getElementById('majorSubject').value = '';
+        document.getElementById('majorSubject').disabled = false;
+        document.getElementById('rollNoLookupStatus').classList.add('hidden');
         document.querySelector('input[name="system"]:checked').checked = false;
         document.getElementById('systemSection').style.display = 'none';
         document.getElementById('mainFormSection').style.display = 'none';
@@ -433,10 +569,14 @@ async function submitAttendance() {
       showMessage(data.error || 'Failed to mark attendance. Please try again.', 'error');
     }
   } catch (error) {
+    closeSubmitConfirm();
     showMessage('Network error. Please check your connection and try again.', 'error');
   } finally {
     submitBtn.disabled = false;
     submitBtn.textContent = 'Mark Attendance';
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = 'Yes, Submit';
+    pendingSubmitPayload = null;
   }
 }
 
