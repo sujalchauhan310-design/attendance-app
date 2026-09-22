@@ -125,59 +125,7 @@
     </div>
 
     <button id="generateBtn" onclick="openGenerateConfirm()" style="display:none;" class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 transition disabled:opacity-50 disabled:cursor-not-allowed">Generate New Code</button>
-        <option value="">Select class</option>
-        <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
-        <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
-        <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
-        <option>MA 1st</option><option>MA 2nd</option>
-      </select>
-    </div>
-
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">System <span class="text-xs font-normal text-muted">(Annual or Semester — also decides the report period)</span></label>
-      <select id="systemSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-        <option value="">Select system</option>
-        <option value="Annual">Annual</option>
-        <option value="Semester">Semester</option>
-      </select>
-    </div>
-
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Subject</label>
-      <select id="subjectSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-        <option value="">Select subject</option>
-        <option>Political Science</option><option>History</option><option>Public Administration</option>
-        <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
-        <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
-        <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
-        <option>Computer Science</option><option>Physical Education</option><option>Other</option>
-      </select>
-    </div>
-
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Course Type <span class="text-xs font-normal text-muted">(same subject, different type = separate class)</span></label>
-      <select id="courseTypeSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-        <option value="">Select course type</option>
-        <option value="DSC">DSC — Discipline Specific Core</option>
-        <option value="SEC">SEC — Skill Enhancement Course</option>
-        <option value="GE">GE — Generic Elective</option>
-        <option value="AEC">AEC — Ability Enhancement Course</option>
-        <option value="VAC">VAC — Value Added Course</option>
-        <option value="MDC">MDC — Multi-Disciplinary Course</option>
-      </select>
-    </div>
-
-    <label class="flex items-center justify-between rounded-lg border border-line bg-surface2/60 px-3.5 py-3 cursor-pointer">
-      <span class="text-sm text-ink">📍 Require Location Verification <span class="block text-xs text-muted mt-0.5">Student must be near college to mark attendance</span></span>
-      <input type="checkbox" id="requireLocation" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
-    </label>
-
-<label class="flex items-center justify-between rounded-lg border border-line bg-surface2/60 px-3.5 py-3 cursor-pointer">
-  <span class="text-sm text-ink">📧 Email PDF Automatically <span class="block text-xs text-muted mt-0.5">Sends this session's attendance PDF to your inbox 20 min after generating the code</span></span>
-  <input type="checkbox" id="autoSendPdf" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
-</label>
-    <button id="generateBtn" onclick="openGenerateConfirm()" class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 transition disabled:opacity-50 disabled:cursor-not-allowed">Generate New Code</button>
-  </div>
+       
 
   <!-- Generated code card -->
   <div id="codeSection" style="display:none;" class="bg-surface border border-gold/40 rounded-xl p-6 mb-5 shadow-lg shadow-black/20 text-center">
