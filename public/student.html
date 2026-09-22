@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
-<title>Student — Mark Attendance</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teacher — Attendance Register</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0d111c">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -36,484 +36,735 @@
 </script>
 <style>
   body { background: #0d111c; }
-  input, select { color-scheme: dark; }
+  input, select, textarea { color-scheme: dark; }
   ::selection { background: #cda43f; color: #0d111c; }
+  table { border-collapse: collapse; }
 </style>
 </head>
 <body class="bg-base text-ink font-sans min-h-screen">
-<div class="max-w-md mx-auto px-4 py-8 pb-16">
+<div class="max-w-3xl mx-auto px-4 py-8 pb-16">
 
-  <!-- Masthead -->
   <div class="mb-6">
-    <div class="text-xs tracking-wide text-gold/80 font-medium mb-1">Student Portal</div>
-    <h1 class="font-serif text-2xl font-semibold text-ink">Mark Attendance</h1>
-    <p class="text-sm text-muted mt-1">Fill in your details below to record today's attendance.</p>
+    <div class="text-xs tracking-wide text-gold/80 font-medium mb-1">Teacher Portal</div>
+    <h1 class="font-serif text-2xl font-semibold text-ink">Attendance Register</h1>
+    <p class="text-sm text-muted mt-1">Generate a code for your class, then review who has marked attendance.</p>
   </div>
 
-  <!-- Form card -->
-  <div class="bg-surface border border-line rounded-xl p-5 space-y-4 shadow-lg shadow-black/20">
-
-    <div class="bg-gold/10 border-2 border-gold rounded-lg p-3.5">
-      <label class="block text-base font-semibold text-gold mb-1.5">Code from teacher</label>
-      <input id="code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="off"
-        placeholder="5-digit code"
-        class="w-full bg-surface2 border-2 border-gold/60 rounded-lg px-4 py-3.5 text-2xl font-bold text-center text-gold placeholder-muted/60 tracking-[0.3em] focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold transition" />
-      <p id="codeErr" class="hidden text-xs text-err mt-1">Code can only contain digits (0–9).</p>
-    </div>
-
+  <!-- Session setup card -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-4 shadow-lg shadow-black/20 mb-5">
+    
+    <!-- Step 1: System Selection (Always visible) -->
     <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Roll Number</label>
-      <input id="rollNo" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
-        placeholder="e.g. 45678"
-        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
-      <p id="rollNoErr" class="hidden text-xs text-err mt-1">Roll number can only contain digits (0–9).</p>
-    </div>
-
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Your Name</label>
-      <input id="studentName" type="text" placeholder="e.g. Priya Sharma"
-        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
-    </div>
-
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Class</label>
-      <select id="className" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-        <option value="">Select your class</option>
-        <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
-        <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
-        <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
-        <option>MA 1st</option><option>MA 2nd</option>
+      <label class="block text-sm font-medium text-ink mb-1.5">Step 1: System <span class="text-xs font-normal text-muted">(Annual or Semester — determines class structure and report period)</span></label>
+      <select id="systemSelect" class="w-full bg-surface2 border-2 border-gold/60 rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select system first</option>
+        <option value="Annual">Annual</option>
+        <option value="Semester">Semester</option>
       </select>
     </div>
 
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">System <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
-      <div class="grid grid-cols-2 gap-2" id="systemGroup">
-        <label class="cursor-pointer">
-          <input type="radio" name="system" value="Annual" class="peer sr-only">
-          <span class="block text-center rounded-lg border border-line bg-surface2 px-3.5 py-2.5 text-sm font-medium text-muted transition peer-checked:border-gold peer-checked:bg-gold/10 peer-checked:text-gold peer-focus-visible:ring-2 peer-focus-visible:ring-gold/60">Annual</span>
-        </label>
-        <label class="cursor-pointer">
-          <input type="radio" name="system" value="Semester" class="peer sr-only">
-          <span class="block text-center rounded-lg border border-line bg-surface2 px-3.5 py-2.5 text-sm font-medium text-muted transition peer-checked:border-gold peer-checked:bg-gold/10 peer-checked:text-gold peer-focus-visible:ring-2 peer-focus-visible:ring-gold/60">Semester</span>
-        </label>
+    <!-- Step 2: Rest of the form (Shows after system selection) -->
+    <div id="mainFormSection" style="display:none;">
+      <div class="text-xs text-gold/60 mb-3 font-medium">Step 2: Class Details</div>
+
+      <div>
+        <label class="block text-sm font-medium text-ink mb-1.5">Course / Year</label>
+        <select id="className" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+          <option value="">Select class</option>
+          <!-- Options will be populated based on system selection -->
+        </select>
       </div>
-    </div>
 
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Subject <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
-      <select id="subject" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-        <option value="">Select subject</option>
-        <option>Political Science</option><option>History</option><option>Public Administration</option>
-        <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
-        <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
-        <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
-        <option>Computer Science</option><option>Physical Education</option><option>Other</option>
-      </select>
-    </div>
-
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Course Type <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
-      <select id="courseType" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-        <option value="">Select course type</option>
-        <option value="DSC">DSC — Discipline Specific Core</option>
-        <option value="SEC">SEC — Skill Enhancement Course</option>
-        <option value="GE">GE — Generic Elective</option>
-        <option value="AEC">AEC — Ability Enhancement Course</option>
-        <option value="VAC">VAC — Value Added Course</option>
-        <option value="MDC">MDC — Multi-Disciplinary Course</option>
-      </select>
-    </div>
-
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Major Subject <span class="text-xs font-normal text-muted">(optional)</span></label>
-      <select id="majorSubject" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-        <option value="">Select major subject</option>
-        <option>Political Science</option><option>History</option><option>Public Administration</option>
-        <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
-        <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
-        <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
-        <option>Computer Science</option><option>Physical Education</option><option>Other</option>
-      </select>
-    </div>
-
-    <!-- Location status -->
-    <div id="locBox" class="rounded-lg border border-line bg-surface2/60 px-3.5 py-3">
-      <div class="text-sm text-muted" id="locStatus">📍 Location: not fetched yet</div>
-      <button type="button" id="retryLocBtn" onclick="fetchLocation()" style="display:none;"
-        class="mt-2 text-sm font-medium text-gold hover:text-gold/80 transition">🔄 Retry Location</button>
-
-      <!-- Permanently denied help panel -->
-      <div id="locHelp" class="hidden mt-3 pt-3 border-t border-line">
-        <p class="text-sm text-ink font-medium mb-2">Location is blocked for this site. Turn it on:</p>
-        <div class="flex gap-2 mb-3">
-          <button type="button" onclick="showLocTab('ios')" id="tabIosBtn"
-            class="flex-1 text-xs font-medium py-1.5 rounded-md border border-line text-muted hover:text-ink transition">iPhone (Safari)</button>
-          <button type="button" onclick="showLocTab('android')" id="tabAndroidBtn"
-            class="flex-1 text-xs font-medium py-1.5 rounded-md border border-line text-muted hover:text-ink transition">Android (Chrome)</button>
-        </div>
-        <ol id="locStepsIos" class="hidden list-decimal list-inside text-sm text-muted space-y-1">
-          <li>Open the <b class="text-ink">Settings</b> app on your iPhone</li>
-          <li>Scroll down and tap <b class="text-ink">Privacy &amp; Security</b></li>
-          <li>Tap <b class="text-ink">Location Services</b> — make sure it's turned ON</li>
-          <li>Scroll down, tap <b class="text-ink">Safari Websites</b></li>
-          <li>Set it to <b class="text-ink">"While Using the App"</b></li>
-          <li>Come back here and tap "Retry Location"</li>
-          <li class="list-none -ml-1 mt-1 text-xs">Still failing? Try turning off <b class="text-ink">iCloud Private Relay</b> (Settings → your name → iCloud → Private Relay) or switch between WiFi and mobile data, then retry.</li>
-        </ol>
-        <ol id="locStepsAndroid" class="hidden list-decimal list-inside text-sm text-muted space-y-1">
-          <li>Tap the <b class="text-ink">🔒 lock / ⓘ info icon</b> next to the address bar</li>
-          <li>Tap <b class="text-ink">Permissions</b> → <b class="text-ink">Location</b></li>
-          <li>Select <b class="text-ink">Allow</b></li>
-          <li>If that option isn't there: open <b class="text-ink">Chrome menu (⋮)</b> → <b class="text-ink">Settings</b> → <b class="text-ink">Site settings</b> → <b class="text-ink">Location</b> → find this site → <b class="text-ink">Allow</b></li>
-          <li>Also check <b class="text-ink">Phone Settings → Apps → Chrome → Permissions → Location</b> is Allowed</li>
-          <li>Come back here and tap "Retry Location"</li>
-        </ol>
+      <div>
+        <label class="block text-sm font-medium text-ink mb-1.5">Subject</label>
+        <select id="subjectSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+          <option value="">Select subject</option>
+          <!-- Options will be populated based on system selection -->
+        </select>
       </div>
-    </div>
 
-    <button id="submitBtn" onclick="openConfirm()"
-      class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 mt-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
-      Mark Attendance
-    </button>
+      <div>
+        <label class="block text-sm font-medium text-ink mb-1.5">Course Type <span class="text-xs font-normal text-muted">(same subject, different type = separate class)</span></label>
+        <select id="courseTypeSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+          <option value="">Select course type</option>
+          <!-- Options will be populated based on system selection -->
+        </select>
+      </div>
+
+      <label class="flex items-center justify-between rounded-lg border border-line bg-surface2/60 px-3.5 py-3 cursor-pointer">
+        <span class="text-sm text-ink">📍 Require Location Verification <span class="block text-xs text-muted mt-0.5">Student must be near college to mark attendance</span></span>
+        <input type="checkbox" id="requireLocation" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
+      </label>
+
+      <label class="flex items-center justify-between rounded-lg border border-line bg-surface2/60 px-3.5 py-3 cursor-pointer">
+        <span class="text-sm text-ink">📧 Email PDF Automatically <span class="block text-xs text-muted mt-0.5">Sends this session's attendance PDF to your inbox 20 min after generating the code</span></span>
+        <input type="checkbox" id="autoSendPdf" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
+      </label>
+
+      <button id="generateBtn" onclick="openGenerateConfirm()" class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 transition disabled:opacity-50 disabled:cursor-not-allowed">Generate New Code</button>
+    </div>
   </div>
 
-  <div id="message" class="mt-4"></div>
-  <div id="queueStatus" class="mt-4"></div>
+  <!-- Generated code card -->
+  <div id="codeSection" style="display:none;" class="bg-surface border border-gold/40 rounded-xl p-6 mb-5 shadow-lg shadow-black/20 text-center">
+    <div class="text-6xl font-serif font-bold tracking-[0.2em] text-gold" id="codeDisplay">-----</div>
+    <div class="text-sm text-muted mt-3" id="timer"></div>
+    <div class="text-xs text-muted mt-1" id="codeLocNote"></div>
+  </div>
+
+  <!-- Roster upload card -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
+    <label class="block text-sm font-medium text-ink">Upload Student List <span class="block text-xs font-normal text-muted mt-0.5">One-time setup — saves everyone's name, class &amp; major subject so it auto-fills (and locks) for any roll number. Also how you fix a locked value later — just re-paste that student's corrected line.</span></label>
+    <textarea id="rosterText" rows="5" placeholder="Paste one student per line, like:&#10;101,Priya Sharma,BA 1st,History&#10;102,Rahul Verma,BA 1st,Sociology&#10;103,Anjali Singh,BSc 2nd"
+      class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-sm text-ink placeholder-muted/60 font-mono focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition"></textarea>
+    <button class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="uploadRoster()">Upload List</button>
+    <div id="uploadMsg"></div>
+  </div>
+
+  <!-- Unlock device card -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
+    <label class="block text-sm font-medium text-ink">Unlock Device <span class="block text-xs font-normal text-muted mt-0.5">A phone/device permanently locks to the first roll number used on it. Enter that roll number to free it up again.</span></label>
+    <div class="flex gap-2">
+      <input id="unlockRollNo" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Roll number to unlock"
+        class="flex-1 bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      <button class="bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="unlockDevice()">Unlock</button>
+    </div>
+    <div id="unlockMsg"></div>
+  </div>
+
+  <!-- Monthly report card -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
+    <label class="block text-sm font-medium text-ink">Attendance % Report <span class="block text-xs font-normal text-muted mt-0.5">Downloads a PDF for the class/subject/course-type/system selected above — one row per student with classes attended, classes held and overall %. Shows last 30 days of attendance data.</span></label>
+    <button id="reportBtn" class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="downloadOverallReport()">Download Report</button>
+    <div id="reportMsg"></div>
+  </div>
+
+  <!-- Attendance list card -->
+  <div class="bg-surface border border-line rounded-xl p-5 shadow-lg shadow-black/20">
+    <label class="block text-sm font-medium text-ink mb-1.5">Attendance List — pick a session <span class="block text-xs font-normal text-muted mt-0.5">Each code you generate is a separate session with its own list &amp; PDF</span></label>
+    <select id="sessionSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink mb-4 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+      <option value="">All sessions today</option>
+    </select>
+
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-serif text-lg font-semibold text-ink" id="attendanceCount">Total marked: 0</h2>
+      <span class="text-xs text-muted" id="attendanceDate"></span>
+    </div>
+
+    <div class="overflow-x-auto -mx-5 px-5">
+      <table id="attendanceTable" class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-line text-left text-muted">
+            <th class="py-2 pr-2 font-medium">S.No</th>
+            <th class="py-2 pr-2 font-medium">Name</th>
+            <th class="py-2 pr-2 font-medium">Roll No</th>
+            <th class="py-2 pr-2 font-medium">Major Subject</th>
+            <th class="py-2 pr-2 font-medium">Type</th>
+            <th class="py-2 pr-2 font-medium">Marked At</th>
+            <th class="py-2 pr-0 font-medium text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-line/60"></tbody>
+      </table>
+    </div>
+
+    <div class="flex flex-col sm:flex-row gap-3 mt-5">
+      <button class="flex-1 bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg py-2.5 transition" onclick="loadAttendance()">Refresh List</button>
+      <button class="flex-1 bg-transparent hover:bg-surface2 border border-line text-muted hover:text-ink font-medium rounded-lg py-2.5 transition" onclick="printList()">Print / Save as PDF</button>
+    </div>
+  </div>
 </div>
 
-<!-- Confirm modal -->
-<div id="confirmModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+<!-- Generate code confirm modal -->
+<div id="generateModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
   <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
-    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Confirm your details</h2>
-    <p class="text-sm text-muted mb-4">Please check before submitting — this can't be edited by your teacher later.</p>
-    <div class="space-y-2 text-sm bg-surface2 border border-line rounded-lg p-3.5" id="confirmSummary"></div>
+    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Confirm this class</h2>
+    <p class="text-sm text-muted mb-4">Double-check before generating — this is what students will need to match.</p>
+    <div class="space-y-2 text-sm bg-surface2 border border-line rounded-lg p-3.5" id="generateSummary"></div>
     <div class="flex gap-3 mt-5">
-      <button onclick="closeConfirm()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
-      <button onclick="confirmSubmit()" class="flex-1 py-2.5 rounded-lg bg-gold text-[#171208] font-semibold hover:bg-gold/90 transition">Yes, Submit</button>
+      <button onclick="closeGenerateConfirm()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
+      <button onclick="confirmGenerate()" class="flex-1 py-2.5 rounded-lg bg-gold text-[#171208] font-semibold hover:bg-gold/90 transition">Yes, Generate</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit entry modal -->
+<div id="editModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
+    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Edit Entry</h2>
+    <p class="text-sm text-muted mb-4">Fix a roll number or subject entered wrong by the student.</p>
+    <div class="space-y-3">
+      <div>
+        <label class="block text-xs font-medium text-muted mb-1">Roll Number</label>
+        <input id="editRollNo" type="text" inputmode="numeric" pattern="[0-9]*"
+          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-muted mb-1">Name</label>
+        <input id="editName" type="text"
+          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-muted mb-1">Subject</label>
+        <input id="editSubject" type="text"
+          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      </div>
+    </div>
+    <div id="editModalErr" class="hidden text-xs text-err mt-3"></div>
+    <div class="flex gap-3 mt-5">
+      <button onclick="closeEditModal()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
+      <button onclick="saveEdit()" class="flex-1 py-2.5 rounded-lg bg-gold text-[#171208] font-semibold hover:bg-gold/90 transition">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete confirm modal -->
+<div id="deleteModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
+    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Delete this entry?</h2>
+    <p class="text-sm text-muted mb-4" id="deleteModalText">This will permanently remove the entry from the attendance list.</p>
+    <div class="flex gap-3">
+      <button onclick="closeDeleteModal()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
+      <button onclick="confirmDelete()" class="flex-1 py-2.5 rounded-lg bg-err text-[#2a0d0d] font-semibold hover:bg-err/90 transition">Delete</button>
     </div>
   </div>
 </div>
 
 <script>
-// ---- Register the service worker so the page shell still loads offline ----
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+// NEP India - Different options for Annual vs Semester
+const nepData = {
+  Annual: {
+    classes: ['BA 1st Year', 'BA 2nd Year', 'BA 3rd Year', 'BSc 1st Year', 'BSc 2nd Year', 'BSc 3rd Year', 'BCom 1st Year', 'BCom 2nd Year', 'BCom 3rd Year', 'MA 1st Year', 'MA 2nd Year'],
+    subjects: ['Political Science', 'History', 'Public Administration', 'Sociology', 'Economics', 'Hindi', 'English', 'Geography', 'Psychology', 'Philosophy', 'Mathematics', 'Physics', 'Chemistry', 'Biology', 'Commerce', 'Computer Science', 'Physical Education', 'Other'],
+    courseTypes: [
+      {value: 'Core', label: 'Core Course'},
+      {value: 'Elective', label: 'Elective Course'},
+      {value: 'Foundation', label: 'Foundation Course'}
+    ]
+  },
+  Semester: {
+    classes: ['BA Sem 1', 'BA Sem 2', 'BA Sem 3', 'BA Sem 4', 'BA Sem 5', 'BA Sem 6', 'BSc Sem 1', 'BSc Sem 2', 'BSc Sem 3', 'BSc Sem 4', 'BSc Sem 5', 'BSc Sem 6', 'BCom Sem 1', 'BCom Sem 2', 'BCom Sem 3', 'BCom Sem 4', 'BCom Sem 5', 'BCom Sem 6', 'MA Sem 1', 'MA Sem 2', 'MA Sem 3', 'MA Sem 4'],
+    subjects: ['Political Science', 'History', 'Public Administration', 'Sociology', 'Economics', 'Hindi', 'English', 'Geography', 'Psychology', 'Philosophy', 'Mathematics', 'Physics', 'Chemistry', 'Biology', 'Commerce', 'Computer Science', 'Physical Education', 'Other'],
+    courseTypes: [
+      {value: 'DSC', label: 'DSC — Discipline Specific Core'},
+      {value: 'SEC', label: 'SEC — Skill Enhancement Course'},
+      {value: 'GE', label: 'GE — Generic Elective'},
+      {value: 'AEC', label: 'AEC — Ability Enhancement Course'},
+      {value: 'VAC', label: 'VAC — Value Added Course'},
+      {value: 'MDC', label: 'MDC — Multi-Disciplinary Course'}
+    ]
+  }
+};
+
+// System selection triggers form population
+document.getElementById('systemSelect').addEventListener('change', () => {
+  const system = document.getElementById('systemSelect').value;
+  if (system) {
+    populateFormOptions(system);
+    document.getElementById('mainFormSection').style.display = 'block';
+    saveSelection();
+    loadSessions();
+    updateReportLabel();
+  } else {
+    document.getElementById('mainFormSection').style.display = 'none';
+  }
+});
+
+function populateFormOptions(system) {
+  const data = nepData[system];
+  
+  // Populate classes
+  const classSelect = document.getElementById('className');
+  classSelect.innerHTML = '<option value="">Select class</option>';
+  data.classes.forEach(cls => {
+    classSelect.innerHTML += `<option>${cls}</option>`;
+  });
+  
+  // Populate subjects
+  const subjectSelect = document.getElementById('subjectSelect');
+  subjectSelect.innerHTML = '<option value="">Select subject</option>';
+  data.subjects.forEach(subj => {
+    subjectSelect.innerHTML += `<option>${subj}</option>`;
+  });
+  
+  // Populate course types
+  const courseTypeSelect = document.getElementById('courseTypeSelect');
+  courseTypeSelect.innerHTML = '<option value="">Select course type</option>';
+  data.courseTypes.forEach(ct => {
+    courseTypeSelect.innerHTML += `<option value="${ct.value}">${ct.label}</option>`;
+  });
 }
 
 function esc(s) {
-  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return String(s == null ? '' : s).replace(/[&<>\"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+let expiryTimestamp = null;
+let timerInterval = null;
+let lastRecords = [];
+let lastDate = '';
+let lastSessionLabel = '';
+let editingRecordId = null;
+let deletingRecordId = null;
+
+const SELECTION_KEY = 'attendance_teacher_selection';
+const ACTIVE_SESSION_KEY = 'attendance_teacher_active_session';
+
+function saveSelection() {
+  try {
+    localStorage.setItem(SELECTION_KEY, JSON.stringify({
+      class_name: document.getElementById('className').value,
+      subject: document.getElementById('subjectSelect').value,
+      course_type: document.getElementById('courseTypeSelect').value,
+      system: document.getElementById('systemSelect').value,
+      require_location: document.getElementById('requireLocation').checked,
+    }));
+  } catch (err) {}
 }
 
-// localStorage can throw (Safari private mode, storage blocked) — never let
-// that break the whole page.
-let memoryDeviceId = null;
-function getDeviceId() {
-  let id = null;
-  try { id = localStorage.getItem('attendance_device_id'); } catch (e) {}
-  if (!id) id = memoryDeviceId;
-  if (!id) {
-    id = 'dev-' + Date.now() + '-' + Math.random().toString(36).slice(2, 12);
-    memoryDeviceId = id;
-    try { localStorage.setItem('attendance_device_id', id); } catch (e) {}
-  }
-  return id;
-}
-const device_id = getDeviceId();
-let coords = null;
-
-// ---- Digits-only inputs (Roll Number & Code) ----
-function enforceDigitsOnly(inputEl, errEl) {
-  inputEl.addEventListener('input', () => {
-    const cleaned = inputEl.value.replace(/[^0-9]/g, '');
-    if (cleaned !== inputEl.value) {
-      inputEl.value = cleaned;
-      errEl.classList.remove('hidden');
-      setTimeout(() => errEl.classList.add('hidden'), 2000);
-    } else {
-      errEl.classList.add('hidden');
+function restoreSelection() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SELECTION_KEY) || 'null');
+    if (!saved) return;
+    if (saved.system) {
+      document.getElementById('systemSelect').value = saved.system;
+      populateFormOptions(saved.system);
+      document.getElementById('mainFormSection').style.display = 'block';
     }
-  });
-}
-enforceDigitsOnly(document.getElementById('rollNo'), document.getElementById('rollNoErr'));
-enforceDigitsOnly(document.getElementById('code'), document.getElementById('codeErr'));
-
-// ---- Location handling ----
-function detectPlatform() {
-  const ua = navigator.userAgent || '';
-  if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
-  if (/Android/i.test(ua)) return 'android';
-  return 'android'; // sensible default for a college's mostly-Android userbase
-}
-function showLocTab(which) {
-  document.getElementById('locStepsIos').classList.toggle('hidden', which !== 'ios');
-  document.getElementById('locStepsAndroid').classList.toggle('hidden', which !== 'android');
-  document.getElementById('tabIosBtn').className = 'flex-1 text-xs font-medium py-1.5 rounded-md border transition ' +
-    (which === 'ios' ? 'border-gold text-gold' : 'border-line text-muted hover:text-ink');
-  document.getElementById('tabAndroidBtn').className = 'flex-1 text-xs font-medium py-1.5 rounded-md border transition ' +
-    (which === 'android' ? 'border-gold text-gold' : 'border-line text-muted hover:text-ink');
+    if (saved.class_name) document.getElementById('className').value = saved.class_name;
+    if (saved.subject) document.getElementById('subjectSelect').value = saved.subject;
+    if (saved.course_type) document.getElementById('courseTypeSelect').value = saved.course_type;
+    if (typeof saved.require_location === 'boolean') document.getElementById('requireLocation').checked = saved.require_location;
+  } catch (err) {}
 }
 
-// On a weak signal, GPS (enableHighAccuracy) can take forever or time out.
-// Network-based location (enableHighAccuracy: false) uses cell towers/WiFi
-// instead of satellites — it's less precise but comes back much faster and
-// works even with a poor connection. A generous timeout and a retry button
-// cover the rest.
-function fetchLocation(timeoutMs) {
-  const statusEl = document.getElementById('locStatus');
-  const retryBtn = document.getElementById('retryLocBtn');
-  const helpBox = document.getElementById('locHelp');
-  retryBtn.style.display = 'none';
-  helpBox.classList.add('hidden');
-  const timeout = (typeof timeoutMs === 'number') ? timeoutMs : 30000;
+function saveActiveSession(data, class_name, subject, course_type, require_location, system) {
+  try {
+    localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify({
+      code: data.code,
+      session_id: data.session_id,
+      class_name, subject, course_type, require_location, system,
+      expiry: expiryTimestamp,
+    }));
+  } catch (err) {}
+}
 
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) {
-      statusEl.textContent = '📍 Location not supported on this browser';
-      retryBtn.style.display = 'inline-block';
-      resolve(null);
+function clearActiveSession() {
+  try { localStorage.removeItem(ACTIVE_SESSION_KEY); } catch (err) {}
+}
+
+async function restoreActiveSession() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(ACTIVE_SESSION_KEY) || 'null');
+    if (!saved || saved.expiry <= Date.now()) {
+      clearActiveSession();
       return;
     }
-    statusEl.textContent = '📍 Fetching location... (this can take a bit on a weak connection)';
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        statusEl.textContent = '📍 Location captured ✓';
-        resolve(coords);
-      },
-      (err) => {
-        retryBtn.style.display = 'inline-block';
-        if (err.code === 1 /* PERMISSION_DENIED */) {
-          statusEl.textContent = '📍 Location access is blocked for this site.';
-          helpBox.classList.remove('hidden');
-          showLocTab(detectPlatform());
-        } else {
-          statusEl.textContent = '📍 Could not get location (' + (err.message || 'timed out') + '). Tap retry, or move somewhere with better signal.';
-        }
-        resolve(null);
-      },
-      { enableHighAccuracy: false, timeout: timeout, maximumAge: 60000 }
-    );
+    document.getElementById('codeSection').style.display = 'block';
+    document.getElementById('codeDisplay').textContent = saved.code;
+    document.getElementById('codeLocNote').textContent = saved.require_location
+      ? '📍 Location check is ON for this session'
+      : '📍 Location check is OFF for this session';
+    expiryTimestamp = saved.expiry;
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = setInterval(updateTimer, 1000);
+    updateTimer();
+    await loadSessions(saved.session_id);
+    await loadAttendance();
+  } catch (err) {}
+}
+
+function getTeacherPassword() {
+  let pw = sessionStorage.getItem('teacher_password');
+  if (!pw) {
+    pw = prompt('Enter the teacher password:') || '';
+    sessionStorage.setItem('teacher_password', pw);
+  }
+  return pw;
+}
+async function teacherFetch(url, options = {}) {
+  options.headers = Object.assign({}, options.headers, { 'X-Teacher-Password': getTeacherPassword() });
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    sessionStorage.removeItem('teacher_password');
+    alert('Incorrect teacher password. Please try again.');
+  }
+  return res;
+}
+
+function openGenerateConfirm() {
+  const class_name = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subjectSelect').value.trim();
+  const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const system = document.getElementById('systemSelect').value.trim();
+  if (!class_name || !system || !subject || !course_type) { alert('Select system, class, subject and course type first'); return; }
+
+  const require_location = document.getElementById('requireLocation').checked;
+  const send_pdf = document.getElementById('autoSendPdf').checked;
+
+  document.getElementById('generateSummary').innerHTML = `
+    <div class="flex justify-between"><span class="text-muted">System</span><span class="font-medium text-ink">${system}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Class</span><span class="font-medium text-ink">${class_name}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Subject</span><span class="font-medium text-ink">${subject}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Course Type</span><span class="font-medium text-ink">${course_type}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Location Check</span><span class="font-medium text-ink">${require_location ? 'ON' : 'OFF'}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Auto-Email PDF</span><span class="font-medium text-ink">${send_pdf ? 'ON' : 'OFF'}</span></div>
+  `;
+  document.getElementById('generateModal').classList.remove('hidden');
+}
+
+function closeGenerateConfirm() {
+  document.getElementById('generateModal').classList.add('hidden');
+}
+
+async function confirmGenerate() {
+  closeGenerateConfirm();
+
+  const class_name = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subjectSelect').value.trim();
+  const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const system = document.getElementById('systemSelect').value.trim();
+  const require_location = document.getElementById('requireLocation').checked;
+  const send_pdf = document.getElementById('autoSendPdf').checked;
+
+  const res = await teacherFetch('/api/teacher/generate-code', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ class_name, subject, course_type, system, require_location, send_pdf })
+  });
+  const data = await res.json().catch(() => ({ error: 'Something went wrong. Try again.' }));
+  if (data.error) { alert(data.error); return; }
+
+  document.getElementById('codeSection').style.display = 'block';
+  document.getElementById('codeDisplay').textContent = data.code;
+  document.getElementById('codeLocNote').textContent = require_location
+    ? '📍 Location check is ON for this session'
+    : '📍 Location check is OFF for this session';
+  const CODE_VALID_SECONDS = data.expires_in_seconds || 7 * 60;
+  expiryTimestamp = Date.now() + CODE_VALID_SECONDS * 1000;
+  saveActiveSession(data, class_name, subject, course_type, require_location, system);
+  saveSelection();
+
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(updateTimer, 1000);
+  updateTimer();
+
+  await loadSessions(data.session_id);
+}
+
+async function loadSessions(selectId) {
+  const class_name = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subjectSelect').value.trim();
+  const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const system = document.getElementById('systemSelect').value.trim();
+  const params = new URLSearchParams();
+  if (class_name) params.set('class_name', class_name);
+  if (subject) params.set('subject', subject);
+  if (course_type) params.set('course_type', course_type);
+  if (system) params.set('system', system);
+
+  try {
+    const res = await teacherFetch('/api/teacher/sessions?' + params.toString());
+    if (!res.ok) return;
+    const data = await res.json();
+    const sel = document.getElementById('sessionSelect');
+    const previous = selectId || sel.value;
+
+    sel.innerHTML = '<option value="">All sessions today</option>';
+    (data.sessions || []).forEach((s, i) => {
+      const opt = document.createElement('option');
+      opt.value = s.session_id;
+      const time = formatTime(s.created_at);
+      opt.textContent = `${s.class_name} — ${s.subject} (${s.course_type || '-'}, ${s.system || 'Annual'}) — ${time}`;
+      sel.appendChild(opt);
+    });
+    if (previous) sel.value = previous;
+  } catch (err) {}
+}
+
+function updateTimer() {
+  const remaining = Math.max(0, Math.round((expiryTimestamp - Date.now())/1000));
+  const min = Math.floor(remaining/60);
+  const sec = remaining % 60;
+  document.getElementById('timer').textContent = remaining > 0
+    ? `Expires in ${min}:${sec.toString().padStart(2,'0')}`
+    : 'Code expired — generate a new one';
+    if (remaining <= 0) {
+    clearInterval(timerInterval);
+    clearActiveSession();
+  }
+}
+
+function formatTime(ms) {
+  return new Date(ms).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+}
+function formatDateHeading(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  return d.toLocaleDateString('en-IN', { timeZone: 'UTC', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+async function uploadRoster() {
+  const roster_text = document.getElementById('rosterText').value;
+  const msgDiv = document.getElementById('uploadMsg');
+  if (!roster_text.trim()) { alert('Paste the student list first.'); return; }
+
+  try {
+    const res = await teacherFetch('/api/teacher/upload-roster', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ roster_text })
+    });
+    const data = await res.json();
+    if (data.success) {
+      msgDiv.innerHTML = `<div class="mt-2 rounded-lg border border-ok/40 bg-ok/10 text-ok text-sm px-3.5 py-2.5">✅ Saved ${data.added} student(s). ${data.skipped ? data.skipped + ' line(s) skipped (missing roll no or name).' : ''}</div>`;
+    } else {
+      msgDiv.innerHTML = `<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ ${data.error}</div>`;
+    }
+  } catch (err) {
+    msgDiv.innerHTML = '<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ Network error. Try again.</div>';
+  }
+}
+
+async function unlockDevice() {
+  const roll_no = document.getElementById('unlockRollNo').value.trim();
+  const msgDiv = document.getElementById('unlockMsg');
+  if (!roll_no) { alert('Enter the roll number to unlock.'); return; }
+
+  try {
+    const res = await teacherFetch('/api/teacher/device-lock', {
+      method: 'DELETE',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ roll_no })
+    });
+    const data = await res.json();
+    if (data.success) {
+      msgDiv.innerHTML = data.removed
+        ? `<div class="mt-2 rounded-lg border border-ok/40 bg-ok/10 text-ok text-sm px-3.5 py-2.5">✅ Unlocked. Roll No ${roll_no} can now mark attendance from a new device.</div>`
+        : `<div class="mt-2 rounded-lg border border-golddim/50 bg-golddim/10 text-[#e8c468] text-sm px-3.5 py-2.5">No device lock was found for Roll No ${roll_no}.</div>`;
+      document.getElementById('unlockRollNo').value = '';
+    } else {
+      msgDiv.innerHTML = `<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ ${data.error}</div>`;
+    }
+  } catch (err) {
+    msgDiv.innerHTML = '<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ Network error. Try again.</div>';
+  }
+}
+
+async function downloadOverallReport() {
+  const class_name = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subjectSelect').value.trim();
+  const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const system = document.getElementById('systemSelect').value.trim();
+  const msgDiv = document.getElementById('reportMsg');
+  if (!class_name || !system || !subject || !course_type) {
+    alert('Select system, class, subject and course type first (top card) — the report is generated for that combination.');
+    return;
+  }
+  msgDiv.innerHTML = '<div class="mt-2 text-sm text-muted">Generating PDF...</div>';
+  try {
+    const params = new URLSearchParams({ class_name, subject, course_type, system });
+    const res = await teacherFetch('/api/teacher/reports/overall-download?' + params.toString());
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      msgDiv.innerHTML = `<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ ${data.error || 'Could not generate report.'}</div>`;
+      return;
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `30day-report-${class_name}-${subject}-${course_type}-${system}.pdf`.replace(/\s+/g, '_');
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+    msgDiv.innerHTML = '';
+  } catch (err) {
+    msgDiv.innerHTML = '<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ Network error. Try again.</div>';
+  }
+}
+
+async function loadAttendance() {
+  const class_name = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subjectSelect').value.trim();
+  const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const system = document.getElementById('systemSelect').value.trim();
+  const sessionSel = document.getElementById('sessionSelect');
+  const session_id = sessionSel.value;
+  lastSessionLabel = session_id
+    ? sessionSel.options[sessionSel.selectedIndex].textContent
+    : 'All sessions today';
+
+  const params = new URLSearchParams();
+  if (class_name) params.set('class_name', class_name);
+  if (subject) params.set('subject', subject);
+  if (course_type) params.set('course_type', course_type);
+  if (system) params.set('system', system);
+  if (session_id) params.set('session_id', session_id);
+
+  const res = await teacherFetch('/api/teacher/attendance?' + params.toString());
+  if (!res.ok) return;
+  const data = await res.json();
+
+  lastRecords = data.records || [];
+  lastDate = data.date;
+
+  document.getElementById('attendanceCount').textContent = `Total marked: ${data.count}`;
+  document.getElementById('attendanceDate').textContent = formatDateHeading(data.date);
+
+  renderTable();
+}
+
+function renderTable() {
+  const tbody = document.querySelector('#attendanceTable tbody');
+  tbody.innerHTML = '';
+  lastRecords.forEach((r, i) => {
+    const recordId = r.id ?? r.record_id ?? r._id ?? i;
+    const tr = document.createElement('tr');
+    tr.className = 'hover:bg-surface2/50 transition';
+    tr.innerHTML = `
+      <td class="py-2.5 pr-2 text-muted">${i + 1}</td>
+      <td class="py-2.5 pr-2 text-ink">${esc(r.student_name) || '-'}</td>
+      <td class="py-2.5 pr-2 text-ink">${esc(r.roll_no)}</td>
+      <td class="py-2.5 pr-2 text-ink">${esc(r.major_subject) || '-'}</td>
+      <td class="py-2.5 pr-2 text-muted">${esc(r.course_type) || '-'}</td>
+      <td class="py-2.5 pr-2 text-muted whitespace-nowrap">${formatTime(r.marked_at)}</td>
+      <td class="py-2.5 pr-0 text-right whitespace-nowrap">
+        <button class="text-xs font-medium text-gold hover:text-gold/80 transition mr-3" onclick="openEditModal('${recordId}')">Edit</button>
+        <button class="text-xs font-medium text-err hover:text-err/80 transition" onclick="openDeleteModal('${recordId}')">Delete</button>
+      </td>`;
+    tbody.appendChild(tr);
   });
 }
 
-fetchLocation();
+function findRecord(recordId) {
+  return lastRecords.find((r, i) => String(r.id ?? r.record_id ?? r._id ?? i) === String(recordId));
+}
 
-document.getElementById('rollNo').addEventListener('input', () => {
-  const nameField = document.getElementById('studentName');
-  const classField = document.getElementById('className');
-  const majorField = document.getElementById('majorSubject');
-  nameField.readOnly = false;
-  nameField.classList.remove('opacity-70', 'cursor-not-allowed');
-  classField.disabled = false;
-  classField.classList.remove('opacity-70', 'cursor-not-allowed');
-  majorField.disabled = false;
-  majorField.classList.remove('opacity-70', 'cursor-not-allowed');
-});
+function openEditModal(recordId) {
+  const r = findRecord(recordId);
+  if (!r) return;
+  editingRecordId = recordId;
+  document.getElementById('editRollNo').value = r.roll_no || '';
+  document.getElementById('editName').value = r.student_name || '';
+  document.getElementById('editSubject').value = r.subject || '';
+  document.getElementById('editModalErr').classList.add('hidden');
+  document.getElementById('editModal').classList.remove('hidden');
+}
+function closeEditModal() {
+  document.getElementById('editModal').classList.add('hidden');
+  editingRecordId = null;
+}
+async function saveEdit() {
+  const errEl = document.getElementById('editModalErr');
+  const roll_no = document.getElementById('editRollNo').value.trim();
+  const student_name = document.getElementById('editName').value.trim();
+  const subject = document.getElementById('editSubject').value.trim();
 
-document.getElementById('rollNo').addEventListener('blur', async () => {
-  const roll_no = document.getElementById('rollNo').value.trim();
-  const nameField = document.getElementById('studentName');
-  const classField = document.getElementById('className');
-  const majorField = document.getElementById('majorSubject');
-  if (!roll_no) return;
+  if (!/^[0-9]+$/.test(roll_no)) {
+    errEl.textContent = 'Roll number must contain digits only.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
   try {
-    const res = await fetch('/api/student/lookup-name?roll_no=' + encodeURIComponent(roll_no));
+    const res = await teacherFetch('/api/teacher/attendance/update', {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ record_id: editingRecordId, roll_no, student_name, subject })
+    });
     const data = await res.json();
+    if (!data.success) {
+      errEl.textContent = data.error || 'Could not save changes.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    closeEditModal();
+    await loadAttendance();
+  } catch (err) {
+    errEl.textContent = 'Network error. Try again.';
+    errEl.classList.remove('hidden');
+  }
+}
 
-    if (data.name) {
-      // Roster match — name is locked, can't be edited (server ignores any
-      // client-sent name for a known roll number anyway; this just makes
-      // that visible so students don't wonder why their edit didn't stick).
-      nameField.value = data.name;
-      nameField.readOnly = true;
-      nameField.classList.add('opacity-70', 'cursor-not-allowed');
-      nameField.title = 'Name is locked to your roll number. Ask your teacher if this needs to change.';
+function openDeleteModal(recordId) {
+  const r = findRecord(recordId);
+  if (!r) return;
+  deletingRecordId = recordId;
+  document.getElementById('deleteModalText').textContent =
+    `Remove ${r.student_name || 'Roll No ' + r.roll_no}'s entry (Roll No ${r.roll_no}) from this list? This cannot be undone.`;
+  document.getElementById('deleteModal').classList.remove('hidden');
+}
+function closeDeleteModal() {
+  document.getElementById('deleteModal').classList.add('hidden');
+  deletingRecordId = null;
+}
+async function confirmDelete() {
+  try {
+    const res = await teacherFetch('/api/teacher/attendance/delete', {
+      method: 'DELETE',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ record_id: deletingRecordId })
+    });
+    const data = await res.json();
+    closeDeleteModal();
+    if (data.success) {
+      await loadAttendance();
     } else {
-      nameField.readOnly = false;
-      nameField.classList.remove('opacity-70', 'cursor-not-allowed');
-      nameField.title = '';
+      alert(data.error || 'Could not delete entry.');
     }
-
-    if (data.class_name) {
-      classField.value = data.class_name;
-      classField.disabled = true;
-      classField.classList.add('opacity-70', 'cursor-not-allowed');
-      classField.title = 'Class is locked to your roll number. Ask your teacher if this needs to change.';
-    } else {
-      classField.disabled = false;
-      classField.classList.remove('opacity-70', 'cursor-not-allowed');
-      classField.title = '';
-    }
-
-    if (data.major_subject) {
-      majorField.value = data.major_subject;
-      majorField.disabled = true;
-      majorField.classList.add('opacity-70', 'cursor-not-allowed');
-      majorField.title = 'Major subject is locked to your roll number. Ask your teacher if this needs to change.';
-    } else {
-      majorField.disabled = false;
-      majorField.classList.remove('opacity-70', 'cursor-not-allowed');
-      majorField.title = '';
-    }
-  } catch (err) {}
-});
-
-// ---------------------------------------------------------------------
-// Reliability layer: retry on flaky connections, and queue offline so a
-// dropped connection never means lost attendance.
-// ---------------------------------------------------------------------
-const QUEUE_KEY = 'attendance_offline_queue';
-
-function getQueue() {
-  try { return JSON.parse(localStorage.getItem(QUEUE_KEY)) || []; } catch (e) { return []; }
-}
-function saveQueue(q) {
-  try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch (e) {}
-  updateQueueStatus();
-}
-function updateQueueStatus() {
-  const q = getQueue();
-  const el = document.getElementById('queueStatus');
-  el.innerHTML = q.length
-    ? `<div class="rounded-lg border border-golddim/50 bg-golddim/10 text-[#e8c468] text-sm px-3.5 py-3">⏳ ${q.length} attendance ${q.length === 1 ? 'entry' : 'entries'} waiting to send — will submit automatically once you're back online.</div>`
-    : '';
-}
-
-// One attempt: sends the request, retrying a couple of times on pure
-// network failure (no response at all — e.g. connection drops mid-request).
-// A response that came back — success or a real error like "already marked"
-// — is never retried, since retrying won't change that outcome.
-async function attemptSubmit(payload, retries) {
-  for (let i = 0; i <= retries; i++) {
-    try {
-      const res = await fetch('/api/student/mark-attendance', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      return { reached: true, data };
-    } catch (err) {
-      if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1))); // backoff: 1s, 2s...
-    }
+  } catch (err) {
+    closeDeleteModal();
+    alert('Network error. Try again.');
   }
-  return { reached: false };
 }
 
-// Tries to flush anything sitting in the offline queue. Called on load,
-// whenever the browser regains connectivity, and on a slow background timer
-// as a safety net.
-let flushing = false;
-async function flushQueue() {
-  if (flushing) return;
-  flushing = true;
-  const q = getQueue();
-  const remaining = [];
-  for (const payload of q) {
-    const result = await attemptSubmit(payload, 1);
-    if (!result.reached) {
-      remaining.push(payload); // still offline — keep it queued
-      continue;
-    }
-    if (result.data.success || (result.data.error && result.data.error.toLowerCase().includes('already marked'))) {
-      // Delivered (or turns out it was already recorded) — drop from queue either way
-      continue;
-    }
-    console.warn('Queued attendance rejected:', result.data.error);
-  }
-  saveQueue(remaining);
-  flushing = false;
-}
-window.addEventListener('online', flushQueue);
-setInterval(flushQueue, 20000); // safety-net retry every 20s in case the 'online' event doesn't fire
-updateQueueStatus();
-flushQueue();
-
-// ---- Pre-submit validation + confirm modal ----
-function gatherPayload() {
-  return {
-    roll_no: document.getElementById('rollNo').value.trim(),
-    name: document.getElementById('studentName').value.trim(),
-    class_name: document.getElementById('className').value.trim(),
-    system: (document.querySelector('input[name="system"]:checked') || {}).value || '',
-    subject: document.getElementById('subject').value.trim(),
-    course_type: document.getElementById('courseType').value.trim(),
-    major_subject: document.getElementById('majorSubject').value.trim(),
-    code: document.getElementById('code').value.trim(),
-  };
+function printList() {
+  if (!lastRecords.length) { alert('Refresh the attendance list first.'); return; }
+  const className = document.getElementById('className').value.trim() || '-';
+  const subject = document.getElementById('subjectSelect').value.trim() || '-';
+  const courseType = document.getElementById('courseTypeSelect').value.trim() || '-';
+  const system = document.getElementById('systemSelect').value.trim();
+  const rows = lastRecords.map((r, i) =>
+    `<tr><td>${i + 1}</td><td>${esc(r.student_name) || '-'}</td><td>${esc(r.roll_no)}</td><td>${esc(r.major_subject) || '-'}</td><td>${esc(r.course_type) || '-'}</td><td>${formatTime(r.marked_at)}</td></tr>`
+  ).join('');
+  const win = window.open('', '_blank');
+  if (!win) { alert('Popup blocked — allow popups for this site and try again.'); return; }
+  win.document.write(`
+    <html><head><title>Attendance - ${className} - ${subject} (${courseType}${system ? ', ' + system : ''}) - ${formatDateHeading(lastDate)}</title>
+    <style>
+      body { font-family: 'Georgia', serif; padding: 30px; color: #232733; }
+      h1 { font-size: 20px; margin-bottom: 4px; }
+      .meta { color:#555; margin-bottom: 20px; font-family: Arial, sans-serif; font-size: 13px; }
+      table { width:100%; border-collapse: collapse; font-family: Arial, sans-serif; }
+      th, td { border:1px solid #999; padding:8px; text-align:left; font-size:14px; }
+      th { background:#1f2a44; color:#fff; }
+      tbody tr:nth-child(even) { background:#f6f4ee; }
+    </style>
+    </head><body>
+      <h1>Attendance Register — ${className} — ${subject} (${courseType}${system ? ', ' + system : ''})</h1>
+      <div class="meta">${formatDateHeading(lastDate)} &nbsp;|&nbsp; Session: ${lastSessionLabel || 'All sessions today'} &nbsp;|&nbsp; Total present: ${lastRecords.length}</div>
+      <table><thead><tr><th>S.No</th><th>Name</th><th>Roll No</th><th>Major Subject</th><th>Type</th><th>Marked At</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+    </body></html>
+  `);
+  win.document.close();
+  win.focus();
+  win.print();
 }
 
-function openConfirm() {
-  const p = gatherPayload();
-  const msgDiv = document.getElementById('message');
-  msgDiv.innerHTML = '';
+document.getElementById('className').addEventListener('change', () => { saveSelection(); loadSessions(); });
+document.getElementById('subjectSelect').addEventListener('change', () => { saveSelection(); loadSessions(); });
+document.getElementById('courseTypeSelect').addEventListener('change', () => { saveSelection(); loadSessions(); });
 
-  if (!/^[0-9]+$/.test(p.roll_no)) {
-    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Roll number must contain digits only.</div>';
-    return;
-  }
-  if (!p.class_name || !p.system || !p.subject || !p.course_type) {
-    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Please fill all required fields (including Annual / Semester).</div>';
-    return;
-  }
-  if (!/^[0-9]{5}$/.test(p.code)) {
-    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Code must be exactly 5 digits.</div>';
-    return;
-  }
-
-  const summary = document.getElementById('confirmSummary');
-  summary.innerHTML = `
-    <div class="flex justify-between"><span class="text-muted">Roll No</span><span class="font-medium text-ink">${esc(p.roll_no)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Name</span><span class="font-medium text-ink">${esc(p.name) || '—'}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Class</span><span class="font-medium text-ink">${esc(p.class_name)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">System</span><span class="font-medium text-ink">${esc(p.system)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Subject</span><span class="font-medium text-ink">${esc(p.subject)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Course Type</span><span class="font-medium text-ink">${esc(p.course_type)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Code</span><span class="font-medium text-ink">${esc(p.code)}</span></div>
-  `;
-  document.getElementById('confirmModal').classList.remove('hidden');
+function updateReportLabel() {
+  document.getElementById('reportBtn').textContent = 'Download Monthly Report (30 days)';
 }
-function closeConfirm() {
-  document.getElementById('confirmModal').classList.add('hidden');
-}
+document.getElementById('requireLocation').addEventListener('change', saveSelection);
 
-async function confirmSubmit() {
-  closeConfirm();
-  const p = gatherPayload();
-  const msgDiv = document.getElementById('message');
-  const btn = document.getElementById('submitBtn');
-
-  // No coords yet? Give location one quick last try (8s, not the full 30s).
-  // Whatever happens, the request is sent — the server decides what to do.
-  if (!coords) {
-    btn.disabled = true;
-    btn.textContent = 'Checking location...';
-    await fetchLocation(8000);
-  }
-
-  btn.disabled = true;
-  btn.textContent = 'Submitting...';
-
-  const payload = Object.assign({}, p, { device_id, lat: coords ? coords.lat : null, lng: coords ? coords.lng : null });
-  const result = await attemptSubmit(payload, 2); // try up to 3 times total before giving up on a live send
-
-  if (result.reached) {
-    if (result.data.success) {
-      msgDiv.innerHTML = `<div class="rounded-lg border border-ok/40 bg-ok/10 text-ok text-sm px-3.5 py-3">✅ ${result.data.message}</div>`;
-    } else {
-      msgDiv.innerHTML = `<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ ${esc(result.data.error)}</div>`;
-    }
-  } else {
-    const q = getQueue();
-    q.push(payload);
-    saveQueue(q);
-    msgDiv.innerHTML = '<div class="rounded-lg border border-golddim/50 bg-golddim/10 text-[#e8c468] text-sm px-3.5 py-3">📴 No internet connection right now. Your attendance has been saved on this phone and will be submitted automatically the moment you\'re back online — no need to do anything else.</div>';
-  }
-
-  btn.disabled = false;
-  btn.textContent = 'Mark Attendance';
-}
+restoreSelection();
+updateReportLabel();
+restoreActiveSession();
+loadSessions();
 </script>
 </body>
 </html>

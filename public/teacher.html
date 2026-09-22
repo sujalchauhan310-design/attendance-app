@@ -52,9 +52,79 @@
 
   <!-- Session setup card -->
   <div class="bg-surface border border-line rounded-xl p-5 space-y-4 shadow-lg shadow-black/20 mb-5">
+     <!-- STEP 1: System Selection First (NEP Compliant) -->
     <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Course / Year</label>
+      <label class="block text-sm font-medium text-ink mb-1.5">
+        <span class="text-gold">Step 1:</span> System 
+        <span class="text-xs font-normal text-muted">(Annual or Semester — select this first)</span>
+      </label>
+      <select id="systemSelect" class="w-full bg-surface2 border-2 border-gold/60 rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold transition">
+        <option value="">Select system first</option>
+        <option value="Annual">Annual System</option>
+        <option value="Semester">Semester System</option>
+      </select>
+    </div>
+
+    <!-- STEP 2: Class Selection (Shows after system selected) -->
+    <div id="classSection" style="display:none;">
+      <label class="block text-sm font-medium text-ink mb-1.5">
+        <span class="text-gold">Step 2:</span> Course / Year
+      </label>
       <select id="className" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select your class</option>
+        <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
+        <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
+        <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
+        <option>MA 1st</option><option>MA 2nd</option>
+      </select>
+    </div>
+
+    <!-- STEP 3: Subject Selection (Shows after class selected) -->
+    <div id="subjectSection" style="display:none;">
+      <label class="block text-sm font-medium text-ink mb-1.5">
+        <span class="text-gold">Step 3:</span> Subject
+      </label>
+      <select id="subjectSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select subject</option>
+        <option>Political Science</option><option>History</option><option>Public Administration</option>
+        <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
+        <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
+        <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
+        <option>Computer Science</option><option>Physical Education</option><option>Other</option>
+      </select>
+    </div>
+
+    <!-- STEP 4: Course Type Selection (Shows after subject selected) -->
+    <div id="courseTypeSection" style="display:none;">
+      <label class="block text-sm font-medium text-ink mb-1.5">
+        <span class="text-gold">Step 4:</span> Course Type 
+        <span class="text-xs font-normal text-muted">(same subject, different type = separate class)</span>
+      </label>
+      <select id="courseTypeSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select course type</option>
+        <option value="DSC">DSC — Discipline Specific Core</option>
+        <option value="SEC">SEC — Skill Enhancement Course</option>
+        <option value="GE">GE — Generic Elective</option>
+        <option value="AEC">AEC — Ability Enhancement Course</option>
+        <option value="VAC">VAC — Value Added Course</option>
+        <option value="MDC">MDC — Multi-Disciplinary Course</option>
+      </select>
+    </div>
+
+    <!-- Location & Email Options (Shows after course type selected) -->
+    <div id="optionsSection" style="display:none;">
+      <label class="flex items-center justify-between rounded-lg border border-line bg-surface2/60 px-3.5 py-3 cursor-pointer mb-3">
+        <span class="text-sm text-ink">📍 Require Location Verification <span class="block text-xs text-muted mt-0.5">Student must be near college to mark attendance</span></span>
+        <input type="checkbox" id="requireLocation" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
+      </label>
+
+      <label class="flex items-center justify-between rounded-lg border border-line bg-surface2/60 px-3.5 py-3 cursor-pointer">
+        <span class="text-sm text-ink">📧 Email PDF Automatically <span class="block text-xs text-muted mt-0.5">Sends this session's attendance PDF to your inbox 20 min after generating the code</span></span>
+        <input type="checkbox" id="autoSendPdf" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
+      </label>
+    </div>
+
+    <button id="generateBtn" onclick="openGenerateConfirm()" style="display:none;" class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 transition disabled:opacity-50 disabled:cursor-not-allowed">Generate New Code</button>
         <option value="">Select class</option>
         <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
         <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
@@ -138,7 +208,7 @@
 
   <!-- 30-day report card -->
   <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
-    <label class="block text-sm font-medium text-ink">Attendance % Report <span class="block text-xs font-normal text-muted mt-0.5">Downloads a PDF for the class/subject/course-type/system selected above — one row per student with classes attended, classes held and overall %. Annual = last 365 days, Semester = last 180 days.</span></label>
+    <label class="block text-sm font-medium text-ink">Attendance % Report <span class="block text-xs font-normal text-muted mt-0.5">Downloads a PDF for the class/subject/course-type/system selected above — one row per student with classes attended, classes held and overall %. Shows last 30 days of attendance data.</span></label>
     <button id="reportBtn" class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="downloadOverallReport()">Download Report</button>
     <div id="reportMsg"></div>
   </div>
@@ -706,12 +776,82 @@ document.getElementById('systemSelect').addEventListener('change', () => { saveS
 function updateReportLabel() {
   const s = document.getElementById('systemSelect').value;
   document.getElementById('reportBtn').textContent =
-    s === 'Annual' ? 'Download Annual Report (365 days)'
-    : s === 'Semester' ? 'Download Semester Report (180 days)'
+    s === 'Annual' ? 'Download Monthly Report (30 days)'
+    : s === 'Semester' ? 'Download Monthly Report (30 days)'
     : 'Download Report';
 }
-document.getElementById('requireLocation').addEventListener('change', saveSelection);
 
+
+document.getElementById('requireLocation').addEventListener('change', saveSelection);
+// NEP Structure: Progressive form reveal
+document.getElementById('systemSelect').addEventListener('change', function() {
+  const system = this.value;
+  const classSection = document.getElementById('classSection');
+  const subjectSection = document.getElementById('subjectSection');
+  const courseTypeSection = document.getElementById('courseTypeSection');
+  const optionsSection = document.getElementById('optionsSection');
+  const generateBtn = document.getElementById('generateBtn');
+  
+  if (system) {
+    classSection.style.display = 'block';
+  } else {
+    classSection.style.display = 'none';
+    subjectSection.style.display = 'none';
+    courseTypeSection.style.display = 'none';
+    optionsSection.style.display = 'none';
+    generateBtn.style.display = 'none';
+  }
+  saveSelection();
+});
+
+document.getElementById('className').addEventListener('change', function() {
+  const className = this.value;
+  const subjectSection = document.getElementById('subjectSection');
+  const courseTypeSection = document.getElementById('courseTypeSection');
+  const optionsSection = document.getElementById('optionsSection');
+  const generateBtn = document.getElementById('generateBtn');
+  
+  if (className) {
+    subjectSection.style.display = 'block';
+  } else {
+    subjectSection.style.display = 'none';
+    courseTypeSection.style.display = 'none';
+    optionsSection.style.display = 'none';
+    generateBtn.style.display = 'none';
+  }
+  saveSelection();
+});
+
+document.getElementById('subjectSelect').addEventListener('change', function() {
+  const subject = this.value;
+  const courseTypeSection = document.getElementById('courseTypeSection');
+  const optionsSection = document.getElementById('optionsSection');
+  const generateBtn = document.getElementById('generateBtn');
+  
+  if (subject) {
+    courseTypeSection.style.display = 'block';
+  } else {
+    courseTypeSection.style.display = 'none';
+    optionsSection.style.display = 'none';
+    generateBtn.style.display = 'none';
+  }
+  saveSelection();
+});
+
+document.getElementById('courseTypeSelect').addEventListener('change', function() {
+  const courseType = this.value;
+  const optionsSection = document.getElementById('optionsSection');
+  const generateBtn = document.getElementById('generateBtn');
+  
+  if (courseType) {
+    optionsSection.style.display = 'block';
+    generateBtn.style.display = 'block';
+  } else {
+    optionsSection.style.display = 'none';
+    generateBtn.style.display = 'none';
+  }
+  saveSelection();
+});
 restoreSelection();
 updateReportLabel();
 restoreActiveSession();
