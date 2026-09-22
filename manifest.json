@@ -1,0 +1,15 @@
+{
+  "name": "Attendance Register",
+  "short_name": "Attendance",
+  "start_url": "student.html",
+  "display": "standalone",
+  "background_color": "#f6f4ee",
+  "theme_color": "#1f2a44",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

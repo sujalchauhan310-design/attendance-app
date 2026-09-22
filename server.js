@@ -71,7 +71,7 @@ const ATTENDANCE_RETENTION_DAYS = 400;
 // If a student's phone can't give a location, they must retry. After this many
 // failed-location submissions in a day from the same device, the next one is
 // accepted anyway (silently — the student just sees the normal success message).
-const MAX_LOCATION_ATTEMPTS = 15;
+const MAX_LOCATION_ATTEMPTS = 7;
 
 // Resend sends over HTTPS (not SMTP), so it isn't blocked on Render's free tier
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -991,6 +991,26 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       Number.isFinite(lat) && Number.isFinite(lng) &&
       Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
     if (hasLocation) {
+      // Location spoofing detection
+const accuracy = req.body.accuracy;
+if (accuracy !== undefined && accuracy < 5) {
+  return res.status(403).json({
+    error: "Location verification failed. Please ensure location services are working properly and try again.",
+  });
+}
+        if (hasLocation) {
+      // Location spoofing detection: Check for suspiciously perfect accuracy
+      // Real GPS typically gives 10-50m accuracy, fake tools often give < 5m
+      const accuracy = req.body.accuracy;
+      if (accuracy !== undefined && accuracy < 5) {
+        return res.status(403).json({
+          error: "Location verification failed. Please ensure location services are working properly and try again.",
+        });
+      }
+      
+      const dist = distanceInMeters(CLASSROOM.lat, CLASSROOM.lng, lat, lng);
+      if (dist > RADIUS_METERS) {
+  
       const dist = distanceInMeters(CLASSROOM.lat, CLASSROOM.lng, lat, lng);
       if (dist > RADIUS_METERS) {
         return res.status(403).json({
@@ -1187,6 +1207,179 @@ app.get("/api/check-and-send-monthly-report", async (req, res) => {
 });
 // ---------- START SERVER ----------
 const PORT = process.env.PORT || 3000;
+// ========== NEW ANALYTICS API ==========
+
+// Get attendance analytics for a student
+app.get("/api/student/analytics", async (req, res) => {
+  try {
+    const { roll_no } = req.query;
+    if (!roll_no) {
+      return res.status(400).json({ error: "roll_no is required" });
+    }
+
+    const today = todayDateString();
+    const last30Days = lastNDates(30);
+    const last7Days = lastNDates(7);
+
+    // Get all attendance records for this student
+    const allRecords = await Attendance.find({ roll_no: roll_no.trim() }).lean();
+    
+    // Last 30 days
+    const last30Records = allRecords.filter(r => last30Days.includes(r.date));
+    
+    // Last 7 days
+    const last7Records = allRecords.filter(r => last7Days.includes(r.date));
+    
+    // By subject
+    const bySubject = {};
+    allRecords.forEach(r => {
+      if (!bySubject[r.subject]) {
+        bySubject[r.subject] = { total: 0, dates: [] };
+      }
+      bySubject[r.subject].total++;
+      bySubject[r.subject].dates.push(r.date);
+    });
+
+    // Calculate percentages (assuming 30 working days per month)
+    const last30Percentage = ((last30Records.length / 30) * 100).toFixed(1);
+    const last7Percentage = ((last7Records.length / 7) * 100).toFixed(1);
+
+    res.json({
+      roll_no,
+      total_attendance: allRecords.length,
+      last_30_days: {
+        count: last30Records.length,
+        percentage: last30Percentage,
+        dates: last30Records.map(r => r.date)
+      },
+      last_7_days: {
+        count: last7Records.length,
+        percentage: last7Percentage,
+        dates: last7Records.map(r => r.date)
+      },
+      by_subject: bySubject,
+      recent_records: allRecords.slice(-10).reverse()
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong fetching analytics." });
+  }
+});
+
+// Get class-wide analytics (for teacher)
+app.get("/api/teacher/analytics", requireTeacherAuth, async (req, res) => {
+  try {
+    const { class_name, subject, course_type, system } = req.query;
+    if (!class_name || !subject || !course_type) {
+      return res.status(400).json({ error: "class_name, subject and course_type are required" });
+    }
+
+    const sys = normalizeSystem(system);
+    if (!sys) {
+      return res.status(400).json({ error: "system must be Annual or Semester" });
+    }
+
+    const last30Days = lastNDates(30);
+    
+    const records = await Attendance.find({
+      class_name,
+      subject,
+      course_type,
+      system: systemMatch(sys),
+      date: { $in: last30Days }
+    }).lean();
+
+    // Group by date
+    const byDate = {};
+    last30Days.forEach(d => { byDate[d] = 0; });
+    records.forEach(r => {
+      if (byDate[r.date] !== undefined) byDate[r.date]++;
+    });
+
+    // Group by student
+    const byStudent = {};
+    records.forEach(r => {
+      if (!byStudent[r.roll_no]) {
+        byStudent[r.roll_no] = {
+          roll_no: r.roll_no,
+          name: r.student_name,
+          count: 0,
+          dates: []
+        };
+      }
+      byStudent[r.roll_no].count++;
+      byStudent[r.roll_no].dates.push(r.date);
+    });
+
+    // Calculate class average
+    const totalStudents = Object.keys(byStudent).length;
+    const totalAttendance = records.length;
+    const classAverage = totalStudents > 0 
+      ? ((totalAttendance / (totalStudents * 30)) * 100).toFixed(1)
+      : "0.0";
+
+    // Low attendance students (< 75%)
+    const lowAttendance = Object.values(byStudent)
+      .filter(s => (s.count / 30) * 100 < 75)
+      .sort((a, b) => a.count - b.count);
+
+    // Top performers (> 90%)
+    const topPerformers = Object.values(byStudent)
+      .filter(s => (s.count / 30) * 100 > 90)
+      .sort((a, b) => b.count - a.count);
+
+    res.json({
+      class_name,
+      subject,
+      course_type,
+      system: sys,
+      period: "Last 30 days",
+      total_students: totalStudents,
+      total_attendance: totalAttendance,
+      class_average: classAverage + "%",
+      by_date: byDate,
+      by_student: Object.values(byStudent),
+      low_attendance: lowAttendance,
+      top_performers: topPerformers
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong fetching analytics." });
+  }
+});
+
+// Offline queue status check
+app.get("/api/student/queue-status", async (req, res) => {
+  try {
+    const { device_id } = req.query;
+    if (!device_id) {
+      return res.json({ queued: 0, message: "No device ID provided" });
+    }
+
+    // Check if there are any pending submissions for this device
+    // (This is a placeholder - actual queue is client-side in localStorage)
+    res.json({
+      queued: 0,
+      message: "Queue is managed on device. Check browser localStorage.",
+      server_time: Date.now(),
+      server_date: todayDateString()
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+});
+
+// Health check endpoint
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    server_time: Date.now(),
+    server_date: todayDateString(),
+    mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+    version: "2.0.0"
+  });
+});
 app.listen(PORT, () => {
   console.log(`Attendance server running at http://localhost:${PORT}`);
   console.log(`Teacher page: http://localhost:${PORT}/teacher.html`);
