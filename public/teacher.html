@@ -284,10 +284,27 @@ function restoreSelection() {
   try {
     const saved = JSON.parse(localStorage.getItem(SELECTION_KEY) || 'null');
     if (!saved) return;
-    if (saved.class_name) document.getElementById('className').value = saved.class_name;
-    if (saved.subject) document.getElementById('subjectSelect').value = saved.subject;
-    if (saved.course_type) document.getElementById('courseTypeSelect').value = saved.course_type;
-    if (saved.system) document.getElementById('systemSelect').value = saved.system;
+    // Setting .value on a <select> does NOT fire a 'change' event, so the
+    // progressive reveal (System -> Class -> Subject -> Course Type ->
+    // Generate button) would otherwise stay hidden even though the saved
+    // value is already selected. Dispatch a real 'change' after each one so
+    // the same cascade that runs on a manual selection runs here too.
+    if (saved.system) {
+      document.getElementById('systemSelect').value = saved.system;
+      document.getElementById('systemSelect').dispatchEvent(new Event('change'));
+    }
+    if (saved.class_name) {
+      document.getElementById('className').value = saved.class_name;
+      document.getElementById('className').dispatchEvent(new Event('change'));
+    }
+    if (saved.subject) {
+      document.getElementById('subjectSelect').value = saved.subject;
+      document.getElementById('subjectSelect').dispatchEvent(new Event('change'));
+    }
+    if (saved.course_type) {
+      document.getElementById('courseTypeSelect').value = saved.course_type;
+      document.getElementById('courseTypeSelect').dispatchEvent(new Event('change'));
+    }
     if (typeof saved.require_location === 'boolean') document.getElementById('requireLocation').checked = saved.require_location;
   } catch (err) {}
 }
