@@ -72,10 +72,6 @@
       </label>
       <select id="className" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
         <option value="">Select your class</option>
-        <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
-        <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
-        <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
-        <option>MA 1st</option><option>MA 2nd</option>
       </select>
     </div>
 
@@ -102,12 +98,6 @@
       </label>
       <select id="courseTypeSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
         <option value="">Select course type</option>
-        <option value="DSC">DSC — Discipline Specific Core</option>
-        <option value="SEC">SEC — Skill Enhancement Course</option>
-        <option value="GE">GE — Generic Elective</option>
-        <option value="AEC">AEC — Ability Enhancement Course</option>
-        <option value="VAC">VAC — Value Added Course</option>
-        <option value="MDC">MDC — Multi-Disciplinary Course</option>
       </select>
     </div>
 
@@ -750,6 +740,44 @@ document.getElementById('systemSelect').addEventListener('change', function() {
   const courseTypeSection = document.getElementById('courseTypeSection');
   const optionsSection = document.getElementById('optionsSection');
   const generateBtn = document.getElementById('generateBtn');
+  const classNameSelect = document.getElementById('className');
+  const courseTypeSelect = document.getElementById('courseTypeSelect');
+
+  // Course/Year list: Annual = old year-wise classes, Semester = NEP
+  // 4-year, 8-semester structure. Course Type list: Annual = Core/Elective/
+  // Foundation, Semester = DSC/SEC/GE/AEC/VAC/MDC — must match student.html.
+  const prevClassName = classNameSelect.value;
+  const prevCourseType = courseTypeSelect.value;
+  classNameSelect.innerHTML = '<option value="">Select your class</option>';
+  courseTypeSelect.innerHTML = '<option value="">Select course type</option>';
+  if (system === 'Annual') {
+    classNameSelect.innerHTML += `
+      <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
+      <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
+      <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
+      <option>MA 1st</option><option>MA 2nd</option>
+    `;
+    courseTypeSelect.innerHTML += `
+      <option value="Core">Core</option>
+      <option value="Elective">Elective</option>
+      <option value="Foundation">Foundation</option>
+    `;
+  } else if (system === 'Semester') {
+    for (let s = 1; s <= 8; s++) {
+      classNameSelect.innerHTML += `<option>Semester ${s}</option>`;
+    }
+    courseTypeSelect.innerHTML += `
+      <option value="DSC">DSC — Discipline Specific Core</option>
+      <option value="SEC">SEC — Skill Enhancement Course</option>
+      <option value="GE">GE — Generic Elective</option>
+      <option value="AEC">AEC — Ability Enhancement Course</option>
+      <option value="VAC">VAC — Value Added Course</option>
+      <option value="MDC">MDC — Multi-Disciplinary Course</option>
+    `;
+  }
+  // Keep previous selections if still valid under the new lists
+  if ([...classNameSelect.options].some(o => o.value === prevClassName)) classNameSelect.value = prevClassName;
+  if ([...courseTypeSelect.options].some(o => o.value === prevCourseType)) courseTypeSelect.value = prevCourseType;
   
   if (system) {
     classSection.style.display = 'block';
