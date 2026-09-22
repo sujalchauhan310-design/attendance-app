@@ -99,7 +99,10 @@
         <label class="block text-sm font-medium text-ink mb-1.5">Class</label>
         <select id="className" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
           <option value="">Select your class</option>
-          <!-- Options will be populated based on system selection -->
+          <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
+          <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
+          <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
+          <option>MA 1st</option><option>MA 2nd</option>
         </select>
       </div>
 
@@ -107,7 +110,11 @@
         <label class="block text-sm font-medium text-ink mb-1.5">Subject <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
         <select id="subject" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
           <option value="">Select subject</option>
-          <!-- Options will be populated based on system selection -->
+          <option>Political Science</option><option>History</option><option>Public Administration</option>
+          <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
+          <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
+          <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
+          <option>Computer Science</option><option>Physical Education</option><option>Other</option>
         </select>
       </div>
 
@@ -115,7 +122,6 @@
         <label class="block text-sm font-medium text-ink mb-1.5">Course Type <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
         <select id="courseType" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
           <option value="">Select course type</option>
-          <!-- Options will be populated based on system selection -->
         </select>
       </div>
 
@@ -123,30 +129,298 @@
         <label class="block text-sm font-medium text-ink mb-1.5">Major Subject <span class="text-xs font-normal text-muted">(optional)</span></label>
         <select id="majorSubject" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
           <option value="">Select major subject</option>
-          <!-- Options will be populated based on system selection -->
+          <option>Political Science</option><option>History</option><option>Public Administration</option>
+          <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
+          <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
+          <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
+          <option>Computer Science</option><option>Physical Education</option><option>Other</option>
         </select>
       </div>
 
       <!-- Location status -->
       <div id="locBox" class="rounded-lg border border-line bg-surface2/60 px-3.5 py-3">
         <div class="text-sm text-muted" id="locStatus">📍 Location: not fetched yet</div>
-        <button type="button" id="retryLocBtn" onclick="fetchLocation()" style="display:none;"
+        <button type="button" id="retryLocBtn" onclick="captureLocation()" style="display:none;"
           class="mt-2 text-sm font-medium text-gold hover:text-gold/80 transition">🔄 Retry Location</button>
+      </div>
 
-        <!-- Permanently denied help panel -->
-        <div id="locHelp" class="hidden mt-3 pt-3 border-t border-line">
-          <p class="text-sm text-ink font-medium mb-2">Location is blocked for this site. Turn it on:</p>
-          <div class="flex gap-2 mb-3">
-            <button type="button" onclick="showLocTab('ios')" id="tabIosBtn"
-              class="flex-1 text-xs font-medium py-1.5 rounded-md border border-line text-muted hover:text-ink transition">iPhone (Safari)</button>
-            <button type="button" onclick="showLocTab('android')" id="tabAndroidBtn"
-              class="flex-1 text-xs font-medium py-1.5 rounded-md border border-line text-muted hover:text-ink transition">Android (Chrome)</button>
-          </div>
-          <ol id="locStepsIos" class="hidden list-decimal list-inside text-sm text-muted space-y-1">
-            <li>Open the <b class="text-ink">Settings</b> app on your iPhone</li>
-            <li>Scroll down and tap <b class="text-ink">Privacy &amp; Security</b></li>
-            <li>Tap <b class="text-ink">Location Services</b> — make sure it's turned ON</li>
-            <li>Scroll down, tap <b class="text-ink">Safari Websites</b></li>
-            <li>Set it to <b class="text-ink">"While Using the App"</b></li>
-            <li>Come back here and tap "Retry Location"</li>
-            <li class="list-none -ml-1 mt-1 text-xs">Still failing? Try turning off <b class="text-ink">iCloud Private Relay</b> (Settings → your name → iCloud → Private Relay)
+      <button id="submitBtn" onclick="submitAttendance()" class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 transition disabled:opacity-50 disabled:cursor-not-allowed">Mark Attendance</button>
+    </div>
+  </div>
+
+  <!-- Success/Error message -->
+  <div id="message" class="hidden mt-4"></div>
+</div>
+
+<script>
+let capturedCoords = null;
+let locationAttempts = 0;
+const MAX_LOCATION_RETRIES = 3;
+
+// Progressive form reveal: Code → System → Main form
+document.getElementById('code').addEventListener('input', function() {
+  const code = this.value.trim();
+  const systemSection = document.getElementById('systemSection');
+  
+  // Validate code is digits only
+  if (code && !/^[0-9]*$/.test(code)) {
+    document.getElementById('codeErr').classList.remove('hidden');
+    systemSection.style.display = 'none';
+    return;
+  } else {
+    document.getElementById('codeErr').classList.add('hidden');
+  }
+  
+  // Show system selection after 5 digits entered
+  if (code.length === 5) {
+    systemSection.style.display = 'block';
+  } else {
+    systemSection.style.display = 'none';
+    document.getElementById('mainFormSection').style.display = 'none';
+  }
+});
+
+// System selection reveals main form and updates course type options
+document.querySelectorAll('input[name="system"]').forEach(radio => {
+  radio.addEventListener('change', function() {
+    const system = this.value;
+    const mainFormSection = document.getElementById('mainFormSection');
+    const courseTypeSelect = document.getElementById('courseType');
+    
+    // Show main form
+    mainFormSection.style.display = 'block';
+    
+    // Update course type options based on system
+    courseTypeSelect.innerHTML = '<option value="">Select course type</option>';
+    
+    if (system === 'Annual') {
+      courseTypeSelect.innerHTML += `
+        <option value="Core">Core</option>
+        <option value="Elective">Elective</option>
+        <option value="Foundation">Foundation</option>
+      `;
+    } else if (system === 'Semester') {
+      courseTypeSelect.innerHTML += `
+        <option value="DSC">DSC — Discipline Specific Core</option>
+        <option value="SEC">SEC — Skill Enhancement Course</option>
+        <option value="GE">GE — Generic Elective</option>
+        <option value="AEC">AEC — Ability Enhancement Course</option>
+        <option value="VAC">VAC — Value Added Course</option>
+        <option value="MDC">MDC — Multi-Disciplinary Course</option>
+      `;
+    }
+    
+    // Start capturing location when form is revealed
+    captureLocation();
+  });
+});
+
+// Roll number validation
+document.getElementById('rollNo').addEventListener('input', function() {
+  const rollNo = this.value.trim();
+  const errEl = document.getElementById('rollNoErr');
+  
+  if (rollNo && !/^[0-9]*$/.test(rollNo)) {
+    errEl.classList.remove('hidden');
+  } else {
+    errEl.classList.add('hidden');
+  }
+});
+
+// Capture location
+function captureLocation() {
+  const statusEl = document.getElementById('locStatus');
+  const retryBtn = document.getElementById('retryLocBtn');
+  
+  if (!navigator.geolocation) {
+    statusEl.innerHTML = '⚠️ Location: not supported by your browser';
+    retryBtn.style.display = 'none';
+    return;
+  }
+  
+  statusEl.innerHTML = '📍 Location: fetching...';
+  retryBtn.style.display = 'none';
+  locationAttempts++;
+  
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const coords = position.coords;
+      
+      // Speed validation - reject if moving too fast (>50 m/s = 180 km/h)
+      if (coords.speed && coords.speed > 50) {
+        statusEl.innerHTML = '<div class="text-err">⚠️ Location error: Speed too high. Please try again when stationary.</div>';
+        retryBtn.style.display = 'block';
+        capturedCoords = null;
+        return;
+      }
+      
+      capturedCoords = coords;
+      statusEl.innerHTML = `✅ Location: captured (accuracy: ${Math.round(coords.accuracy)}m)`;
+      retryBtn.style.display = 'none';
+    },
+    (error) => {
+      let msg = '⚠️ Location: ';
+      if (error.code === 1) {
+        msg += 'permission denied';
+      } else if (error.code === 2) {
+        msg += 'unavailable';
+      } else if (error.code === 3) {
+        msg += 'timeout';
+      } else {
+        msg += 'error';
+      }
+      
+      statusEl.innerHTML = msg;
+      
+      if (locationAttempts < MAX_LOCATION_RETRIES) {
+        retryBtn.style.display = 'block';
+      } else {
+        statusEl.innerHTML += ' (max retries reached)';
+        retryBtn.style.display = 'none';
+      }
+      
+      capturedCoords = null;
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0
+    }
+  );
+}
+
+// Submit attendance
+async function submitAttendance() {
+  const messageEl = document.getElementById('message');
+  const submitBtn = document.getElementById('submitBtn');
+  
+  // Get form values
+  const code = document.getElementById('code').value.trim();
+  const system = document.querySelector('input[name="system"]:checked')?.value;
+  const rollNo = document.getElementById('rollNo').value.trim();
+  const studentName = document.getElementById('studentName').value.trim();
+  const className = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subject').value.trim();
+  const courseType = document.getElementById('courseType').value.trim();
+  const majorSubject = document.getElementById('majorSubject').value.trim();
+  
+  // Validation
+  if (!code || code.length !== 5) {
+    showMessage('Please enter the 5-digit code from your teacher.', 'error');
+    return;
+  }
+  
+  if (!/^[0-9]+$/.test(code)) {
+    showMessage('Code can only contain digits (0–9).', 'error');
+    return;
+  }
+  
+  if (!system) {
+    showMessage('Please select Annual or Semester system.', 'error');
+    return;
+  }
+  
+  if (!rollNo) {
+    showMessage('Please enter your roll number.', 'error');
+    return;
+  }
+  
+  if (!/^[0-9]+$/.test(rollNo)) {
+    showMessage('Roll number can only contain digits (0–9).', 'error');
+    return;
+  }
+  
+  if (!studentName) {
+    showMessage('Please enter your name.', 'error');
+    return;
+  }
+  
+  if (!className) {
+    showMessage('Please select your class.', 'error');
+    return;
+  }
+  
+  if (!subject) {
+    showMessage('Please select the subject.', 'error');
+    return;
+  }
+  
+  if (!courseType) {
+    showMessage('Please select the course type.', 'error');
+    return;
+  }
+  
+  // Disable submit button
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Submitting...';
+  
+  try {
+    const payload = {
+      code,
+      roll_no: rollNo,
+      student_name: studentName,
+      class_name: className,
+      subject,
+      course_type: courseType,
+      major_subject: majorSubject || null,
+      system,
+      lat: capturedCoords ? capturedCoords.latitude : null,
+      lng: capturedCoords ? capturedCoords.longitude : null,
+      accuracy: capturedCoords ? capturedCoords.accuracy : null
+    };
+    
+    const response = await fetch('/api/student/mark-attendance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok && data.success) {
+      showMessage('✅ Attendance marked successfully!', 'success');
+      
+      // Reset form after 2 seconds
+      setTimeout(() => {
+        document.getElementById('code').value = '';
+        document.getElementById('rollNo').value = '';
+        document.getElementById('studentName').value = '';
+        document.getElementById('className').value = '';
+        document.getElementById('subject').value = '';
+        document.getElementById('courseType').value = '';
+        document.getElementById('majorSubject').value = '';
+        document.querySelector('input[name="system"]:checked').checked = false;
+        document.getElementById('systemSection').style.display = 'none';
+        document.getElementById('mainFormSection').style.display = 'none';
+        messageEl.classList.add('hidden');
+        capturedCoords = null;
+        locationAttempts = 0;
+        document.getElementById('locStatus').innerHTML = '📍 Location: not fetched yet';
+      }, 2000);
+    } else {
+      showMessage(data.error || 'Failed to mark attendance. Please try again.', 'error');
+    }
+  } catch (error) {
+    showMessage('Network error. Please check your connection and try again.', 'error');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Mark Attendance';
+  }
+}
+
+function showMessage(text, type) {
+  const messageEl = document.getElementById('message');
+  messageEl.classList.remove('hidden');
+  
+  if (type === 'success') {
+    messageEl.innerHTML = `<div class="rounded-lg border border-ok/40 bg-ok/10 text-ok text-sm px-4 py-3">${text}</div>`;
+  } else {
+    messageEl.innerHTML = `<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-4 py-3">${text}</div>`;
+  }
+  
+  // Scroll to message
+  messageEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+</script>
+</body>
+</html>
