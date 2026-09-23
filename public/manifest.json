@@ -3,8 +3,8 @@
   "short_name": "Attendance",
   "start_url": "student.html",
   "display": "standalone",
-  "background_color": "#f6f4ee",
-  "theme_color": "#1f2a44",
+  "background_color": "#0d111c",
+  "theme_color": "#0d111c",
   "icons": [
     {
       "src": "icon.svg",

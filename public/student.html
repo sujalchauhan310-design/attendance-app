@@ -180,13 +180,48 @@
 
   <div id="message" class="mt-4"></div>
   <div id="queueStatus" class="mt-4"></div>
+  <div id="failedBox" class="mt-4"></div>
+
+  <!-- Check my attendance -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-4 shadow-lg shadow-black/20 mt-5">
+    <div>
+      <div class="text-xs tracking-wide text-gold/80 font-medium mb-1">My Attendance</div>
+      <h2 class="font-serif text-lg font-semibold text-ink">Check my percentage</h2>
+      <p class="text-sm text-muted mt-1">Enter your roll number. For your privacy this only works from the phone you have marked attendance with.</p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Roll Number</label>
+      <input id="myRollNo" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+        placeholder="e.g. 45678"
+        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      <p id="myRollNoErr" class="hidden text-xs text-err mt-1">Roll number can only contain digits (0–9).</p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">System</label>
+      <select id="mySystem"
+        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="Semester">Semester (last 180 days)</option>
+        <option value="Annual">Annual (last 365 days)</option>
+      </select>
+    </div>
+
+    <button id="myAttBtn" onclick="checkMyAttendance()"
+      class="w-full bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg py-3 transition disabled:opacity-50">
+      Check Attendance
+    </button>
+
+    <div id="myAttMsg"></div>
+    <div id="myAttResult" class="space-y-2"></div>
+  </div>
 </div>
 
 <!-- Confirm modal -->
 <div id="confirmModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
   <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
     <h2 class="font-serif text-lg font-semibold text-ink mb-1">Confirm your details</h2>
-    <p class="text-sm text-muted mb-4">Please check before submitting — this can't be edited by your teacher later.</p>
+    <p class="text-sm text-muted mb-4">Please check before submitting. If something is wrong, tell your teacher — they can correct it from the register.</p>
     <div class="space-y-2 text-sm bg-surface2 border border-line rounded-lg p-3.5" id="confirmSummary"></div>
     <div class="flex gap-3 mt-5">
       <button onclick="closeConfirm()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
@@ -237,6 +272,14 @@ function enforceDigitsOnly(inputEl, errEl) {
 }
 enforceDigitsOnly(document.getElementById('rollNo'), document.getElementById('rollNoErr'));
 enforceDigitsOnly(document.getElementById('code'), document.getElementById('codeErr'));
+enforceDigitsOnly(document.getElementById('myRollNo'), document.getElementById('myRollNoErr'));
+
+// Keep the "check my attendance" roll number in step with the form's roll
+// number, so a student who just filled the form does not have to type it twice.
+document.getElementById('rollNo').addEventListener('input', () => {
+  const v = document.getElementById('rollNo').value;
+  if (!document.getElementById('myRollNo').value) document.getElementById('myRollNo').value = v;
+});
 
 // ---- Location handling ----
 function detectPlatform() {
@@ -404,12 +447,45 @@ async function attemptSubmit(payload, retries) {
 // Tries to flush anything sitting in the offline queue. Called on load,
 // whenever the browser regains connectivity, and on a slow background timer
 // as a safety net.
+// Rejections (expired code, wrong class, duplicate…) are NOT silently dropped:
+// they are collected and shown to the student, because an entry that looks
+// "saved" but was actually refused would leave them thinking they are present.
+const FAILED_KEY = 'attendance_failed_queue';
+
+function getFailed() {
+  try { return JSON.parse(localStorage.getItem(FAILED_KEY)) || []; } catch (e) { return []; }
+}
+function saveFailed(list) {
+  try { localStorage.setItem(FAILED_KEY, JSON.stringify(list.slice(-10))); } catch (e) {}
+  showFailed();
+}
+function clearFailed() {
+  saveFailed([]);
+}
+function showFailed() {
+  const el = document.getElementById('failedBox');
+  if (!el) return;
+  const list = getFailed();
+  if (!list.length) { el.innerHTML = ''; return; }
+  const items = list.map((f) =>
+    `<li>${esc(f.subject) || 'Class'}${f.course_type ? ' (' + esc(f.course_type) + ')' : ''} — ${esc(f.error)}</li>`
+  ).join('');
+  el.innerHTML = `
+    <div class="rounded-lg border border-err/50 bg-err/10 text-err text-sm px-3.5 py-3">
+      <div class="font-medium mb-1">✕ ${list.length} saved entr${list.length === 1 ? 'y' : 'ies'} could not be recorded</div>
+      <ul class="list-disc list-inside space-y-0.5">${items}</ul>
+      <div class="text-xs mt-2 text-err/80">These were NOT counted. Ask your teacher to mark you manually if you were present.</div>
+      <button type="button" onclick="clearFailed()" class="mt-2 text-xs font-medium underline">Clear this message</button>
+    </div>`;
+}
+
 let flushing = false;
 async function flushQueue() {
   if (flushing) return;
   flushing = true;
   const q = getQueue();
   const remaining = [];
+  const failures = [];
   for (const payload of q) {
     const result = await attemptSubmit(payload, 1);
     if (!result.reached) {
@@ -421,14 +497,77 @@ async function flushQueue() {
       continue;
     }
     console.warn('Queued attendance rejected:', result.data.error);
+    failures.push({
+      subject: payload.subject,
+      course_type: payload.course_type,
+      error: result.data.error || 'Rejected by the server.',
+    });
   }
+  if (failures.length) saveFailed(getFailed().concat(failures));
   saveQueue(remaining);
   flushing = false;
 }
 window.addEventListener('online', flushQueue);
 setInterval(flushQueue, 20000); // safety-net retry every 20s in case the 'online' event doesn't fire
 updateQueueStatus();
+showFailed();
 flushQueue();
+
+// ---- My attendance (subject-wise percentage) ----
+async function checkMyAttendance() {
+  const roll_no = document.getElementById('myRollNo').value.trim();
+  const system = document.getElementById('mySystem').value;
+  const msgDiv = document.getElementById('myAttMsg');
+  const resDiv = document.getElementById('myAttResult');
+  const btn = document.getElementById('myAttBtn');
+  resDiv.innerHTML = '';
+
+  if (!/^[0-9]+$/.test(roll_no)) {
+    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Enter your roll number (digits only).</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  msgDiv.innerHTML = '<div class="text-sm text-muted">Checking...</div>';
+  try {
+    const params = new URLSearchParams({ roll_no, system, device_id });
+    const res = await fetch('/api/student/my-attendance?' + params.toString());
+    const data = await res.json();
+    if (!res.ok) {
+      msgDiv.innerHTML = `<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ ${esc(data.error || 'Could not load your attendance.')}</div>`;
+      return;
+    }
+    msgDiv.innerHTML = '';
+    if (!data.subjects || !data.subjects.length) {
+      resDiv.innerHTML = `<div class="rounded-lg border border-golddim/50 bg-golddim/10 text-[#e8c468] text-sm px-3.5 py-3">No attendance found for this roll number in the last ${data.window_days} days.</div>`;
+      return;
+    }
+
+    const rows = data.subjects.map((s) => `
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <div class="text-sm text-ink font-medium">${esc(s.subject)}</div>
+          <div class="text-xs text-muted">${esc(s.course_type)} · ${s.attended} of ${s.held} classes</div>
+        </div>
+        <div class="text-sm font-semibold ${s.pct >= 75 ? 'text-ok' : 'text-err'}">${s.pct}%</div>
+      </div>`).join('');
+
+    resDiv.innerHTML = `
+      <div class="rounded-lg border border-line bg-surface2 px-3.5 py-3 flex items-center justify-between">
+        <div>
+          <div class="text-sm text-ink font-medium">${esc(data.name) || 'Roll No ' + esc(data.roll_no)}</div>
+          <div class="text-xs text-muted">${esc(data.class_name)} · ${data.from_date} to ${data.to_date}</div>
+        </div>
+        <div class="text-lg font-serif font-semibold ${data.overall_pct >= 75 ? 'text-ok' : 'text-err'}">${data.overall_pct}%</div>
+      </div>
+      <div class="space-y-2 pt-1">${rows}</div>
+      <p class="text-xs text-muted">Percentage = classes attended ÷ classes held (${data.total_attended} of ${data.total_held}). 75% is usually the minimum required.</p>`;
+  } catch (err) {
+    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ No internet connection. Try again.</div>';
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 // ---- Pre-submit validation + confirm modal ----
 function gatherPayload() {
