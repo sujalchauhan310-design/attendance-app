@@ -2,7 +2,9 @@
  * College Attendance System — Backend
  * -------------------------------------------------
  * Features:
- *  - Teacher generates a rotating 5-digit code (server-side, expires in 5 min)
+ *  - Teacher generates a rotating 5-digit code (server-side, expires in 7 min)
+ *  - Teacher can close a code early ("End code now") and see, for any past day,
+ *    either the register, a present/absent list, or an attendance-% PDF
  *  - Server time is always used (client device time is never trusted)
  *  - One roll number can mark attendance only ONCE per class + subject +
  *    course type per day (DSC / SEC / GE / AEC / VAC / MDC of the same
@@ -12,10 +14,17 @@
  *
  * HOW TO RUN:
  *   1. npm install
- *   2. Set the MONGODB_URI environment variable to your MongoDB Atlas connection string
+ *   2. Set these environment variables (see the CONFIG block below):
+ *        MONGODB_URI        — MongoDB Atlas connection string (required)
+ *        TEACHER_PASSWORD   — password for the teacher page (strongly advised)
+ *        RESEND_API_KEY     — enables automatic PDF emails
+ *        TEACHER_EMAIL      — inbox that receives the PDFs
+ *        CRON_SECRET        — locks down the two /api/check-and-send-* endpoints
+ *        CLASSROOM_LAT / CLASSROOM_LNG / CLASSROOM_RADIUS_METERS
  *   3. node server.js
  *   4. Open http://localhost:3000/teacher.html   (for teacher)
  *      Open http://localhost:3000/student.html   (for student)
+ *      Health check: http://localhost:3000/api/health
  */
 
 const express = require("express");
@@ -27,9 +36,25 @@ const { Resend } = require("resend");
 const dns = require("dns");
 dns.setDefaultResultOrder("ipv4first"); //render's IPv6 route to gmail is broken; force ipv4
 
+// Body size limit for JSON requests. The roster upload posts a whole class in
+// one request, so Express's 100kb default is too tight for a big college.
+const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || "2mb";
+
 const app = express();
+app.disable("x-powered-by"); // don't advertise the framework to the internet
 app.set("trust proxy",1);
-app.use(express.json());
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
+
+// Baseline security headers — no extra dependency (helmet) needed for these.
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  // The student page needs the phone's GPS; allow only our own origin to ask.
+  res.setHeader("Permissions-Policy", "geolocation=(self)");
+  next();
+});
+
 app.use(express.static(path.join(__dirname, "public")));
 
 // ---------- CONFIG ----------
@@ -39,15 +64,25 @@ const MONGODB_URI = process.env.MONGODB_URI;
 // Simple shared password so only the teacher can generate codes / see attendance.
 // Set this in Render's Environment tab. If not set, falls back to a default —
 // change it via the environment variable for real use.
-const TEACHER_PASSWORD = process.env.TEACHER_PASSWORD || "changeme123";
+const DEFAULT_TEACHER_PASSWORD = "changeme123";
+const TEACHER_PASSWORD = process.env.TEACHER_PASSWORD || DEFAULT_TEACHER_PASSWORD;
 
-// TODO: Set this to your actual classroom's GPS coordinates
-// (Google Maps → right-click the spot → copy lat/long)
+// Optional shared secret for the two cron-only endpoints
+// (/api/check-and-send-pdfs and /api/check-and-send-monthly-report). Set
+// CRON_SECRET in Render's Environment tab and either append ?secret=... to the
+// cron-job.org URL or send an x-cron-secret header — then nobody else can
+// trigger an email blast or burn the Resend quota. If it is left unset the
+// endpoints stay reachable (so an existing cron keeps working) but a loud
+// warning is printed at startup.
+const CRON_SECRET = process.env.CRON_SECRET;
+
+// Classroom GPS centre + allowed radius. Override with env vars on the server
+// instead of editing code (Google Maps → right-click the spot → copy lat/long).
 const CLASSROOM = {
-  lat: 31.10648, // <-- change this
-  lng: 77.15175, // <-- change this
+  lat: Number(process.env.CLASSROOM_LAT) || 31.10648, // <-- set CLASSROOM_LAT
+  lng: Number(process.env.CLASSROOM_LNG) || 77.15175, // <-- set CLASSROOM_LNG
 };
-const RADIUS_METERS = 150; // a bit generous, since network-based location
+const RADIUS_METERS = Number(process.env.CLASSROOM_RADIUS_METERS) || 150; // a bit generous, since network-based location
                             // (used for weak signal) is less precise than GPS
 // How long after a code is generated the attendance PDF is auto-emailed
 const PDF_EMAIL_DELAY_MS = 20 * 60 * 1000; // 20 minutes
@@ -58,20 +93,20 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const IST_TIMEZONE = "Asia/Kolkata";
 
 // Annual vs Semester system. Each has its own report window.
-const REPORT_DAYS = { Annual: 30, Semester: 30 };
+const REPORT_DAYS = { Annual: 365, Semester: 180 };
 // Up to this many days the report shows the day-by-day P/A grid. Longer
 // ranges (Annual/Semester) don't fit on a page as a grid, so they use a
 // compact summary table instead.
 const GRID_MAX_DAYS = 45;
 // Attendance records are auto-deleted after this many days. Must be longer
-// than the longest report window (Annual = 30 days), otherwise the Annual
+// than the longest report window (Annual = 365 days), otherwise the Annual
 // report would silently be missing older data.
 const ATTENDANCE_RETENTION_DAYS = 400;
 
 // If a student's phone can't give a location, they must retry. After this many
 // failed-location submissions in a day from the same device, the next one is
 // accepted anyway (silently — the student just sees the normal success message).
-const MAX_LOCATION_ATTEMPTS = 7;
+const MAX_LOCATION_ATTEMPTS = 15;
 
 // Resend sends over HTTPS (not SMTP), so it isn't blocked on Render's free tier
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -82,6 +117,18 @@ const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
 if (!resend) {
   console.warn("RESEND_API_KEY not set — automatic PDF emails are disabled.");
+}
+
+if (TEACHER_PASSWORD === DEFAULT_TEACHER_PASSWORD) {
+  console.warn("WARNING: TEACHER_PASSWORD is not set — the default password is in use.");
+  console.warn("         Anyone who finds the teacher page link can generate codes and read the register.");
+  console.warn("         Set the TEACHER_PASSWORD environment variable to a private password.");
+}
+
+if (!CRON_SECRET) {
+  console.warn("WARNING: CRON_SECRET is not set — /api/check-and-send-pdfs and");
+  console.warn("         /api/check-and-send-monthly-report can be triggered by anyone who knows the URL.");
+  console.warn("         Set CRON_SECRET and add ?secret=... to your cron-job.org URLs to lock them down.");
 }
 
 
@@ -152,6 +199,9 @@ send_pdf: { type: Boolean, default: true }, // auto-email attendance PDF 20 min 
 pdf_sent: { type: Boolean, default: false }, // prevents sending twice if server restarts
   created_at: Number,
   expires_at: Number,
+  // Real Date object used only to auto-delete old sessions, so the collection
+  // does not grow forever (every generated code = one document).
+  createdAtDate: { type: Date, default: Date.now, expires: 90 * 24 * 60 * 60 },
 });
 const ActiveCode = mongoose.model("ActiveCode", activeCodeSchema);
 
@@ -167,7 +217,6 @@ const attendanceSchema = new mongoose.Schema({
   date: String,           // YYYY-MM-DD
   marked_at: Number,
   device_id: String,
-  remarks: { type: String, default: "" }, // optional note, e.g. "10 min late", or set automatically for manually-marked entries
   // Real Date object (separate from the display-only `date` string) used
   // purely to drive the 60-day auto-delete below.
   createdAtDate: { type: Date, default: Date.now },
@@ -228,10 +277,64 @@ function todayDateString() {
   return istNow().toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
-// Epoch ms of today's 00:00 IST
-function startOfTodayIstMs() {
-  const shifted = Date.now() + IST_OFFSET_MS;
-  return Math.floor(shifted / 86400000) * 86400000 - IST_OFFSET_MS;
+// Same YYYY-MM-DD (IST) format as todayDateString(), but for any moment.
+// Used so a PDF/email sent after midnight still shows the date of the class.
+function istDateStringFromMs(ms) {
+  return new Date(ms + IST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+// First and last epoch ms of a YYYY-MM-DD IST day (end is exclusive).
+function istDayRangeMs(dateStr) {
+  const start = new Date(dateStr + "T00:00:00Z").getTime() - IST_OFFSET_MS;
+  return { start, end: start + 86400000 };
+}
+
+// Validates an optional YYYY-MM-DD the teacher may pass to look at a past day.
+// Malformed values, future dates and anything older than the retention window
+// (the data is already deleted by then) are rejected with a clear message.
+// No value at all → today, so existing callers keep working unchanged.
+function parseReportDate(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === "") {
+    return { date: todayDateString() };
+  }
+  const s = String(raw).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return { error: "date must be in YYYY-MM-DD format." };
+  }
+  const parsed = new Date(s + "T00:00:00Z");
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== s) {
+    return { error: "That is not a real calendar date." };
+  }
+  const today = todayDateString();
+  if (s > today) {
+    return { error: "Attendance cannot be shown for a future date." };
+  }
+  const oldestMs = new Date(today + "T00:00:00Z").getTime() - (ATTENDANCE_RETENTION_DAYS - 1) * 86400000;
+  if (s < new Date(oldestMs).toISOString().slice(0, 10)) {
+    return { error: `Attendance records older than ${ATTENDANCE_RETENTION_DAYS} days are deleted automatically.` };
+  }
+  return { date: s };
+}
+
+// Roll numbers are digits, but Mongo sorts them as text (so "99" > "100").
+// Every list in this app is sorted with this comparator instead.
+function compareRollNo(a, b) {
+  const numA = parseFloat(a.roll_no);
+  const numB = parseFloat(b.roll_no);
+  if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+  return String(a.roll_no).localeCompare(String(b.roll_no));
+}
+
+// Checkbox-style flags sent as JSON. undefined/null/"" means "use the default",
+// and "false"/"0"/"no"/"off" (strings) are understood too, so a client that
+// stringifies booleans can't accidentally switch a safety check back on.
+function boolWithDefault(raw, fallback) {
+  if (raw === undefined || raw === null || raw === "") return fallback;
+  if (typeof raw === "boolean") return raw;
+  const s = String(raw).trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(s)) return true;
+  if (["false", "0", "no", "off"].includes(s)) return false;
+  return fallback;
 }
 
 function formatIstTime(ms) {
@@ -365,11 +468,12 @@ async function buildOverallReportRows(class_name, subject, course_type, system, 
   }).lean();
 
   const classDays = new Set(records.map((r) => r.date)).size;
-  // Short ranges (monthly report): % of calendar days, as before.
-  // Long ranges (Annual/Semester): % of days a class was actually held —
-  // dividing by 365 calendar days would include Sundays, holidays and
-  // vacations and make every % look tiny.
-  const denominator = dates.length <= GRID_MAX_DAYS ? dates.length : classDays;
+  // The denominator is ALWAYS the number of days this class was actually held.
+  // Dividing by calendar days would drag every student's % down with Sundays,
+  // holidays and vacations — and would make a 30-day report and a 365-day
+  // report of the same student disagree wildly. Attended ÷ Held is also the
+  // number a college actually asks for.
+  const denominator = classDays;
 
   const byRoll = new Map();
   for (const r of records) {
@@ -393,12 +497,7 @@ async function buildOverallReportRows(class_name, subject, course_type, system, 
     };
   });
 
-  rows.sort((a, b) => {
-    const numA = parseFloat(a.roll_no);
-    const numB = parseFloat(b.roll_no);
-    if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
-    return String(a.roll_no).localeCompare(String(b.roll_no));
-  });
+  rows.sort(compareRollNo);
 
   return { rows, classDays };
 }
@@ -423,9 +522,8 @@ function buildOverallReportPdfBuffer(meta, rows) {
       { align: "center" }
     );
     doc.moveDown(0.3);
-    const heldInfo = grid ? "" : `   |   Classes held: ${meta.classDays || 0}`;
     doc.fontSize(9).font("Helvetica").fillColor("#555").text(
-      `Period: ${meta.dates[0]} to ${meta.dates[meta.dates.length - 1]}${heldInfo}   |   Students: ${rows.length}`,
+      `Period: ${meta.dates[0]} to ${meta.dates[meta.dates.length - 1]}   |   Classes held: ${meta.classDays || 0}   |   Students: ${rows.length}   |   % = attended / held`,
       { align: "center" }
     );
     doc.moveDown(0.8);
@@ -475,8 +573,8 @@ function buildOverallReportPdfBuffer(meta, rows) {
 
     // ---- Day-by-day grid (short ranges) ----
     const pageWidth = doc.page.width - 60;
-    const fixed = { sno: 22, name: 110, roll: 45, total: 34, pct: 34 };
-    const fixedSum = fixed.sno + fixed.name + fixed.roll + fixed.total + fixed.pct;
+    const fixed = { sno: 22, name: 110, roll: 45, total: 34, held: 30, pct: 34 };
+    const fixedSum = fixed.sno + fixed.name + fixed.roll + fixed.total + fixed.held + fixed.pct;
     const dayColWidth = Math.max(10, (pageWidth - fixedSum) / meta.dates.length);
 
     function drawRow(y, bold, cells) {
@@ -490,6 +588,7 @@ function buildOverallReportPdfBuffer(meta, rows) {
         x += dayColWidth;
       });
       doc.text(String(cells.total), x, y, { width: fixed.total, align: "center" }); x += fixed.total;
+      doc.text(String(cells.held), x, y, { width: fixed.held, align: "center" }); x += fixed.held;
       doc.text(String(cells.pct), x, y, { width: fixed.pct, align: "center" });
     }
 
@@ -499,7 +598,8 @@ function buildOverallReportPdfBuffer(meta, rows) {
       name: "Name",
       roll: "Roll No",
       days: meta.dates.map((d) => String(new Date(d + "T00:00:00Z").getUTCDate())),
-      total: "Total",
+      total: "Att.",
+      held: "Held",
       pct: "%",
     });
     y += 14;
@@ -516,6 +616,7 @@ function buildOverallReportPdfBuffer(meta, rows) {
         roll: r.roll_no,
         days: r.dayMarks,
         total: r.totalPresent,
+        held: meta.classDays || 0,
         pct: r.pct + "%",
       });
       y += 13;
@@ -598,15 +699,13 @@ async function sendAttendancePdfEmail(sessionId) {
     claimed = true;
 
     const records = await Attendance.find({ session_id: sessionId }).lean();
-    records.sort((a, b) => {
-      const numA = parseFloat(a.roll_no);
-      const numB = parseFloat(b.roll_no);
-      if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
-      return String(a.roll_no).localeCompare(String(b.roll_no));
-    });
+    records.sort(compareRollNo);
 
     const pdfBuffer = await buildAttendancePdfBuffer(
-      { ...session.toObject(), dateForPdf: todayDateString() },
+      // The date shown on the PDF is the date the class actually happened
+      // (the session's own timestamp, in IST) — not "today". Otherwise a code
+      // generated at 11:55pm and emailed at 12:15am would print the wrong day.
+      { ...session.toObject(), dateForPdf: istDateStringFromMs(session.created_at || Date.now()) },
       records
     );
 
@@ -673,6 +772,15 @@ const generateCodeLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const studentLookupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 80, // a student typing roll numbers on the form will never come close
+  statusCode: 429,
+  message: { error: "Too many lookups. Please wait a few minutes and try again." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ---------- TEACHER ROUTES ----------
 
 // Generate a new attendance code for a class + subject + course type
@@ -694,25 +802,29 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       subject,
       course_type,
       system,
-require_location: require_location !== false, // defaults to true unless explicitly turned off
-send_pdf: send_pdf !== false, // defaults to true unless explicitly turned off
-created_at: now,
+      require_location: boolWithDefault(require_location, true), // on unless explicitly turned off
+      send_pdf: boolWithDefault(send_pdf, true),                 // on unless explicitly turned off
+      created_at: now,
       expires_at: now + CODE_EXPIRY_MS,
     });
-  // Auto-email the attendance PDF 20 minutes after this code was generated
-if (session.send_pdf) {
-  setTimeout(() => sendAttendancePdfEmail(session._id.toString()), PDF_EMAIL_DELAY_MS);
-} 
- res.json({
+    // Auto-email the attendance PDF 20 minutes after this code was generated.
+    // The cron endpoint (/api/check-and-send-pdfs) is the safety net for when
+    // this Render instance sleeps before the timer fires.
+    if (session.send_pdf) {
+      setTimeout(() => sendAttendancePdfEmail(session._id.toString()), PDF_EMAIL_DELAY_MS);
+    }
+    res.json({
       code,
       session_id: session._id.toString(),
       expires_in_seconds: CODE_EXPIRY_MS / 1000,
+      expires_at: session.expires_at,
+      server_now: now,
       class_name,
       subject,
       course_type,
       system,
-  require_location: session.require_location,
-  send_pdf: session.send_pdf,
+      require_location: session.require_location,
+      send_pdf: session.send_pdf,
     });
   } catch (err) {
     console.error(err);
@@ -720,9 +832,129 @@ if (session.send_pdf) {
   }
 });
 
+// Live status of one generated code. The teacher page uses this on reload so
+// the countdown comes from SERVER time — a phone whose clock is a few minutes
+// off would otherwise show the wrong remaining time for a still-valid code.
+app.get("/api/teacher/session-status", requireTeacherAuth, async (req, res) => {
+  try {
+    const { session_id } = req.query;
+    if (!session_id || !mongoose.Types.ObjectId.isValid(session_id)) {
+      return res.status(400).json({ error: "A valid session_id is required." });
+    }
+    const session = await ActiveCode.findById(session_id).lean();
+    if (!session) return res.json({ found: false });
+    const marked_count = await Attendance.countDocuments({ session_id });
+    const now = Date.now();
+    res.json({
+      found: true,
+      session_id: session._id.toString(),
+      code: session.code,
+      class_name: session.class_name,
+      subject: session.subject,
+      course_type: session.course_type,
+      system: session.system || "Annual",
+      require_location: session.require_location !== false,
+      send_pdf: session.send_pdf !== false,
+      created_at: session.created_at,
+      expires_at: session.expires_at,
+      server_now: now,
+      seconds_left: Math.max(0, Math.round((session.expires_at - now) / 1000)),
+      active: now <= session.expires_at,
+      marked_count,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong loading the session." });
+  }
+});
+
+// Close a code early — the period finished sooner than expected, the code was
+// read out too loudly, etc. The record stays in the database (its list and PDF
+// are unaffected) but stops accepting new marks straight away; students then
+// see the normal "This code has expired" message.
+app.post("/api/teacher/end-session", requireTeacherAuth, async (req, res) => {
+  try {
+    const { session_id } = req.body;
+    if (!session_id || !mongoose.Types.ObjectId.isValid(session_id)) {
+      return res.status(400).json({ error: "A valid session_id is required." });
+    }
+    const session = await ActiveCode.findById(session_id);
+    if (!session) return res.status(404).json({ error: "Session not found." });
+    const now = Date.now();
+    if (session.expires_at > now) {
+      session.expires_at = now;
+      await session.save();
+    }
+    const marked_count = await Attendance.countDocuments({ session_id });
+    res.json({ success: true, code: session.code, marked_count });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong ending the session." });
+  }
+});
+
+// Present / absent view: who marked attendance and — from the uploaded roster —
+// who did NOT. Absentees were invisible before this: the teacher could only see
+// the list of students who had marked.
+app.get("/api/teacher/session-report", requireTeacherAuth, async (req, res) => {
+  try {
+    const { class_name, subject, course_type, session_id, system } = req.query;
+    if (!class_name) {
+      return res.status(400).json({ error: "class_name is required." });
+    }
+    const day = parseReportDate(req.query.date);
+    if (day.error) return res.status(400).json({ error: day.error });
+    const systemFilter = system ? normalizeSystem(system) : null;
+    if (system && !systemFilter) {
+      return res.status(400).json({ error: "system must be either Annual or Semester." });
+    }
+
+    const filter = { class_name, date: day.date };
+    if (subject) filter.subject = subject;
+    if (course_type) filter.course_type = course_type;
+    if (systemFilter) filter.system = systemMatch(systemFilter);
+    if (session_id) {
+      if (!mongoose.Types.ObjectId.isValid(session_id)) {
+        return res.status(400).json({ error: "Invalid session_id." });
+      }
+      filter.session_id = session_id;
+    }
+
+    const [present, roster] = await Promise.all([
+      Attendance.find(filter).lean(),
+      Student.find({ class_name }).lean(),
+    ]);
+    present.sort(compareRollNo);
+
+    const presentRolls = new Set(present.map((r) => String(r.roll_no)));
+    // Only roll numbers we know about can be "absent" — a number that has never
+    // been seen anywhere cannot be counted as missing from a class.
+    const absent = roster
+      .filter((s) => !presentRolls.has(String(s.roll_no)))
+      .map((s) => ({ roll_no: s.roll_no, student_name: s.name, major_subject: s.major_subject || "" }))
+      .sort(compareRollNo);
+
+    res.json({
+      date: day.date,
+      class_name,
+      subject: subject || "",
+      course_type: course_type || "",
+      system: systemFilter || "",
+      roster_size: roster.length,
+      present_count: present.length,
+      absent_count: absent.length,
+      present,
+      absent,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong building the present/absent list." });
+  }
+});
+
 // Look up a student's saved name, class and major subject from their roll
 // number (for auto-fill + lock on the student form)
-app.get("/api/student/lookup-name", async (req, res) => {
+app.get("/api/student/lookup-name", studentLookupLimiter, async (req, res) => {
   try {
     const { roll_no } = req.query;
     if (!roll_no) return res.json({ name: "", class_name: "", major_subject: "" });
@@ -751,8 +983,10 @@ app.post("/api/teacher/upload-roster", requireTeacherAuth, async (req, res) => {
       return res.status(400).json({ error: "Paste the student list first." });
     }
     const lines = roster_text.split("\n").map((l) => l.trim()).filter(Boolean);
-    let added = 0;
     let skipped = 0;
+    // One bulkWrite instead of one query per line — a 500-student roster used to
+    // mean 500 sequential round-trips to Atlas (slow, and easy to time out).
+    const ops = [];
     for (const line of lines) {
       const parts = line.split(/,|\t/).map((p) => p.trim());
       const [roll_no, name, class_name, major_subject] = parts;
@@ -760,12 +994,28 @@ app.post("/api/teacher/upload-roster", requireTeacherAuth, async (req, res) => {
         skipped++;
         continue;
       }
-      await Student.findOneAndUpdate(
-        { roll_no },
-        { roll_no, name, class_name: class_name || "", major_subject: major_subject || "" },
-        { upsert: true }
-      );
-      added++;
+      ops.push({
+        updateOne: {
+          filter: { roll_no },
+          update: { $set: { roll_no, name, class_name: class_name || "", major_subject: major_subject || "" } },
+          upsert: true,
+        },
+      });
+    }
+
+    let added = 0;
+    if (ops.length) {
+      let result = null;
+      try {
+        result = await Student.bulkWrite(ops, { ordered: false });
+      } catch (bulkErr) {
+        // A duplicate roll number inside the same paste makes Mongo report a
+        // BulkWriteError — the rest of the list is still saved, so report what
+        // actually went through instead of failing the whole upload.
+        result = bulkErr.result || null;
+        if (!result) throw bulkErr;
+      }
+      added = (result.upsertedCount || 0) + (result.matchedCount || 0);
     }
     res.json({ success: true, added, skipped, total: lines.length });
   } catch (err) {
@@ -774,12 +1024,42 @@ app.post("/api/teacher/upload-roster", requireTeacherAuth, async (req, res) => {
   }
 });
 
-// List today's code-generation sessions, newest first, so the teacher can pick
-// which one's attendance list to view. Each generated code = one separate session.
+// See what is currently saved in the roster — either one class, or one student.
+// Lets the teacher verify an upload (and see the roll numbers/classes the
+// student form will auto-fill from) without re-pasting anything.
+app.get("/api/teacher/roster", requireTeacherAuth, async (req, res) => {
+  try {
+    const { class_name, roll_no } = req.query;
+    const filter = {};
+    if (class_name) filter.class_name = class_name;
+    if (roll_no) filter.roll_no = String(roll_no).trim();
+    const students = await Student.find(filter).lean();
+    students.sort(compareRollNo);
+    res.json({
+      count: students.length,
+      students: students.map((s) => ({
+        roll_no: s.roll_no,
+        name: s.name,
+        class_name: s.class_name || "",
+        major_subject: s.major_subject || "",
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong loading the roster." });
+  }
+});
+
+// List the code-generation sessions of one day (default: today, IST), newest
+// first, so the teacher can pick which one's attendance list to view. Each
+// generated code = one separate session.
 app.get("/api/teacher/sessions", requireTeacherAuth, async (req, res) => {
   try {
     const { class_name, subject, course_type, system } = req.query;
-    const filter = { created_at: { $gte: startOfTodayIstMs() } }; // today, in IST
+    const day = parseReportDate(req.query.date);
+    if (day.error) return res.status(400).json({ error: day.error });
+    const { start, end } = istDayRangeMs(day.date);
+    const filter = { created_at: { $gte: start, $lt: end } };
     if (class_name) filter.class_name = class_name;
     if (subject) filter.subject = subject;
     if (course_type) filter.course_type = course_type;
@@ -788,7 +1068,15 @@ app.get("/api/teacher/sessions", requireTeacherAuth, async (req, res) => {
       if (sys) filter.system = systemMatch(sys);
     }
     const sessions = await ActiveCode.find(filter).sort({ created_at: -1 }).lean();
+    // How many students marked in each session (one small aggregation instead of
+    // a count query per session), so the dropdown can show it at a glance.
+    const counts = await Attendance.aggregate([
+      { $match: { date: day.date } },
+      { $group: { _id: "$session_id", count: { $sum: 1 } } },
+    ]);
+    const countBySession = new Map(counts.map((c) => [String(c._id), c.count]));
     res.json({
+      date: day.date,
       sessions: sessions.map((s) => ({
         session_id: s._id.toString(),
         class_name: s.class_name,
@@ -796,6 +1084,8 @@ app.get("/api/teacher/sessions", requireTeacherAuth, async (req, res) => {
         course_type: s.course_type,
         system: s.system || "Annual",
         created_at: s.created_at,
+        expires_at: s.expires_at,
+        marked_count: countBySession.get(s._id.toString()) || 0,
       })),
     });
   } catch (err) {
@@ -804,11 +1094,15 @@ app.get("/api/teacher/sessions", requireTeacherAuth, async (req, res) => {
   }
 });
 
-// Get today's attendance list for a class + subject + course type (optionally one specific session)
+// Get the attendance list for a class + subject + course type (optionally one
+// specific session). Defaults to today; pass ?date=YYYY-MM-DD to open an older
+// register (marks are kept for ATTENDANCE_RETENTION_DAYS days).
 app.get("/api/teacher/attendance", requireTeacherAuth, async (req, res) => {
   try {
     const { class_name, subject, course_type, session_id, system } = req.query;
-    const date = todayDateString();
+    const day = parseReportDate(req.query.date);
+    if (day.error) return res.status(400).json({ error: day.error });
+    const date = day.date;
     const filter = { date };
     if (class_name) filter.class_name = class_name;
     if (subject) filter.subject = subject;
@@ -817,15 +1111,15 @@ app.get("/api/teacher/attendance", requireTeacherAuth, async (req, res) => {
       const sys = normalizeSystem(system);
       if (sys) filter.system = systemMatch(sys);
     }
-    if (session_id) filter.session_id = session_id;
+    if (session_id) {
+      if (!mongoose.Types.ObjectId.isValid(session_id)) {
+        return res.status(400).json({ error: "Invalid session_id." });
+      }
+      filter.session_id = session_id;
+    }
     const rows = await Attendance.find(filter).lean();
     // Sort by roll number, ascending (numeric if possible, else alphabetic)
-    rows.sort((a, b) => {
-      const numA = parseFloat(a.roll_no);
-      const numB = parseFloat(b.roll_no);
-      if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
-      return String(a.roll_no).localeCompare(String(b.roll_no));
-    });
+    rows.sort(compareRollNo);
     res.json({ date, count: rows.length, records: rows });
   } catch (err) {
     console.error(err);
@@ -839,7 +1133,7 @@ app.get("/api/teacher/attendance", requireTeacherAuth, async (req, res) => {
 // instead of silently creating a clash.
 app.patch("/api/teacher/attendance/update", requireTeacherAuth, async (req, res) => {
   try {
-    const { record_id, roll_no, student_name, subject, remarks } = req.body;
+    const { record_id, roll_no, student_name, subject } = req.body;
     if (!record_id) {
       return res.status(400).json({ error: "record_id is required." });
     }
@@ -870,9 +1164,8 @@ app.patch("/api/teacher/attendance/update", requireTeacherAuth, async (req, res)
     }
 
     existing.roll_no = cleanRoll;
-    if (student_name !== undefined) existing.student_name = student_name.trim();
+    if (student_name !== undefined) existing.student_name = String(student_name || "").trim();
     existing.subject = finalSubject;
-    if (remarks !== undefined) existing.remarks = String(remarks).trim();
     await existing.save();
 
     res.json({ success: true });
@@ -917,107 +1210,9 @@ app.delete("/api/teacher/device-lock", requireTeacherAuth, async (req, res) => {
   }
 });
 
-// Compares the uploaded roster (filtered by class_name) against today's
-// attendance for the selected class+subject+course_type+system, so the
-// teacher can see who hasn't self-marked yet. Roster only stores class_name
-// (not subject/course-type), so a student on a different elective under the
-// same class_name may still show up here — this is a best-effort list, not
-// a guaranteed roll call.
-app.get("/api/teacher/roster-status", requireTeacherAuth, async (req, res) => {
-  try {
-    const { class_name, subject, course_type, system } = req.query;
-    if (!class_name || !subject || !course_type) {
-      return res.status(400).json({ error: "class_name, subject and course_type are required." });
-    }
-    const sys = normalizeSystem(system);
-    if (!sys) {
-      return res.status(400).json({ error: "system must be either Annual or Semester" });
-    }
-
-    const rosterStudents = await Student.find({ class_name }).lean();
-    const date = todayDateString();
-    const markedRecords = await Attendance.find({
-      class_name,
-      subject,
-      course_type,
-      system: systemMatch(sys),
-      date,
-    }).lean();
-    const markedRollNos = new Set(markedRecords.map((r) => r.roll_no));
-
-    const absent = rosterStudents
-      .filter((s) => !markedRollNos.has(s.roll_no))
-      .map((s) => ({ roll_no: s.roll_no, name: s.name }));
-    absent.sort((a, b) => {
-      const numA = parseFloat(a.roll_no);
-      const numB = parseFloat(b.roll_no);
-      if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
-      return String(a.roll_no).localeCompare(String(b.roll_no));
-    });
-
-    res.json({
-      roster_count: rosterStudents.length,
-      marked_count: markedRecords.length,
-      absent,
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Something went wrong loading the roster status." });
-  }
-});
-
-// Lets the teacher mark a roster student present directly (no code, no
-// device, no location needed) — e.g. their phone is dead or GPS won't work.
-app.post("/api/teacher/mark-manual", requireTeacherAuth, async (req, res) => {
-  try {
-    const { class_name, subject, course_type, roll_no } = req.body;
-    if (!class_name || !subject || !course_type || !roll_no) {
-      return res.status(400).json({ error: "class_name, subject, course_type and roll_no are required." });
-    }
-    const sys = normalizeSystem(req.body.system);
-    if (!sys) {
-      return res.status(400).json({ error: "system must be either Annual or Semester" });
-    }
-    const cleanRoll = String(roll_no).trim();
-    if (!/^[0-9]+$/.test(cleanRoll)) {
-      return res.status(400).json({ error: "Roll number must contain digits only." });
-    }
-
-    const student = await Student.findOne({ roll_no: cleanRoll }).lean();
-    const now = Date.now();
-
-    try {
-      await Attendance.create({
-        roll_no: cleanRoll,
-        student_name: student ? student.name : "",
-        subject,
-        course_type,
-        system: sys,
-        major_subject: student ? student.major_subject || "" : "",
-        class_name,
-        session_id: "manual",
-        date: todayDateString(),
-        marked_at: now,
-        device_id: "teacher-manual",
-        remarks: "Marked manually by teacher",
-      });
-    } catch (createErr) {
-      if (createErr.code === 11000) {
-        return res.status(409).json({ error: "This student already has attendance marked for this class today." });
-      }
-      throw createErr;
-    }
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Something went wrong marking attendance." });
-  }
-});
-
-
 // Manual download: overall attendance % PDF for one class + subject + course
-// type + system combination. The window is 30 days for both Annual and Semester.
+// type + system combination. The window depends on the system:
+// Annual = last 365 days, Semester = last 180 days.
 app.get("/api/teacher/reports/overall-download", requireTeacherAuth, async (req, res) => {
   try {
     const { class_name, subject, course_type } = req.query;
@@ -1039,6 +1234,113 @@ app.get("/api/teacher/reports/overall-download", requireTeacherAuth, async (req,
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong generating the report." });
+  }
+});
+
+// A student's own subject-wise attendance summary. Identity comes from the
+// device lock the app already uses everywhere else: only the phone registered
+// to this roll number can read its percentages, so one student cannot look up
+// another by guessing roll numbers.
+app.get("/api/student/my-attendance", studentLookupLimiter, async (req, res) => {
+  try {
+    const { roll_no, device_id } = req.query;
+    if (!roll_no || !/^[0-9]+$/.test(String(roll_no).trim())) {
+      return res.status(400).json({ error: "Roll number must contain digits only." });
+    }
+    if (!device_id) {
+      return res.status(400).json({ error: "This phone could not be identified. Reload the page and try again." });
+    }
+    const cleanRoll = String(roll_no).trim();
+    const system = normalizeSystem(req.query.system);
+    if (req.query.system && !system) {
+      return res.status(400).json({ error: "system must be either Annual or Semester." });
+    }
+
+    const lock = await DeviceLock.findOne({ device_id });
+    if (!lock) {
+      return res.status(403).json({
+        error: "Mark attendance once from this phone first — after that you can check your percentage here.",
+      });
+    }
+    if (String(lock.roll_no) !== cleanRoll) {
+      return res.status(403).json({
+        error: "This phone is registered to a different roll number, so it can only show that student's attendance.",
+      });
+    }
+
+    const student = await Student.findOne({ roll_no: cleanRoll }).lean();
+    const days = REPORT_DAYS[system];
+    const dates = lastNDates(days);
+
+    const records = await Attendance.find({
+      roll_no: cleanRoll,
+      system: systemMatch(system),
+      date: { $in: dates },
+    }).lean();
+
+    // Group the student's own marks by class + subject + course type — the same
+    // subject taught as DSC and as SEC is two classes with two percentages.
+    const groups = new Map();
+    for (const r of records) {
+      const key = [r.class_name, r.subject, r.course_type].join("|");
+      if (!groups.has(key)) {
+        groups.set(key, {
+          class_name: r.class_name,
+          subject: r.subject,
+          course_type: r.course_type,
+          present: new Set(),
+        });
+      }
+      groups.get(key).present.add(r.date);
+    }
+
+    // How many times each of those classes was actually held (a date on which
+    // any student of that class marked counts as one class held).
+    const heldAgg = await Attendance.aggregate([
+      { $match: { system: systemMatch(system), date: { $in: dates } } },
+      { $group: { _id: { class_name: "$class_name", subject: "$subject", course_type: "$course_type", date: "$date" } } },
+      { $group: { _id: { class_name: "$_id.class_name", subject: "$_id.subject", course_type: "$_id.course_type" }, held: { $sum: 1 } } },
+    ]);
+    const heldMap = new Map(
+      heldAgg.map((h) => [[h._id.class_name, h._id.subject, h._id.course_type].join("|"), h.held])
+    );
+
+    const subjects = Array.from(groups.entries()).map(([key, g]) => {
+      const attended = g.present.size;
+      const held = heldMap.get(key) || attended; // fall back to own marks if oldest data was purged
+      return {
+        class_name: g.class_name,
+        subject: g.subject,
+        course_type: g.course_type,
+        attended,
+        held,
+        pct: held ? Number(((attended / held) * 100).toFixed(1)) : 0,
+      };
+    });
+    subjects.sort((a, b) =>
+      String(a.class_name + a.subject + a.course_type).localeCompare(String(b.class_name + b.subject + b.course_type))
+    );
+
+    const totalAttended = subjects.reduce((sum, s) => sum + s.attended, 0);
+    const totalHeld = subjects.reduce((sum, s) => sum + s.held, 0);
+
+    res.json({
+      roll_no: cleanRoll,
+      name: student ? student.name : "",
+      class_name: student ? student.class_name || "" : "",
+      major_subject: student ? student.major_subject || "" : "",
+      system,
+      window_days: days,
+      from_date: dates[0],
+      to_date: dates[dates.length - 1],
+      total_attended: totalAttended,
+      total_held: totalHeld,
+      overall_pct: totalHeld ? Number(((totalAttended / totalHeld) * 100).toFixed(1)) : 0,
+      subjects,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong loading your attendance." });
   }
 });
 
@@ -1077,21 +1379,20 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       return res.status(400).json({ error: "Incorrect code." });
     }
 
-    // 1b. Location validation with spoofing detection
+    // 1b. Location.
+    //   (a) A location came through and is outside the radius → ALWAYS reject.
+    //   (b) A location came through and is inside → fine.
+    //   (c) NO location came through (denied / timed out / Safari quirk) and
+    //       the teacher has location check ON → ask the student to retry. Once
+    //       the same device has failed MAX_LOCATION_ATTEMPTS times today, the
+    //       next submission is accepted silently, with the normal success
+    //       message (nothing tells the student location wasn't used).
+    //   (d) NO location and the teacher turned location check OFF → accept.
     const hasLocation =
       typeof lat === "number" && typeof lng === "number" &&
       Number.isFinite(lat) && Number.isFinite(lng) &&
       Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
     if (hasLocation) {
-      // Location spoofing detection: Check for suspiciously perfect accuracy
-      // Real GPS typically gives 10-50m accuracy, fake tools often give < 5m
-      const accuracy = req.body.accuracy;
-      if (accuracy !== undefined && accuracy < 5) {
-        return res.status(403).json({
-          error: "Location verification failed. Please ensure location services are working properly and try again.",
-        });
-      }
-      
       const dist = distanceInMeters(CLASSROOM.lat, CLASSROOM.lng, lat, lng);
       if (dist > RADIUS_METERS) {
         return res.status(403).json({
@@ -1237,11 +1538,40 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
     res.status(500).json({ error: "Something went wrong. Try again." });
   }
 });
+// ---------- CRON / MONITORING ----------
+// Shared guard for the two cron endpoints below. If CRON_SECRET is not set the
+// endpoints behave exactly as before (open), so an existing cron-job.org setup
+// keeps working until the secret is configured.
+function requireCronAuth(req, res, next) {
+  if (!CRON_SECRET) return next();
+  const provided = req.headers["x-cron-secret"] || req.query.secret;
+  if (provided !== CRON_SECRET) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+  next();
+}
+
+// Lightweight health/keep-alive endpoint. A free Render instance sleeps after
+// ~15 minutes idle, so pinging this every 10 minutes from a cron keeps the
+// server (and the code-generating teacher) responsive — and unlike the cron
+// endpoints above it can never send an email.
+app.get("/api/health", (req, res) => {
+  const STATES = ["disconnected", "connected", "connecting", "disconnecting"];
+  res.json({
+    ok: mongoose.connection.readyState === 1,
+    db: STATES[mongoose.connection.readyState] || "unknown",
+    ist_date: todayDateString(),
+    server_time: new Date().toISOString(),
+    uptime_seconds: Math.round(process.uptime()),
+    emails_configured: Boolean(resend && TEACHER_EMAIL),
+  });
+});
+
 // Checks for any session whose 20-minute PDF window has passed but the PDF
 // hasn't been sent yet, and sends it. Meant to be called every few minutes by
 // an external cron service (like cron-job.org) — unlike setTimeout, this
 // survives the server spinning down and restarting before the timer fires.
-app.get("/api/check-and-send-pdfs", async (req, res) => {
+app.get("/api/check-and-send-pdfs", requireCronAuth, async (req, res) => {
   try {
     const now = Date.now();
     const dueSessions = await ActiveCode.find({
@@ -1275,7 +1605,7 @@ app.get("/api/check-and-send-pdfs", async (req, res) => {
 // class/subject/course-type combo's report for the PREVIOUS month and emails
 // them all as one combined message. Safe to call every day — MonthlyReportLog
 // makes it a no-op once that month's report has already gone out.
-app.get("/api/check-and-send-monthly-report", async (req, res) => {
+app.get("/api/check-and-send-monthly-report", requireCronAuth, async (req, res) => {
   try {
     const result = await sendMonthlyCombinedReport();
     res.json(result);
@@ -1288,179 +1618,6 @@ app.get("/api/check-and-send-monthly-report", async (req, res) => {
 });
 // ---------- START SERVER ----------
 const PORT = process.env.PORT || 3000;
-// ========== NEW ANALYTICS API ==========
-
-// Get attendance analytics for a student
-app.get("/api/student/analytics", async (req, res) => {
-  try {
-    const { roll_no } = req.query;
-    if (!roll_no) {
-      return res.status(400).json({ error: "roll_no is required" });
-    }
-
-    const today = todayDateString();
-    const last30Days = lastNDates(30);
-    const last7Days = lastNDates(7);
-
-    // Get all attendance records for this student
-    const allRecords = await Attendance.find({ roll_no: roll_no.trim() }).lean();
-    
-    // Last 30 days
-    const last30Records = allRecords.filter(r => last30Days.includes(r.date));
-    
-    // Last 7 days
-    const last7Records = allRecords.filter(r => last7Days.includes(r.date));
-    
-    // By subject
-    const bySubject = {};
-    allRecords.forEach(r => {
-      if (!bySubject[r.subject]) {
-        bySubject[r.subject] = { total: 0, dates: [] };
-      }
-      bySubject[r.subject].total++;
-      bySubject[r.subject].dates.push(r.date);
-    });
-
-    // Calculate percentages (assuming 30 working days per month)
-    const last30Percentage = ((last30Records.length / 30) * 100).toFixed(1);
-    const last7Percentage = ((last7Records.length / 7) * 100).toFixed(1);
-
-    res.json({
-      roll_no,
-      total_attendance: allRecords.length,
-      last_30_days: {
-        count: last30Records.length,
-        percentage: last30Percentage,
-        dates: last30Records.map(r => r.date)
-      },
-      last_7_days: {
-        count: last7Records.length,
-        percentage: last7Percentage,
-        dates: last7Records.map(r => r.date)
-      },
-      by_subject: bySubject,
-      recent_records: allRecords.slice(-10).reverse()
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Something went wrong fetching analytics." });
-  }
-});
-
-// Get class-wide analytics (for teacher)
-app.get("/api/teacher/analytics", requireTeacherAuth, async (req, res) => {
-  try {
-    const { class_name, subject, course_type, system } = req.query;
-    if (!class_name || !subject || !course_type) {
-      return res.status(400).json({ error: "class_name, subject and course_type are required" });
-    }
-
-    const sys = normalizeSystem(system);
-    if (!sys) {
-      return res.status(400).json({ error: "system must be Annual or Semester" });
-    }
-
-    const last30Days = lastNDates(30);
-    
-    const records = await Attendance.find({
-      class_name,
-      subject,
-      course_type,
-      system: systemMatch(sys),
-      date: { $in: last30Days }
-    }).lean();
-
-    // Group by date
-    const byDate = {};
-    last30Days.forEach(d => { byDate[d] = 0; });
-    records.forEach(r => {
-      if (byDate[r.date] !== undefined) byDate[r.date]++;
-    });
-
-    // Group by student
-    const byStudent = {};
-    records.forEach(r => {
-      if (!byStudent[r.roll_no]) {
-        byStudent[r.roll_no] = {
-          roll_no: r.roll_no,
-          name: r.student_name,
-          count: 0,
-          dates: []
-        };
-      }
-      byStudent[r.roll_no].count++;
-      byStudent[r.roll_no].dates.push(r.date);
-    });
-
-    // Calculate class average
-    const totalStudents = Object.keys(byStudent).length;
-    const totalAttendance = records.length;
-    const classAverage = totalStudents > 0 
-      ? ((totalAttendance / (totalStudents * 30)) * 100).toFixed(1)
-      : "0.0";
-
-    // Low attendance students (< 75%)
-    const lowAttendance = Object.values(byStudent)
-      .filter(s => (s.count / 30) * 100 < 75)
-      .sort((a, b) => a.count - b.count);
-
-    // Top performers (> 90%)
-    const topPerformers = Object.values(byStudent)
-      .filter(s => (s.count / 30) * 100 > 90)
-      .sort((a, b) => b.count - a.count);
-
-    res.json({
-      class_name,
-      subject,
-      course_type,
-      system: sys,
-      period: "Last 30 days",
-      total_students: totalStudents,
-      total_attendance: totalAttendance,
-      class_average: classAverage + "%",
-      by_date: byDate,
-      by_student: Object.values(byStudent),
-      low_attendance: lowAttendance,
-      top_performers: topPerformers
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Something went wrong fetching analytics." });
-  }
-});
-
-// Offline queue status check
-app.get("/api/student/queue-status", async (req, res) => {
-  try {
-    const { device_id } = req.query;
-    if (!device_id) {
-      return res.json({ queued: 0, message: "No device ID provided" });
-    }
-
-    // Check if there are any pending submissions for this device
-    // (This is a placeholder - actual queue is client-side in localStorage)
-    res.json({
-      queued: 0,
-      message: "Queue is managed on device. Check browser localStorage.",
-      server_time: Date.now(),
-      server_date: todayDateString()
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Something went wrong." });
-  }
-});
-
-// Health check endpoint
-app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-    server_time: Date.now(),
-    server_date: todayDateString(),
-    mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
-    version: "2.0.0"
-  });
-});
 app.listen(PORT, () => {
   console.log(`Attendance server running at http://localhost:${PORT}`);
   console.log(`Teacher page: http://localhost:${PORT}/teacher.html`);
