@@ -45,9 +45,15 @@
 
   <!-- Masthead -->
   <div class="mb-6">
-    <div class="text-xs tracking-wide text-gold/80 font-medium mb-1">Student Portal</div>
-    <h1 class="font-serif text-2xl font-semibold text-ink">Mark Attendance</h1>
-    <p class="text-sm text-muted mt-1">Fill in your details below to record today's attendance.</p>
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <div class="text-xs tracking-wide text-gold/80 font-medium mb-1">Student Portal</div>
+        <h1 class="font-serif text-2xl font-semibold text-ink">Mark Attendance</h1>
+        <p class="text-sm text-muted mt-1">Fill in your details below to record today's attendance.</p>
+      </div>
+      <button type="button" onclick="openMyAnalytics()" class="shrink-0 text-xs font-medium text-gold border border-gold/50 rounded-lg px-3 py-2 hover:bg-gold/10 transition">📊 My Attendance</button>
+    </div>
+    <div id="offlineQueueBanner" class="hidden mt-3 text-xs bg-surface2 border border-gold/40 text-gold rounded-lg px-3.5 py-2.5"></div>
   </div>
 
   <!-- Form card -->
@@ -147,6 +153,20 @@
 
   <!-- Success/Error message -->
   <div id="message" class="hidden mt-4"></div>
+</div>
+
+<!-- My Attendance analytics modal -->
+<div id="analyticsModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl max-h-[85vh] overflow-y-auto">
+    <h2 class="font-serif text-lg font-semibold text-ink mb-1">My Attendance</h2>
+    <div class="flex gap-2 mb-4">
+      <input id="analyticsRollNo" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Enter your roll number"
+        class="flex-1 bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      <button onclick="fetchMyAnalytics()" class="bg-gold text-[#171208] font-semibold rounded-lg px-4 py-2.5 hover:bg-gold/90 transition">View</button>
+    </div>
+    <div id="analyticsBody" class="text-sm"></div>
+    <button onclick="closeMyAnalytics()" class="w-full mt-4 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Close</button>
+  </div>
 </div>
 
 <!-- Confirm submission modal -->
@@ -419,6 +439,110 @@ async function captureLocation() {
   );
 }
 
+// ---- My Attendance (student-facing analytics) ----
+function openMyAnalytics() {
+  const rollField = document.getElementById('analyticsRollNo');
+  const currentRoll = document.getElementById('rollNo').value.trim();
+  if (currentRoll) rollField.value = currentRoll;
+  document.getElementById('analyticsBody').innerHTML = '';
+  document.getElementById('analyticsModal').classList.remove('hidden');
+  if (currentRoll) fetchMyAnalytics();
+}
+function closeMyAnalytics() {
+  document.getElementById('analyticsModal').classList.add('hidden');
+}
+async function fetchMyAnalytics() {
+  const rollNo = document.getElementById('analyticsRollNo').value.trim();
+  const bodyEl = document.getElementById('analyticsBody');
+  if (!rollNo || !/^[0-9]+$/.test(rollNo)) {
+    bodyEl.innerHTML = `<p class="text-err">Please enter a valid roll number.</p>`;
+    return;
+  }
+  bodyEl.innerHTML = `<p class="text-muted">Loading...</p>`;
+  try {
+    const res = await fetch('/api/student/analytics?roll_no=' + encodeURIComponent(rollNo));
+    const data = await res.json();
+    if (!res.ok) {
+      bodyEl.innerHTML = `<p class="text-err">${esc(data.error || 'Could not load attendance.')}</p>`;
+      return;
+    }
+    if (data.total_attendance === 0) {
+      bodyEl.innerHTML = `<p class="text-muted">No attendance records found yet for this roll number.</p>`;
+      return;
+    }
+    const subjectRows = Object.entries(data.by_subject).map(([subj, info]) => `
+      <div class="flex justify-between py-1"><span class="text-muted">${esc(subj)}</span><span class="text-ink font-medium">${info.total} classes</span></div>
+    `).join('');
+    const recentRows = data.recent_records.map(r => `
+      <div class="flex justify-between py-1 text-xs"><span class="text-muted">${esc(r.date)} — ${esc(r.subject)} (${esc(r.course_type)})</span></div>
+    `).join('');
+    bodyEl.innerHTML = `
+      <div class="grid grid-cols-2 gap-3 mb-4">
+        <div class="bg-surface2 border border-line rounded-lg p-3 text-center">
+          <div class="text-2xl font-semibold text-gold">${esc(data.last_30_days.percentage)}%</div>
+          <div class="text-xs text-muted">Last 30 days</div>
+        </div>
+        <div class="bg-surface2 border border-line rounded-lg p-3 text-center">
+          <div class="text-2xl font-semibold text-ink">${esc(data.last_7_days.percentage)}%</div>
+          <div class="text-xs text-muted">Last 7 days</div>
+        </div>
+      </div>
+      <h3 class="text-sm font-medium text-ink mb-1">By Subject</h3>
+      <div class="mb-4">${subjectRows}</div>
+      <h3 class="text-sm font-medium text-ink mb-1">Recent</h3>
+      <div>${recentRows}</div>
+    `;
+  } catch (err) {
+    bodyEl.innerHTML = `<p class="text-err">Network error. Please try again.</p>`;
+  }
+}
+
+// ---- Offline queue: if a submission fails because there's no internet, ----
+// save it on this device and auto-retry once the connection comes back.
+const QUEUE_KEY = 'attendance_offline_queue';
+function getQueue() {
+  try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch (e) { return []; }
+}
+function setQueue(q) {
+  localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
+  renderQueueBanner();
+}
+function renderQueueBanner() {
+  const q = getQueue();
+  const el = document.getElementById('offlineQueueBanner');
+  if (q.length === 0) {
+    el.classList.add('hidden');
+    return;
+  }
+  el.classList.remove('hidden');
+  el.innerHTML = `⏳ ${q.length} attendance submission(s) saved on this device, waiting for internet. <button onclick="flushQueue()" class="underline font-medium">Retry now</button>`;
+}
+async function flushQueue() {
+  let q = getQueue();
+  if (q.length === 0) return;
+  const remaining = [];
+  for (const item of q) {
+    try {
+      const res = await fetch('/api/student/mark-attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item.payload)
+      });
+      await res.json().catch(() => ({}));
+      // Whether the server accepted it or rejected it (e.g. expired code,
+      // already marked), there's no point holding it forever — drop it
+      // either way and only keep genuine network failures below.
+    } catch (err) {
+      remaining.push(item); // still offline — keep it for the next retry
+    }
+  }
+  setQueue(remaining);
+}
+window.addEventListener('online', flushQueue);
+window.addEventListener('DOMContentLoaded', () => { renderQueueBanner(); flushQueue(); });
+setInterval(flushQueue, 30000);
+
+
 // Student name is typed by the student — escape before putting in HTML.
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -543,34 +667,20 @@ async function confirmSubmit() {
     
     if (response.ok && data.success) {
       showMessage('✅ Attendance marked successfully!', 'success');
-      
-      // Reset form after 2 seconds
-      setTimeout(() => {
-        document.getElementById('code').value = '';
-        document.getElementById('rollNo').value = '';
-        document.getElementById('studentName').value = '';
-        document.getElementById('studentName').readOnly = false;
-        document.getElementById('className').value = '';
-        document.getElementById('className').disabled = false;
-        document.getElementById('subject').value = '';
-        document.getElementById('courseType').value = '';
-        document.getElementById('majorSubject').value = '';
-        document.getElementById('majorSubject').disabled = false;
-        document.getElementById('rollNoLookupStatus').classList.add('hidden');
-        document.querySelector('input[name="system"]:checked').checked = false;
-        document.getElementById('systemSection').style.display = 'none';
-        document.getElementById('mainFormSection').style.display = 'none';
-        messageEl.classList.add('hidden');
-        capturedCoords = null;
-        locationAttempts = 0;
-        document.getElementById('locStatus').innerHTML = '📍 Location: not fetched yet';
-      }, 2000);
+      setTimeout(() => resetStudentForm(messageEl), 2000);
     } else {
       showMessage(data.error || 'Failed to mark attendance. Please try again.', 'error');
     }
   } catch (error) {
+    // A thrown fetch error here means the request never reached the
+    // server (genuinely offline) — save it locally and auto-retry later,
+    // rather than making the student lose what they filled in.
+    const q = getQueue();
+    q.push({ payload: pendingSubmitPayload, savedAt: Date.now() });
+    setQueue(q);
     closeSubmitConfirm();
-    showMessage('Network error. Please check your connection and try again.', 'error');
+    showMessage('📴 No internet connection. Saved on this device — it will submit automatically once you\'re back online.', 'error');
+    setTimeout(() => resetStudentForm(messageEl), 2000);
   } finally {
     submitBtn.disabled = false;
     submitBtn.textContent = 'Mark Attendance';
@@ -578,6 +688,27 @@ async function confirmSubmit() {
     confirmBtn.textContent = 'Yes, Submit';
     pendingSubmitPayload = null;
   }
+}
+
+function resetStudentForm(messageEl) {
+  document.getElementById('code').value = '';
+  document.getElementById('rollNo').value = '';
+  document.getElementById('studentName').value = '';
+  document.getElementById('studentName').readOnly = false;
+  document.getElementById('className').value = '';
+  document.getElementById('className').disabled = false;
+  document.getElementById('subject').value = '';
+  document.getElementById('courseType').value = '';
+  document.getElementById('majorSubject').value = '';
+  document.getElementById('majorSubject').disabled = false;
+  document.getElementById('rollNoLookupStatus').classList.add('hidden');
+  document.querySelector('input[name="system"]:checked').checked = false;
+  document.getElementById('systemSection').style.display = 'none';
+  document.getElementById('mainFormSection').style.display = 'none';
+  messageEl.classList.add('hidden');
+  capturedCoords = null;
+  locationAttempts = 0;
+  document.getElementById('locStatus').innerHTML = '📍 Location: not fetched yet';
 }
 
 function showMessage(text, type) {

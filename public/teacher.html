@@ -150,6 +150,20 @@
     <div id="reportMsg"></div>
   </div>
 
+  <!-- Class analytics card -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
+    <label class="block text-sm font-medium text-ink">Class Analytics <span class="block text-xs font-normal text-muted mt-0.5">Class average, low-attendance and top-performing students — last 30 days, for the class/subject/course-type/system selected above</span></label>
+    <button id="analyticsBtn" class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="loadTeacherAnalytics()">Load Analytics</button>
+    <div id="analyticsResult" class="hidden space-y-4"></div>
+  </div>
+
+  <!-- Manual attendance / absentees card -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
+    <label class="block text-sm font-medium text-ink">Manual Attendance <span class="block text-xs font-normal text-muted mt-0.5">Roster students (by Class) who haven't self-marked yet, for the subject/course-type/system selected above — mark them present directly if their phone/GPS isn't working</span></label>
+    <button id="rosterStatusBtn" class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="loadRosterStatus()">Load List</button>
+    <div id="rosterStatusResult" class="hidden"></div>
+  </div>
+
 
   <!-- Attendance list card -->
   <div class="bg-surface border border-line rounded-xl p-5 shadow-lg shadow-black/20">
@@ -173,6 +187,7 @@
             <th class="py-2 pr-2 font-medium">Major Subject</th>
             <th class="py-2 pr-2 font-medium">Type</th>
             <th class="py-2 pr-2 font-medium">Marked At</th>
+            <th class="py-2 pr-2 font-medium">Remarks</th>
             <th class="py-2 pr-0 font-medium text-right">Actions</th>
           </tr>
         </thead>
@@ -219,6 +234,11 @@
       <div>
         <label class="block text-xs font-medium text-muted mb-1">Subject</label>
         <input id="editSubject" type="text"
+          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-muted mb-1">Remarks <span class="font-normal">(optional — e.g. "10 min late")</span></label>
+        <input id="editRemarks" type="text"
           class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
       </div>
     </div>
@@ -596,6 +616,7 @@ function renderTable() {
       <td class="py-2.5 pr-2 text-ink">${esc(r.major_subject) || '-'}</td>
       <td class="py-2.5 pr-2 text-muted">${esc(r.course_type) || '-'}</td>
       <td class="py-2.5 pr-2 text-muted whitespace-nowrap">${formatTime(r.marked_at)}</td>
+      <td class="py-2.5 pr-2 text-muted">${esc(r.remarks) || '-'}</td>
       <td class="py-2.5 pr-0 text-right whitespace-nowrap">
         <button class="text-xs font-medium text-gold hover:text-gold/80 transition mr-3" onclick="openEditModal('${recordId}')">Edit</button>
         <button class="text-xs font-medium text-err hover:text-err/80 transition" onclick="openDeleteModal('${recordId}')">Delete</button>
@@ -616,6 +637,7 @@ function openEditModal(recordId) {
   document.getElementById('editRollNo').value = r.roll_no || '';
   document.getElementById('editName').value = r.student_name || '';
   document.getElementById('editSubject').value = r.subject || '';
+  document.getElementById('editRemarks').value = r.remarks || '';
   document.getElementById('editModalErr').classList.add('hidden');
   document.getElementById('editModal').classList.remove('hidden');
 }
@@ -628,6 +650,7 @@ async function saveEdit() {
   const roll_no = document.getElementById('editRollNo').value.trim();
   const student_name = document.getElementById('editName').value.trim();
   const subject = document.getElementById('editSubject').value.trim();
+  const remarks = document.getElementById('editRemarks').value.trim();
 
   if (!/^[0-9]+$/.test(roll_no)) {
     errEl.textContent = 'Roll number must contain digits only.';
@@ -639,7 +662,7 @@ async function saveEdit() {
     const res = await teacherFetch('/api/teacher/attendance/update', {
       method: 'PATCH',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ record_id: editingRecordId, roll_no, student_name, subject })
+      body: JSON.stringify({ record_id: editingRecordId, roll_no, student_name, subject, remarks })
     });
     const data = await res.json();
     if (!data.success) {
@@ -728,6 +751,159 @@ function updateReportLabel() {
     s === 'Annual' ? 'Download Monthly Report (30 days)'
     : s === 'Semester' ? 'Download Monthly Report (30 days)'
     : 'Download Report';
+}
+
+async function loadTeacherAnalytics() {
+  const class_name = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subjectSelect').value.trim();
+  const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const system = document.getElementById('systemSelect').value.trim();
+  const btn = document.getElementById('analyticsBtn');
+  const resultEl = document.getElementById('analyticsResult');
+
+  if (!class_name || !subject || !course_type || !system) {
+    resultEl.classList.remove('hidden');
+    resultEl.innerHTML = `<p class="text-sm text-err">Please select System, Class, Subject and Course Type above first.</p>`;
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  try {
+    const params = new URLSearchParams({ class_name, subject, course_type, system });
+    const res = await teacherFetch('/api/teacher/analytics?' + params.toString());
+    const data = await res.json();
+
+    if (!res.ok) {
+      resultEl.classList.remove('hidden');
+      resultEl.innerHTML = `<p class="text-sm text-err">${esc(data.error || 'Failed to load analytics.')}</p>`;
+      return;
+    }
+
+    resultEl.classList.remove('hidden');
+
+    const lowRows = data.low_attendance.map(s => `
+      <tr class="border-b border-line/60"><td class="py-1.5 pr-2">${esc(s.name || '-')}</td><td class="py-1.5 pr-2">${esc(s.roll_no)}</td><td class="py-1.5 text-right text-err">${((s.count / 30) * 100).toFixed(1)}%</td></tr>
+    `).join('') || `<tr><td colspan="3" class="py-2 text-muted text-center">None 🎉</td></tr>`;
+
+    const topRows = data.top_performers.map(s => `
+      <tr class="border-b border-line/60"><td class="py-1.5 pr-2">${esc(s.name || '-')}</td><td class="py-1.5 pr-2">${esc(s.roll_no)}</td><td class="py-1.5 text-right text-ok">${((s.count / 30) * 100).toFixed(1)}%</td></tr>
+    `).join('') || `<tr><td colspan="3" class="py-2 text-muted text-center">None yet</td></tr>`;
+
+    resultEl.innerHTML = `
+      <div class="grid grid-cols-2 gap-3">
+        <div class="bg-surface2 border border-line rounded-lg p-3 text-center">
+          <div class="text-2xl font-semibold text-ink">${data.total_students}</div>
+          <div class="text-xs text-muted">Students</div>
+        </div>
+        <div class="bg-surface2 border border-line rounded-lg p-3 text-center">
+          <div class="text-2xl font-semibold text-gold">${esc(data.class_average)}</div>
+          <div class="text-xs text-muted">Class Average (30d)</div>
+        </div>
+      </div>
+      <div>
+        <h3 class="text-sm font-medium text-err mb-1.5">⚠️ Low Attendance (&lt;75%)</h3>
+        <table class="w-full text-sm"><tbody>${lowRows}</tbody></table>
+      </div>
+      <div>
+        <h3 class="text-sm font-medium text-ok mb-1.5">⭐ Top Performers (&gt;90%)</h3>
+        <table class="w-full text-sm"><tbody>${topRows}</tbody></table>
+      </div>
+    `;
+  } catch (err) {
+    resultEl.classList.remove('hidden');
+    resultEl.innerHTML = `<p class="text-sm text-err">Network error loading analytics.</p>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Load Analytics';
+  }
+}
+
+async function loadRosterStatus() {
+  const class_name = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subjectSelect').value.trim();
+  const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const system = document.getElementById('systemSelect').value.trim();
+  const btn = document.getElementById('rosterStatusBtn');
+  const resultEl = document.getElementById('rosterStatusResult');
+
+  if (!class_name || !subject || !course_type || !system) {
+    resultEl.classList.remove('hidden');
+    resultEl.innerHTML = `<p class="text-sm text-err">Please select System, Class, Subject and Course Type above first.</p>`;
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  try {
+    const params = new URLSearchParams({ class_name, subject, course_type, system });
+    const res = await teacherFetch('/api/teacher/roster-status?' + params.toString());
+    const data = await res.json();
+
+    if (!res.ok) {
+      resultEl.classList.remove('hidden');
+      resultEl.innerHTML = `<p class="text-sm text-err">${esc(data.error || 'Failed to load list.')}</p>`;
+      return;
+    }
+
+    resultEl.classList.remove('hidden');
+    if (data.roster_count === 0) {
+      resultEl.innerHTML = `<p class="text-sm text-muted">No roster uploaded for class "${esc(class_name)}" yet. Upload one in "Upload Student List" above to use this.</p>`;
+      return;
+    }
+    if (data.absent.length === 0) {
+      resultEl.innerHTML = `<p class="text-sm text-ok">✅ Everyone on the roster for this class has already been marked (${data.marked_count}/${data.roster_count}).</p>`;
+      return;
+    }
+
+    const rows = data.absent.map(s => `
+      <div class="flex items-center justify-between py-2 border-b border-line/60" data-roll="${esc(s.roll_no)}">
+        <div><div class="text-sm text-ink font-medium">${esc(s.name) || '(no name on roster)'}</div><div class="text-xs text-muted">Roll ${esc(s.roll_no)}</div></div>
+        <button class="text-xs bg-gold text-[#171208] font-semibold rounded-lg px-3 py-1.5 hover:bg-gold/90 transition shrink-0" onclick="markPresentManually('${esc(s.roll_no)}', this)">Mark Present</button>
+      </div>
+    `).join('');
+    resultEl.innerHTML = `
+      <p class="text-xs text-muted mb-2">${data.marked_count} marked · ${data.absent.length} not yet marked (roster: ${data.roster_count})</p>
+      <div>${rows}</div>
+    `;
+  } catch (err) {
+    resultEl.classList.remove('hidden');
+    resultEl.innerHTML = `<p class="text-sm text-err">Network error loading list.</p>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Load List';
+  }
+}
+
+async function markPresentManually(rollNo, btnEl) {
+  const class_name = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subjectSelect').value.trim();
+  const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const system = document.getElementById('systemSelect').value.trim();
+
+  btnEl.disabled = true;
+  btnEl.textContent = '...';
+  try {
+    const res = await teacherFetch('/api/teacher/mark-manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ class_name, subject, course_type, system, roll_no: rollNo })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      const row = btnEl.closest('div[data-roll]');
+      if (row) row.remove();
+      loadAttendance(); // refresh the main attendance list too
+    } else {
+      alert(data.error || 'Failed to mark attendance.');
+      btnEl.disabled = false;
+      btnEl.textContent = 'Mark Present';
+    }
+  } catch (err) {
+    alert('Network error. Please try again.');
+    btnEl.disabled = false;
+    btnEl.textContent = 'Mark Present';
+  }
 }
 
 document.getElementById('requireLocation').addEventListener('change', saveSelection);
