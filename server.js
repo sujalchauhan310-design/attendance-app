@@ -167,6 +167,7 @@ const attendanceSchema = new mongoose.Schema({
   date: String,           // YYYY-MM-DD
   marked_at: Number,
   device_id: String,
+  remarks: { type: String, default: "" }, // optional note, e.g. "10 min late", or set automatically for manually-marked entries
   // Real Date object (separate from the display-only `date` string) used
   // purely to drive the 60-day auto-delete below.
   createdAtDate: { type: Date, default: Date.now },
@@ -838,7 +839,7 @@ app.get("/api/teacher/attendance", requireTeacherAuth, async (req, res) => {
 // instead of silently creating a clash.
 app.patch("/api/teacher/attendance/update", requireTeacherAuth, async (req, res) => {
   try {
-    const { record_id, roll_no, student_name, subject } = req.body;
+    const { record_id, roll_no, student_name, subject, remarks } = req.body;
     if (!record_id) {
       return res.status(400).json({ error: "record_id is required." });
     }
@@ -871,6 +872,7 @@ app.patch("/api/teacher/attendance/update", requireTeacherAuth, async (req, res)
     existing.roll_no = cleanRoll;
     if (student_name !== undefined) existing.student_name = student_name.trim();
     existing.subject = finalSubject;
+    if (remarks !== undefined) existing.remarks = String(remarks).trim();
     await existing.save();
 
     res.json({ success: true });
@@ -914,6 +916,105 @@ app.delete("/api/teacher/device-lock", requireTeacherAuth, async (req, res) => {
     res.status(500).json({ error: "Something went wrong unlocking the device." });
   }
 });
+
+// Compares the uploaded roster (filtered by class_name) against today's
+// attendance for the selected class+subject+course_type+system, so the
+// teacher can see who hasn't self-marked yet. Roster only stores class_name
+// (not subject/course-type), so a student on a different elective under the
+// same class_name may still show up here — this is a best-effort list, not
+// a guaranteed roll call.
+app.get("/api/teacher/roster-status", requireTeacherAuth, async (req, res) => {
+  try {
+    const { class_name, subject, course_type, system } = req.query;
+    if (!class_name || !subject || !course_type) {
+      return res.status(400).json({ error: "class_name, subject and course_type are required." });
+    }
+    const sys = normalizeSystem(system);
+    if (!sys) {
+      return res.status(400).json({ error: "system must be either Annual or Semester" });
+    }
+
+    const rosterStudents = await Student.find({ class_name }).lean();
+    const date = todayDateString();
+    const markedRecords = await Attendance.find({
+      class_name,
+      subject,
+      course_type,
+      system: systemMatch(sys),
+      date,
+    }).lean();
+    const markedRollNos = new Set(markedRecords.map((r) => r.roll_no));
+
+    const absent = rosterStudents
+      .filter((s) => !markedRollNos.has(s.roll_no))
+      .map((s) => ({ roll_no: s.roll_no, name: s.name }));
+    absent.sort((a, b) => {
+      const numA = parseFloat(a.roll_no);
+      const numB = parseFloat(b.roll_no);
+      if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+      return String(a.roll_no).localeCompare(String(b.roll_no));
+    });
+
+    res.json({
+      roster_count: rosterStudents.length,
+      marked_count: markedRecords.length,
+      absent,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong loading the roster status." });
+  }
+});
+
+// Lets the teacher mark a roster student present directly (no code, no
+// device, no location needed) — e.g. their phone is dead or GPS won't work.
+app.post("/api/teacher/mark-manual", requireTeacherAuth, async (req, res) => {
+  try {
+    const { class_name, subject, course_type, roll_no } = req.body;
+    if (!class_name || !subject || !course_type || !roll_no) {
+      return res.status(400).json({ error: "class_name, subject, course_type and roll_no are required." });
+    }
+    const sys = normalizeSystem(req.body.system);
+    if (!sys) {
+      return res.status(400).json({ error: "system must be either Annual or Semester" });
+    }
+    const cleanRoll = String(roll_no).trim();
+    if (!/^[0-9]+$/.test(cleanRoll)) {
+      return res.status(400).json({ error: "Roll number must contain digits only." });
+    }
+
+    const student = await Student.findOne({ roll_no: cleanRoll }).lean();
+    const now = Date.now();
+
+    try {
+      await Attendance.create({
+        roll_no: cleanRoll,
+        student_name: student ? student.name : "",
+        subject,
+        course_type,
+        system: sys,
+        major_subject: student ? student.major_subject || "" : "",
+        class_name,
+        session_id: "manual",
+        date: todayDateString(),
+        marked_at: now,
+        device_id: "teacher-manual",
+        remarks: "Marked manually by teacher",
+      });
+    } catch (createErr) {
+      if (createErr.code === 11000) {
+        return res.status(409).json({ error: "This student already has attendance marked for this class today." });
+      }
+      throw createErr;
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong marking attendance." });
+  }
+});
+
 
 // Manual download: overall attendance % PDF for one class + subject + course
 // type + system combination. The window is 30 days for both Annual and Semester.
