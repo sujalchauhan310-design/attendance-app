@@ -45,32 +45,49 @@
 
   <!-- Masthead -->
   <div class="mb-6">
-    <div class="flex items-start justify-between gap-3">
-      <div>
-        <div class="text-xs tracking-wide text-gold/80 font-medium mb-1">Student Portal</div>
-        <h1 class="font-serif text-2xl font-semibold text-ink">Mark Attendance</h1>
-        <p class="text-sm text-muted mt-1">Fill in your details below to record today's attendance.</p>
-      </div>
-      <button type="button" onclick="openMyAnalytics()" class="shrink-0 text-xs font-medium text-gold border border-gold/50 rounded-lg px-3 py-2 hover:bg-gold/10 transition">📊 My Attendance</button>
-    </div>
-    <div id="offlineQueueBanner" class="hidden mt-3 text-xs bg-surface2 border border-gold/40 text-gold rounded-lg px-3.5 py-2.5"></div>
+    <div class="text-xs tracking-wide text-gold/80 font-medium mb-1">Student Portal</div>
+    <h1 class="font-serif text-2xl font-semibold text-ink">Mark Attendance</h1>
+    <p class="text-sm text-muted mt-1">Fill in your details below to record today's attendance.</p>
   </div>
 
   <!-- Form card -->
   <div class="bg-surface border border-line rounded-xl p-5 space-y-4 shadow-lg shadow-black/20">
 
-    <!-- Step 1: Code (Always visible) -->
     <div class="bg-gold/10 border-2 border-gold rounded-lg p-3.5">
-      <label class="block text-base font-semibold text-gold mb-1.5">Step 1: Code from teacher</label>
+      <label class="block text-base font-semibold text-gold mb-1.5">Code from teacher</label>
       <input id="code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="off"
         placeholder="5-digit code"
         class="w-full bg-surface2 border-2 border-gold/60 rounded-lg px-4 py-3.5 text-2xl font-bold text-center text-gold placeholder-muted/60 tracking-[0.3em] focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold transition" />
       <p id="codeErr" class="hidden text-xs text-err mt-1">Code can only contain digits (0–9).</p>
     </div>
 
-    <!-- Step 2: System Selection (Shows after code) -->
-    <div id="systemSection" style="display:none;">
-      <label class="block text-sm font-medium text-ink mb-1.5">Step 2: System <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Roll Number</label>
+      <input id="rollNo" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+        placeholder="e.g. 45678"
+        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      <p id="rollNoErr" class="hidden text-xs text-err mt-1">Roll number can only contain digits (0–9).</p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Your Name</label>
+      <input id="studentName" type="text" placeholder="e.g. Priya Sharma"
+        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Class</label>
+      <select id="className" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select your class</option>
+        <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
+        <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
+        <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
+        <option>MA 1st</option><option>MA 2nd</option>
+      </select>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">System <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
       <div class="grid grid-cols-2 gap-2" id="systemGroup">
         <label class="cursor-pointer">
           <input type="radio" name="system" value="Annual" class="peer sr-only">
@@ -83,646 +100,558 @@
       </div>
     </div>
 
-    <!-- Step 3: Rest of the form (Shows after system selection) -->
-    <div id="mainFormSection" style="display:none;">
-      <div class="text-xs text-gold/60 mb-3 font-medium">Step 3: Your Details</div>
-
-      <div>
-        <label class="block text-sm font-medium text-ink mb-1.5">Roll Number</label>
-        <input id="rollNo" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
-          placeholder="e.g. 45678"
-          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
-        <p id="rollNoErr" class="hidden text-xs text-err mt-1">Roll number can only contain digits (0–9).</p>
-        <p id="rollNoLookupStatus" class="hidden text-xs text-gold mt-1"></p>
-      </div>
-
-      <div>
-        <label class="block text-sm font-medium text-ink mb-1.5">Your Name</label>
-        <input id="studentName" type="text" placeholder="e.g. Priya Sharma"
-          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
-      </div>
-
-      <div>
-        <label class="block text-sm font-medium text-ink mb-1.5">Course / Year <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
-        <select id="className" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-          <option value="">Select System first</option>
-        </select>
-      </div>
-
-      <div>
-        <label class="block text-sm font-medium text-ink mb-1.5">Subject <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
-        <select id="subject" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-          <option value="">Select subject</option>
-          <option>Political Science</option><option>History</option><option>Public Administration</option>
-          <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
-          <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
-          <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
-          <option>Computer Science</option><option>Physical Education</option><option>Other</option>
-        </select>
-      </div>
-
-      <div>
-        <label class="block text-sm font-medium text-ink mb-1.5">Course Type <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
-        <select id="courseType" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-          <option value="">Select course type</option>
-        </select>
-      </div>
-
-      <div>
-        <label class="block text-sm font-medium text-ink mb-1.5">Major Subject <span class="text-xs font-normal text-muted">(optional)</span></label>
-        <select id="majorSubject" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-          <option value="">Select major subject</option>
-          <option>Political Science</option><option>History</option><option>Public Administration</option>
-          <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
-          <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
-          <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
-          <option>Computer Science</option><option>Physical Education</option><option>Other</option>
-        </select>
-      </div>
-
-      <!-- Location status -->
-      <div id="locBox" class="rounded-lg border border-line bg-surface2/60 px-3.5 py-3">
-        <div class="text-sm text-muted" id="locStatus">📍 Location: not fetched yet</div>
-        <button type="button" id="retryLocBtn" onclick="captureLocation()" style="display:none;"
-          class="mt-2 text-sm font-medium text-gold hover:text-gold/80 transition">🔄 Retry Location</button>
-      </div>
-
-      <button id="submitBtn" onclick="submitAttendance()" class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 transition disabled:opacity-50 disabled:cursor-not-allowed">Mark Attendance</button>
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Subject <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
+      <select id="subject" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select subject</option>
+        <option>Political Science</option><option>History</option><option>Public Administration</option>
+        <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
+        <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
+        <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
+        <option>Computer Science</option><option>Physical Education</option><option>Other</option>
+      </select>
     </div>
-  </div>
 
-  <!-- Success/Error message -->
-  <div id="message" class="hidden mt-4"></div>
-</div>
-
-<!-- My Attendance analytics modal -->
-<div id="analyticsModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl max-h-[85vh] overflow-y-auto">
-    <h2 class="font-serif text-lg font-semibold text-ink mb-1">My Attendance</h2>
-    <div class="flex gap-2 mb-4">
-      <input id="analyticsRollNo" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Enter your roll number"
-        class="flex-1 bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
-      <button onclick="fetchMyAnalytics()" class="bg-gold text-[#171208] font-semibold rounded-lg px-4 py-2.5 hover:bg-gold/90 transition">View</button>
-    </div>
-    <div id="analyticsBody" class="text-sm"></div>
-    <button onclick="closeMyAnalytics()" class="w-full mt-4 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Close</button>
-  </div>
-</div>
-
-<!-- Confirm submission modal -->
-<div id="submitModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
-    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Confirm your details</h2>
-    <p class="text-sm text-muted mb-4">Double-check before submitting — this cannot be edited afterwards.</p>
-    <div class="space-y-2 text-sm bg-surface2 border border-line rounded-lg p-3.5" id="submitSummary"></div>
-    <div class="flex gap-3 mt-5">
-      <button onclick="closeSubmitConfirm()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Edit</button>
-      <button id="confirmSubmitBtn" onclick="confirmSubmit()" class="flex-1 py-2.5 rounded-lg bg-gold text-[#171208] font-semibold hover:bg-gold/90 transition">Yes, Submit</button>
-    </div>
-  </div>
-</div>
-
-<script>
-let capturedCoords = null;
-let locationAttempts = 0;
-const MAX_LOCATION_RETRIES = 3;
-
-// Every device needs a stable, persistent device_id — the server uses this
-// to lock one device to one roll number and to rate-limit location retries.
-// Generated once and stored in localStorage so it survives reloads.
-function getDeviceId() {
-  let id = localStorage.getItem('device_id');
-  if (!id) {
-    id = (crypto.randomUUID ? crypto.randomUUID() : 'dev-' + Date.now() + '-' + Math.random().toString(36).slice(2));
-    localStorage.setItem('device_id', id);
-  }
-  return id;
-}
-const deviceId = getDeviceId();
-
-// Progressive form reveal: Code → System → Main form
-document.getElementById('code').addEventListener('input', function() {
-  const code = this.value.trim();
-  const systemSection = document.getElementById('systemSection');
-  
-  // Validate code is digits only
-  if (code && !/^[0-9]*$/.test(code)) {
-    document.getElementById('codeErr').classList.remove('hidden');
-    systemSection.style.display = 'none';
-    return;
-  } else {
-    document.getElementById('codeErr').classList.add('hidden');
-  }
-  
-  // Show system selection after 5 digits entered
-  if (code.length === 5) {
-    systemSection.style.display = 'block';
-  } else {
-    systemSection.style.display = 'none';
-    document.getElementById('mainFormSection').style.display = 'none';
-  }
-});
-
-// System selection reveals main form and updates course type options
-document.querySelectorAll('input[name="system"]').forEach(radio => {
-  radio.addEventListener('change', function() {
-    const system = this.value;
-    const mainFormSection = document.getElementById('mainFormSection');
-    const courseTypeSelect = document.getElementById('courseType');
-    const classNameSelect = document.getElementById('className');
-    
-    // Show main form
-    mainFormSection.style.display = 'block';
-    
-    // Update course type options based on system
-    courseTypeSelect.innerHTML = '<option value="">Select course type</option>';
-    
-    if (system === 'Annual') {
-      courseTypeSelect.innerHTML += `
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Course Type <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
+      <select id="courseType" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select course type</option>
         <option value="DSC">DSC — Discipline Specific Core</option>
         <option value="SEC">SEC — Skill Enhancement Course</option>
         <option value="GE">GE — Generic Elective</option>
         <option value="AEC">AEC — Ability Enhancement Course</option>
         <option value="VAC">VAC — Value Added Course</option>
         <option value="MDC">MDC — Multi-Disciplinary Course</option>
-      `;
-    } else if (system === 'Semester') {
-      courseTypeSelect.innerHTML += `
-        <option value="Core">Core</option>
-        <option value="Elective">Elective</option>
-        <option value="Foundation">Foundation</option>
-      `;
-    }
+      </select>
+    </div>
 
-    // Update Course/Year options based on system:
-    // Annual = old year-wise classes, Semester = NEP 4-year, 8-semester structure
-    const previousClassName = classNameSelect.value;
-    classNameSelect.innerHTML = '<option value="">Select your class</option>';
-    if (system === 'Annual') {
-      classNameSelect.innerHTML += `
-        <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
-        <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
-        <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
-        <option>MA 1st</option><option>MA 2nd</option>
-      `;
-    } else if (system === 'Semester') {
-      for (let s = 1; s <= 8; s++) {
-        classNameSelect.innerHTML += `<option>Semester ${s}</option>`;
-      }
-    }
-    // Keep the previous selection if it's still valid under the new list
-    if ([...classNameSelect.options].some(o => o.value === previousClassName)) {
-      classNameSelect.value = previousClassName;
-    }
-    
-    // Start capturing location when form is revealed
-    captureLocation();
-  });
-});
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Major Subject <span class="text-xs font-normal text-muted">(optional)</span></label>
+      <select id="majorSubject" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select major subject</option>
+        <option>Political Science</option><option>History</option><option>Public Administration</option>
+        <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
+        <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
+        <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
+        <option>Computer Science</option><option>Physical Education</option><option>Other</option>
+      </select>
+    </div>
 
-// Auto-fill + lock name / class / major subject when this roll number is
-// already known (from a roster upload or an earlier submission), matching
-// what the server treats as locked.
-let lookupTimeout = null;
-async function lookupRollNo(rollNo) {
-  const statusEl = document.getElementById('rollNoLookupStatus');
-  const nameInput = document.getElementById('studentName');
-  const classSelect = document.getElementById('className');
-  const majorSelect = document.getElementById('majorSubject');
+    <!-- Location status -->
+    <div id="locBox" class="rounded-lg border border-line bg-surface2/60 px-3.5 py-3">
+      <div class="text-sm text-muted" id="locStatus">📍 Location: not fetched yet</div>
+      <button type="button" id="retryLocBtn" onclick="fetchLocation()" style="display:none;"
+        class="mt-2 text-sm font-medium text-gold hover:text-gold/80 transition">🔄 Retry Location</button>
 
-  try {
-    const res = await fetch('/api/student/lookup-name?roll_no=' + encodeURIComponent(rollNo));
-    const data = await res.json();
-
-    if (data.name) {
-      nameInput.value = data.name;
-      nameInput.readOnly = true;
-      statusEl.textContent = `✅ Welcome back, ${data.name}! Name is locked from your earlier submission.`;
-      statusEl.classList.remove('hidden');
-
-      // Only lock the class/major-subject value if the current system's list
-      // (Annual vs Semester, chosen in Step 2) actually contains it.
-      if (data.class_name && [...classSelect.options].some(o => o.value === data.class_name)) {
-        classSelect.value = data.class_name;
-        classSelect.disabled = true;
-      }
-      if (data.major_subject && [...majorSelect.options].some(o => o.value === data.major_subject)) {
-        majorSelect.value = data.major_subject;
-        majorSelect.disabled = true;
-      }
-    } else {
-      statusEl.textContent = 'First time marking attendance — please fill in your details below.';
-      statusEl.classList.remove('hidden');
-    }
-  } catch (err) {
-    statusEl.classList.add('hidden');
-  }
-}
-
-// Roll number validation
-document.getElementById('rollNo').addEventListener('input', function() {
-  const rollNo = this.value.trim();
-  const errEl = document.getElementById('rollNoErr');
-  
-  if (rollNo && !/^[0-9]*$/.test(rollNo)) {
-    errEl.classList.remove('hidden');
-  } else {
-    errEl.classList.add('hidden');
-  }
-
-  // Reset any previous lock while the roll number is still being edited
-  clearTimeout(lookupTimeout);
-  document.getElementById('studentName').readOnly = false;
-  document.getElementById('className').disabled = false;
-  document.getElementById('majorSubject').disabled = false;
-  document.getElementById('rollNoLookupStatus').classList.add('hidden');
-
-  if (rollNo && /^[0-9]+$/.test(rollNo)) {
-    lookupTimeout = setTimeout(() => lookupRollNo(rollNo), 600);
-  }
-});
-
-// Capture location
-async function captureLocation() {
-  const statusEl = document.getElementById('locStatus');
-  const retryBtn = document.getElementById('retryLocBtn');
-  
-  if (!navigator.geolocation) {
-    statusEl.innerHTML = '⚠️ Location: not supported by your browser';
-    retryBtn.style.display = 'none';
-    return;
-  }
-
-  // Check the site's location permission up front — if it was denied
-  // earlier, getCurrentPosition would otherwise fail silently/instantly
-  // with no clear explanation, or on some browsers just hang.
-  if (navigator.permissions && navigator.permissions.query) {
-    try {
-      const status = await navigator.permissions.query({ name: 'geolocation' });
-      if (status.state === 'denied') {
-        statusEl.innerHTML = '<div class="text-err">⚠️ Location: blocked for this site. Tap the 🔒/ⓘ icon next to the address bar → Permissions → turn Location ON, then tap Retry.</div>';
-        retryBtn.style.display = 'block';
-        capturedCoords = null;
-        return;
-      }
-    } catch (permErr) {
-      // Permissions API unsupported/failed — fall through and just try getCurrentPosition normally.
-    }
-  }
-  
-  statusEl.innerHTML = '📍 Location: fetching...';
-  retryBtn.style.display = 'none';
-  locationAttempts++;
-
-  let settled = false;
-  // Safety net: some browsers occasionally never call either callback at
-  // all (a known bug on a few Android/Chrome combinations). Without this,
-  // the status would stay stuck on "fetching..." forever with no way to retry.
-  const safetyTimer = setTimeout(() => {
-    if (settled) return;
-    settled = true;
-    statusEl.innerHTML = '<div class="text-err">⚠️ Location: browser did not respond. Check that Location is ON for Chrome in your phone\'s Settings → Apps → Chrome → Permissions, then tap Retry.</div>';
-    retryBtn.style.display = 'block';
-    capturedCoords = null;
-  }, 12000);
-  
-  navigator.geolocation.getCurrentPosition(
-    (position) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(safetyTimer);
-      const coords = position.coords;
-      
-      // Speed validation - reject if moving too fast (>50 m/s = 180 km/h)
-      if (coords.speed && coords.speed > 50) {
-        statusEl.innerHTML = '<div class="text-err">⚠️ Location error: Speed too high. Please try again when stationary.</div>';
-        retryBtn.style.display = 'block';
-        capturedCoords = null;
-        return;
-      }
-      
-      capturedCoords = coords;
-      statusEl.innerHTML = `✅ Location: captured (accuracy: ${Math.round(coords.accuracy)}m)`;
-      retryBtn.style.display = 'none';
-    },
-    (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(safetyTimer);
-      let msg = '⚠️ Location: ';
-      if (error.code === 1) {
-        msg += 'permission denied. Tap the 🔒/ⓘ icon next to the address bar → Permissions → turn Location ON.';
-      } else if (error.code === 2) {
-        msg += 'unavailable. Make sure Location/GPS is ON in your phone\'s quick settings, then tap Retry.';
-      } else if (error.code === 3) {
-        msg += 'timed out. Try moving near a window or outdoors, then tap Retry.';
-      } else {
-        msg += 'error. ' + (error.message || '');
-      }
-      
-      statusEl.innerHTML = msg;
-      
-      if (locationAttempts < MAX_LOCATION_RETRIES) {
-        retryBtn.style.display = 'block';
-      } else {
-        statusEl.innerHTML += ' (max retries reached)';
-        retryBtn.style.display = 'none';
-      }
-      
-      capturedCoords = null;
-    },
-    {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 0
-    }
-  );
-}
-
-// ---- My Attendance (student-facing analytics) ----
-function openMyAnalytics() {
-  const rollField = document.getElementById('analyticsRollNo');
-  const currentRoll = document.getElementById('rollNo').value.trim();
-  if (currentRoll) rollField.value = currentRoll;
-  document.getElementById('analyticsBody').innerHTML = '';
-  document.getElementById('analyticsModal').classList.remove('hidden');
-  if (currentRoll) fetchMyAnalytics();
-}
-function closeMyAnalytics() {
-  document.getElementById('analyticsModal').classList.add('hidden');
-}
-async function fetchMyAnalytics() {
-  const rollNo = document.getElementById('analyticsRollNo').value.trim();
-  const bodyEl = document.getElementById('analyticsBody');
-  if (!rollNo || !/^[0-9]+$/.test(rollNo)) {
-    bodyEl.innerHTML = `<p class="text-err">Please enter a valid roll number.</p>`;
-    return;
-  }
-  bodyEl.innerHTML = `<p class="text-muted">Loading...</p>`;
-  try {
-    const res = await fetch('/api/student/analytics?roll_no=' + encodeURIComponent(rollNo));
-    const data = await res.json();
-    if (!res.ok) {
-      bodyEl.innerHTML = `<p class="text-err">${esc(data.error || 'Could not load attendance.')}</p>`;
-      return;
-    }
-    if (data.total_attendance === 0) {
-      bodyEl.innerHTML = `<p class="text-muted">No attendance records found yet for this roll number.</p>`;
-      return;
-    }
-    const subjectRows = Object.entries(data.by_subject).map(([subj, info]) => `
-      <div class="flex justify-between py-1"><span class="text-muted">${esc(subj)}</span><span class="text-ink font-medium">${info.total} classes</span></div>
-    `).join('');
-    const recentRows = data.recent_records.map(r => `
-      <div class="flex justify-between py-1 text-xs"><span class="text-muted">${esc(r.date)} — ${esc(r.subject)} (${esc(r.course_type)})</span></div>
-    `).join('');
-    bodyEl.innerHTML = `
-      <div class="grid grid-cols-2 gap-3 mb-4">
-        <div class="bg-surface2 border border-line rounded-lg p-3 text-center">
-          <div class="text-2xl font-semibold text-gold">${esc(data.last_30_days.percentage)}%</div>
-          <div class="text-xs text-muted">Last 30 days</div>
+      <!-- Permanently denied help panel -->
+      <div id="locHelp" class="hidden mt-3 pt-3 border-t border-line">
+        <p class="text-sm text-ink font-medium mb-2">Location is blocked for this site. Turn it on:</p>
+        <div class="flex gap-2 mb-3">
+          <button type="button" onclick="showLocTab('ios')" id="tabIosBtn"
+            class="flex-1 text-xs font-medium py-1.5 rounded-md border border-line text-muted hover:text-ink transition">iPhone (Safari)</button>
+          <button type="button" onclick="showLocTab('android')" id="tabAndroidBtn"
+            class="flex-1 text-xs font-medium py-1.5 rounded-md border border-line text-muted hover:text-ink transition">Android (Chrome)</button>
         </div>
-        <div class="bg-surface2 border border-line rounded-lg p-3 text-center">
-          <div class="text-2xl font-semibold text-ink">${esc(data.last_7_days.percentage)}%</div>
-          <div class="text-xs text-muted">Last 7 days</div>
-        </div>
+        <ol id="locStepsIos" class="hidden list-decimal list-inside text-sm text-muted space-y-1">
+          <li>Open the <b class="text-ink">Settings</b> app on your iPhone</li>
+          <li>Scroll down and tap <b class="text-ink">Privacy &amp; Security</b></li>
+          <li>Tap <b class="text-ink">Location Services</b> — make sure it's turned ON</li>
+          <li>Scroll down, tap <b class="text-ink">Safari Websites</b></li>
+          <li>Set it to <b class="text-ink">"While Using the App"</b></li>
+          <li>Come back here and tap "Retry Location"</li>
+          <li class="list-none -ml-1 mt-1 text-xs">Still failing? Try turning off <b class="text-ink">iCloud Private Relay</b> (Settings → your name → iCloud → Private Relay) or switch between WiFi and mobile data, then retry.</li>
+        </ol>
+        <ol id="locStepsAndroid" class="hidden list-decimal list-inside text-sm text-muted space-y-1">
+          <li>Tap the <b class="text-ink">🔒 lock / ⓘ info icon</b> next to the address bar</li>
+          <li>Tap <b class="text-ink">Permissions</b> → <b class="text-ink">Location</b></li>
+          <li>Select <b class="text-ink">Allow</b></li>
+          <li>If that option isn't there: open <b class="text-ink">Chrome menu (⋮)</b> → <b class="text-ink">Settings</b> → <b class="text-ink">Site settings</b> → <b class="text-ink">Location</b> → find this site → <b class="text-ink">Allow</b></li>
+          <li>Also check <b class="text-ink">Phone Settings → Apps → Chrome → Permissions → Location</b> is Allowed</li>
+          <li>Come back here and tap "Retry Location"</li>
+        </ol>
       </div>
-      <h3 class="text-sm font-medium text-ink mb-1">By Subject</h3>
-      <div class="mb-4">${subjectRows}</div>
-      <h3 class="text-sm font-medium text-ink mb-1">Recent</h3>
-      <div>${recentRows}</div>
-    `;
-  } catch (err) {
-    bodyEl.innerHTML = `<p class="text-err">Network error. Please try again.</p>`;
-  }
+    </div>
+
+    <button id="submitBtn" onclick="openConfirm()"
+      class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 mt-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
+      Mark Attendance
+    </button>
+  </div>
+
+  <div id="message" class="mt-4"></div>
+  <div id="queueStatus" class="mt-4"></div>
+  <div id="failedBox" class="mt-4"></div>
+
+  <!-- Check my attendance -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-4 shadow-lg shadow-black/20 mt-5">
+    <div>
+      <div class="text-xs tracking-wide text-gold/80 font-medium mb-1">My Attendance</div>
+      <h2 class="font-serif text-lg font-semibold text-ink">Check my percentage</h2>
+      <p class="text-sm text-muted mt-1">Enter your roll number. For your privacy this only works from the phone you have marked attendance with.</p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Roll Number</label>
+      <input id="myRollNo" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+        placeholder="e.g. 45678"
+        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      <p id="myRollNoErr" class="hidden text-xs text-err mt-1">Roll number can only contain digits (0–9).</p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">System</label>
+      <select id="mySystem"
+        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="Semester">Semester (last 180 days)</option>
+        <option value="Annual">Annual (last 365 days)</option>
+      </select>
+    </div>
+
+    <button id="myAttBtn" onclick="checkMyAttendance()"
+      class="w-full bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg py-3 transition disabled:opacity-50">
+      Check Attendance
+    </button>
+
+    <div id="myAttMsg"></div>
+    <div id="myAttResult" class="space-y-2"></div>
+  </div>
+</div>
+
+<!-- Confirm modal -->
+<div id="confirmModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
+    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Confirm your details</h2>
+    <p class="text-sm text-muted mb-4">Please check before submitting. If something is wrong, tell your teacher — they can correct it from the register.</p>
+    <div class="space-y-2 text-sm bg-surface2 border border-line rounded-lg p-3.5" id="confirmSummary"></div>
+    <div class="flex gap-3 mt-5">
+      <button onclick="closeConfirm()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
+      <button onclick="confirmSubmit()" class="flex-1 py-2.5 rounded-lg bg-gold text-[#171208] font-semibold hover:bg-gold/90 transition">Yes, Submit</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---- Register the service worker so the page shell still loads offline ----
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-// ---- Offline queue: if a submission fails because there's no internet, ----
-// save it on this device and auto-retry once the connection comes back.
-const QUEUE_KEY = 'attendance_offline_queue';
-function getQueue() {
-  try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch (e) { return []; }
-}
-function setQueue(q) {
-  localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
-  renderQueueBanner();
-}
-function renderQueueBanner() {
-  const q = getQueue();
-  const el = document.getElementById('offlineQueueBanner');
-  if (q.length === 0) {
-    el.classList.add('hidden');
-    return;
-  }
-  el.classList.remove('hidden');
-  el.innerHTML = `⏳ ${q.length} attendance submission(s) saved on this device, waiting for internet. <button onclick="flushQueue()" class="underline font-medium">Retry now</button>`;
-}
-async function flushQueue() {
-  let q = getQueue();
-  if (q.length === 0) return;
-  const remaining = [];
-  for (const item of q) {
-    try {
-      const res = await fetch('/api/student/mark-attendance', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item.payload)
-      });
-      await res.json().catch(() => ({}));
-      // Whether the server accepted it or rejected it (e.g. expired code,
-      // already marked), there's no point holding it forever — drop it
-      // either way and only keep genuine network failures below.
-    } catch (err) {
-      remaining.push(item); // still offline — keep it for the next retry
-    }
-  }
-  setQueue(remaining);
-}
-window.addEventListener('online', flushQueue);
-window.addEventListener('DOMContentLoaded', () => { renderQueueBanner(); flushQueue(); });
-setInterval(flushQueue, 30000);
-
-
-// Student name is typed by the student — escape before putting in HTML.
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-let pendingSubmitPayload = null;
-
-// Validate the form, then show a confirmation popup before actually submitting
-function submitAttendance() {
-  // Get form values
-  const code = document.getElementById('code').value.trim();
-  const system = document.querySelector('input[name="system"]:checked')?.value;
-  const rollNo = document.getElementById('rollNo').value.trim();
-  const studentName = document.getElementById('studentName').value.trim();
-  const className = document.getElementById('className').value.trim();
-  const subject = document.getElementById('subject').value.trim();
-  const courseType = document.getElementById('courseType').value.trim();
-  const majorSubject = document.getElementById('majorSubject').value.trim();
-  
-  // Validation
-  if (!code || code.length !== 5) {
-    showMessage('Please enter the 5-digit code from your teacher.', 'error');
-    return;
+// localStorage can throw (Safari private mode, storage blocked) — never let
+// that break the whole page.
+let memoryDeviceId = null;
+function getDeviceId() {
+  let id = null;
+  try { id = localStorage.getItem('attendance_device_id'); } catch (e) {}
+  if (!id) id = memoryDeviceId;
+  if (!id) {
+    id = 'dev-' + Date.now() + '-' + Math.random().toString(36).slice(2, 12);
+    memoryDeviceId = id;
+    try { localStorage.setItem('attendance_device_id', id); } catch (e) {}
   }
-  
-  if (!/^[0-9]+$/.test(code)) {
-    showMessage('Code can only contain digits (0–9).', 'error');
-    return;
-  }
-  
-  if (!system) {
-    showMessage('Please select Annual or Semester system.', 'error');
-    return;
-  }
-  
-  if (!rollNo) {
-    showMessage('Please enter your roll number.', 'error');
-    return;
-  }
-  
-  if (!/^[0-9]+$/.test(rollNo)) {
-    showMessage('Roll number can only contain digits (0–9).', 'error');
-    return;
-  }
-  
-  if (!studentName) {
-    showMessage('Please enter your name.', 'error');
-    return;
-  }
-  
-  if (!className) {
-    showMessage('Please select your class.', 'error');
-    return;
-  }
-  
-  if (!subject) {
-    showMessage('Please select the subject.', 'error');
-    return;
-  }
-  
-  if (!courseType) {
-    showMessage('Please select the course type.', 'error');
-    return;
-  }
-
-  document.getElementById('message').classList.add('hidden');
-
-  // Stash the validated values — the actual submit happens after the
-  // student taps "Yes, Submit" in the confirmation popup.
-  pendingSubmitPayload = {
-    code,
-    roll_no: rollNo,
-    name: studentName,
-    class_name: className,
-    subject,
-    course_type: courseType,
-    major_subject: majorSubject || null,
-    system,
-    device_id: deviceId,
-    lat: capturedCoords ? capturedCoords.latitude : null,
-    lng: capturedCoords ? capturedCoords.longitude : null,
-    accuracy: capturedCoords ? capturedCoords.accuracy : null
-  };
-
-  document.getElementById('submitSummary').innerHTML = `
-    <div class="flex justify-between"><span class="text-muted">Name</span><span class="font-medium text-ink">${esc(studentName)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Roll No</span><span class="font-medium text-ink">${esc(rollNo)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">System</span><span class="font-medium text-ink">${esc(system)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Class</span><span class="font-medium text-ink">${esc(className)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Subject</span><span class="font-medium text-ink">${esc(subject)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Course Type</span><span class="font-medium text-ink">${esc(courseType)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Location</span><span class="font-medium text-ink">${capturedCoords ? '✅ Captured' : '⚠️ Not captured'}</span></div>
-  `;
-  document.getElementById('submitModal').classList.remove('hidden');
+  return id;
 }
+const device_id = getDeviceId();
+let coords = null;
 
-function closeSubmitConfirm() {
-  document.getElementById('submitModal').classList.add('hidden');
-}
-
-// Actually sends the attendance to the server, called after the student
-// confirms their details in the popup.
-async function confirmSubmit() {
-  const messageEl = document.getElementById('message');
-  const submitBtn = document.getElementById('submitBtn');
-  const confirmBtn = document.getElementById('confirmSubmitBtn');
-  if (!pendingSubmitPayload) { closeSubmitConfirm(); return; }
-
-  confirmBtn.disabled = true;
-  confirmBtn.textContent = 'Submitting...';
-  submitBtn.disabled = true;
-
-  try {
-    const response = await fetch('/api/student/mark-attendance', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(pendingSubmitPayload)
-    });
-    
-    const data = await response.json();
-    closeSubmitConfirm();
-    
-    if (response.ok && data.success) {
-      showMessage('✅ Attendance marked successfully!', 'success');
-      setTimeout(() => resetStudentForm(messageEl), 2000);
+// ---- Digits-only inputs (Roll Number & Code) ----
+function enforceDigitsOnly(inputEl, errEl) {
+  inputEl.addEventListener('input', () => {
+    const cleaned = inputEl.value.replace(/[^0-9]/g, '');
+    if (cleaned !== inputEl.value) {
+      inputEl.value = cleaned;
+      errEl.classList.remove('hidden');
+      setTimeout(() => errEl.classList.add('hidden'), 2000);
     } else {
-      showMessage(data.error || 'Failed to mark attendance. Please try again.', 'error');
+      errEl.classList.add('hidden');
     }
-  } catch (error) {
-    // A thrown fetch error here means the request never reached the
-    // server (genuinely offline) — save it locally and auto-retry later,
-    // rather than making the student lose what they filled in.
-    const q = getQueue();
-    q.push({ payload: pendingSubmitPayload, savedAt: Date.now() });
-    setQueue(q);
-    closeSubmitConfirm();
-    showMessage('📴 No internet connection. Saved on this device — it will submit automatically once you\'re back online.', 'error');
-    setTimeout(() => resetStudentForm(messageEl), 2000);
+  });
+}
+enforceDigitsOnly(document.getElementById('rollNo'), document.getElementById('rollNoErr'));
+enforceDigitsOnly(document.getElementById('code'), document.getElementById('codeErr'));
+enforceDigitsOnly(document.getElementById('myRollNo'), document.getElementById('myRollNoErr'));
+
+// Keep the "check my attendance" roll number in step with the form's roll
+// number, so a student who just filled the form does not have to type it twice.
+document.getElementById('rollNo').addEventListener('input', () => {
+  const v = document.getElementById('rollNo').value;
+  if (!document.getElementById('myRollNo').value) document.getElementById('myRollNo').value = v;
+});
+
+// ---- Location handling ----
+function detectPlatform() {
+  const ua = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
+  if (/Android/i.test(ua)) return 'android';
+  return 'android'; // sensible default for a college's mostly-Android userbase
+}
+function showLocTab(which) {
+  document.getElementById('locStepsIos').classList.toggle('hidden', which !== 'ios');
+  document.getElementById('locStepsAndroid').classList.toggle('hidden', which !== 'android');
+  document.getElementById('tabIosBtn').className = 'flex-1 text-xs font-medium py-1.5 rounded-md border transition ' +
+    (which === 'ios' ? 'border-gold text-gold' : 'border-line text-muted hover:text-ink');
+  document.getElementById('tabAndroidBtn').className = 'flex-1 text-xs font-medium py-1.5 rounded-md border transition ' +
+    (which === 'android' ? 'border-gold text-gold' : 'border-line text-muted hover:text-ink');
+}
+
+// On a weak signal, GPS (enableHighAccuracy) can take forever or time out.
+// Network-based location (enableHighAccuracy: false) uses cell towers/WiFi
+// instead of satellites — it's less precise but comes back much faster and
+// works even with a poor connection. A generous timeout and a retry button
+// cover the rest.
+function fetchLocation(timeoutMs) {
+  const statusEl = document.getElementById('locStatus');
+  const retryBtn = document.getElementById('retryLocBtn');
+  const helpBox = document.getElementById('locHelp');
+  retryBtn.style.display = 'none';
+  helpBox.classList.add('hidden');
+  const timeout = (typeof timeoutMs === 'number') ? timeoutMs : 30000;
+
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      statusEl.textContent = '📍 Location not supported on this browser';
+      retryBtn.style.display = 'inline-block';
+      resolve(null);
+      return;
+    }
+    statusEl.textContent = '📍 Fetching location... (this can take a bit on a weak connection)';
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        statusEl.textContent = '📍 Location captured ✓';
+        resolve(coords);
+      },
+      (err) => {
+        retryBtn.style.display = 'inline-block';
+        if (err.code === 1 /* PERMISSION_DENIED */) {
+          statusEl.textContent = '📍 Location access is blocked for this site.';
+          helpBox.classList.remove('hidden');
+          showLocTab(detectPlatform());
+        } else {
+          statusEl.textContent = '📍 Could not get location (' + (err.message || 'timed out') + '). Tap retry, or move somewhere with better signal.';
+        }
+        resolve(null);
+      },
+      { enableHighAccuracy: false, timeout: timeout, maximumAge: 60000 }
+    );
+  });
+}
+
+fetchLocation();
+
+document.getElementById('rollNo').addEventListener('input', () => {
+  const nameField = document.getElementById('studentName');
+  const classField = document.getElementById('className');
+  const majorField = document.getElementById('majorSubject');
+  nameField.readOnly = false;
+  nameField.classList.remove('opacity-70', 'cursor-not-allowed');
+  classField.disabled = false;
+  classField.classList.remove('opacity-70', 'cursor-not-allowed');
+  majorField.disabled = false;
+  majorField.classList.remove('opacity-70', 'cursor-not-allowed');
+});
+
+document.getElementById('rollNo').addEventListener('blur', async () => {
+  const roll_no = document.getElementById('rollNo').value.trim();
+  const nameField = document.getElementById('studentName');
+  const classField = document.getElementById('className');
+  const majorField = document.getElementById('majorSubject');
+  if (!roll_no) return;
+  try {
+    const res = await fetch('/api/student/lookup-name?roll_no=' + encodeURIComponent(roll_no));
+    const data = await res.json();
+
+    if (data.name) {
+      // Roster match — name is locked, can't be edited (server ignores any
+      // client-sent name for a known roll number anyway; this just makes
+      // that visible so students don't wonder why their edit didn't stick).
+      nameField.value = data.name;
+      nameField.readOnly = true;
+      nameField.classList.add('opacity-70', 'cursor-not-allowed');
+      nameField.title = 'Name is locked to your roll number. Ask your teacher if this needs to change.';
+    } else {
+      nameField.readOnly = false;
+      nameField.classList.remove('opacity-70', 'cursor-not-allowed');
+      nameField.title = '';
+    }
+
+    if (data.class_name) {
+      classField.value = data.class_name;
+      classField.disabled = true;
+      classField.classList.add('opacity-70', 'cursor-not-allowed');
+      classField.title = 'Class is locked to your roll number. Ask your teacher if this needs to change.';
+    } else {
+      classField.disabled = false;
+      classField.classList.remove('opacity-70', 'cursor-not-allowed');
+      classField.title = '';
+    }
+
+    if (data.major_subject) {
+      majorField.value = data.major_subject;
+      majorField.disabled = true;
+      majorField.classList.add('opacity-70', 'cursor-not-allowed');
+      majorField.title = 'Major subject is locked to your roll number. Ask your teacher if this needs to change.';
+    } else {
+      majorField.disabled = false;
+      majorField.classList.remove('opacity-70', 'cursor-not-allowed');
+      majorField.title = '';
+    }
+  } catch (err) {}
+});
+
+// ---------------------------------------------------------------------
+// Reliability layer: retry on flaky connections, and queue offline so a
+// dropped connection never means lost attendance.
+// ---------------------------------------------------------------------
+const QUEUE_KEY = 'attendance_offline_queue';
+
+function getQueue() {
+  try { return JSON.parse(localStorage.getItem(QUEUE_KEY)) || []; } catch (e) { return []; }
+}
+function saveQueue(q) {
+  try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch (e) {}
+  updateQueueStatus();
+}
+function updateQueueStatus() {
+  const q = getQueue();
+  const el = document.getElementById('queueStatus');
+  el.innerHTML = q.length
+    ? `<div class="rounded-lg border border-golddim/50 bg-golddim/10 text-[#e8c468] text-sm px-3.5 py-3">⏳ ${q.length} attendance ${q.length === 1 ? 'entry' : 'entries'} waiting to send — will submit automatically once you're back online.</div>`
+    : '';
+}
+
+// One attempt: sends the request, retrying a couple of times on pure
+// network failure (no response at all — e.g. connection drops mid-request).
+// A response that came back — success or a real error like "already marked"
+// — is never retried, since retrying won't change that outcome.
+async function attemptSubmit(payload, retries) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetch('/api/student/mark-attendance', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      return { reached: true, data };
+    } catch (err) {
+      if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1))); // backoff: 1s, 2s...
+    }
+  }
+  return { reached: false };
+}
+
+// Tries to flush anything sitting in the offline queue. Called on load,
+// whenever the browser regains connectivity, and on a slow background timer
+// as a safety net.
+// Rejections (expired code, wrong class, duplicate…) are NOT silently dropped:
+// they are collected and shown to the student, because an entry that looks
+// "saved" but was actually refused would leave them thinking they are present.
+const FAILED_KEY = 'attendance_failed_queue';
+
+function getFailed() {
+  try { return JSON.parse(localStorage.getItem(FAILED_KEY)) || []; } catch (e) { return []; }
+}
+function saveFailed(list) {
+  try { localStorage.setItem(FAILED_KEY, JSON.stringify(list.slice(-10))); } catch (e) {}
+  showFailed();
+}
+function clearFailed() {
+  saveFailed([]);
+}
+function showFailed() {
+  const el = document.getElementById('failedBox');
+  if (!el) return;
+  const list = getFailed();
+  if (!list.length) { el.innerHTML = ''; return; }
+  const items = list.map((f) =>
+    `<li>${esc(f.subject) || 'Class'}${f.course_type ? ' (' + esc(f.course_type) + ')' : ''} — ${esc(f.error)}</li>`
+  ).join('');
+  el.innerHTML = `
+    <div class="rounded-lg border border-err/50 bg-err/10 text-err text-sm px-3.5 py-3">
+      <div class="font-medium mb-1">✕ ${list.length} saved entr${list.length === 1 ? 'y' : 'ies'} could not be recorded</div>
+      <ul class="list-disc list-inside space-y-0.5">${items}</ul>
+      <div class="text-xs mt-2 text-err/80">These were NOT counted. Ask your teacher to mark you manually if you were present.</div>
+      <button type="button" onclick="clearFailed()" class="mt-2 text-xs font-medium underline">Clear this message</button>
+    </div>`;
+}
+
+let flushing = false;
+async function flushQueue() {
+  if (flushing) return;
+  flushing = true;
+  const q = getQueue();
+  const remaining = [];
+  const failures = [];
+  for (const payload of q) {
+    const result = await attemptSubmit(payload, 1);
+    if (!result.reached) {
+      remaining.push(payload); // still offline — keep it queued
+      continue;
+    }
+    if (result.data.success || (result.data.error && result.data.error.toLowerCase().includes('already marked'))) {
+      // Delivered (or turns out it was already recorded) — drop from queue either way
+      continue;
+    }
+    console.warn('Queued attendance rejected:', result.data.error);
+    failures.push({
+      subject: payload.subject,
+      course_type: payload.course_type,
+      error: result.data.error || 'Rejected by the server.',
+    });
+  }
+  if (failures.length) saveFailed(getFailed().concat(failures));
+  saveQueue(remaining);
+  flushing = false;
+}
+window.addEventListener('online', flushQueue);
+setInterval(flushQueue, 20000); // safety-net retry every 20s in case the 'online' event doesn't fire
+updateQueueStatus();
+showFailed();
+flushQueue();
+
+// ---- My attendance (subject-wise percentage) ----
+async function checkMyAttendance() {
+  const roll_no = document.getElementById('myRollNo').value.trim();
+  const system = document.getElementById('mySystem').value;
+  const msgDiv = document.getElementById('myAttMsg');
+  const resDiv = document.getElementById('myAttResult');
+  const btn = document.getElementById('myAttBtn');
+  resDiv.innerHTML = '';
+
+  if (!/^[0-9]+$/.test(roll_no)) {
+    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Enter your roll number (digits only).</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  msgDiv.innerHTML = '<div class="text-sm text-muted">Checking...</div>';
+  try {
+    const params = new URLSearchParams({ roll_no, system, device_id });
+    const res = await fetch('/api/student/my-attendance?' + params.toString());
+    const data = await res.json();
+    if (!res.ok) {
+      msgDiv.innerHTML = `<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ ${esc(data.error || 'Could not load your attendance.')}</div>`;
+      return;
+    }
+    msgDiv.innerHTML = '';
+    if (!data.subjects || !data.subjects.length) {
+      resDiv.innerHTML = `<div class="rounded-lg border border-golddim/50 bg-golddim/10 text-[#e8c468] text-sm px-3.5 py-3">No attendance found for this roll number in the last ${data.window_days} days.</div>`;
+      return;
+    }
+
+    const rows = data.subjects.map((s) => `
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <div class="text-sm text-ink font-medium">${esc(s.subject)}</div>
+          <div class="text-xs text-muted">${esc(s.course_type)} · ${s.attended} of ${s.held} classes</div>
+        </div>
+        <div class="text-sm font-semibold ${s.pct >= 75 ? 'text-ok' : 'text-err'}">${s.pct}%</div>
+      </div>`).join('');
+
+    resDiv.innerHTML = `
+      <div class="rounded-lg border border-line bg-surface2 px-3.5 py-3 flex items-center justify-between">
+        <div>
+          <div class="text-sm text-ink font-medium">${esc(data.name) || 'Roll No ' + esc(data.roll_no)}</div>
+          <div class="text-xs text-muted">${esc(data.class_name)} · ${data.from_date} to ${data.to_date}</div>
+        </div>
+        <div class="text-lg font-serif font-semibold ${data.overall_pct >= 75 ? 'text-ok' : 'text-err'}">${data.overall_pct}%</div>
+      </div>
+      <div class="space-y-2 pt-1">${rows}</div>
+      <p class="text-xs text-muted">Percentage = classes attended ÷ classes held (${data.total_attended} of ${data.total_held}). 75% is usually the minimum required.</p>`;
+  } catch (err) {
+    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ No internet connection. Try again.</div>';
   } finally {
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Mark Attendance';
-    confirmBtn.disabled = false;
-    confirmBtn.textContent = 'Yes, Submit';
-    pendingSubmitPayload = null;
+    btn.disabled = false;
   }
 }
 
-function resetStudentForm(messageEl) {
-  document.getElementById('code').value = '';
-  document.getElementById('rollNo').value = '';
-  document.getElementById('studentName').value = '';
-  document.getElementById('studentName').readOnly = false;
-  document.getElementById('className').value = '';
-  document.getElementById('className').disabled = false;
-  document.getElementById('subject').value = '';
-  document.getElementById('courseType').value = '';
-  document.getElementById('majorSubject').value = '';
-  document.getElementById('majorSubject').disabled = false;
-  document.getElementById('rollNoLookupStatus').classList.add('hidden');
-  document.querySelector('input[name="system"]:checked').checked = false;
-  document.getElementById('systemSection').style.display = 'none';
-  document.getElementById('mainFormSection').style.display = 'none';
-  messageEl.classList.add('hidden');
-  capturedCoords = null;
-  locationAttempts = 0;
-  document.getElementById('locStatus').innerHTML = '📍 Location: not fetched yet';
+// ---- Pre-submit validation + confirm modal ----
+function gatherPayload() {
+  return {
+    roll_no: document.getElementById('rollNo').value.trim(),
+    name: document.getElementById('studentName').value.trim(),
+    class_name: document.getElementById('className').value.trim(),
+    system: (document.querySelector('input[name="system"]:checked') || {}).value || '',
+    subject: document.getElementById('subject').value.trim(),
+    course_type: document.getElementById('courseType').value.trim(),
+    major_subject: document.getElementById('majorSubject').value.trim(),
+    code: document.getElementById('code').value.trim(),
+  };
 }
 
-function showMessage(text, type) {
-  const messageEl = document.getElementById('message');
-  messageEl.classList.remove('hidden');
-  
-  if (type === 'success') {
-    messageEl.innerHTML = `<div class="rounded-lg border border-ok/40 bg-ok/10 text-ok text-sm px-4 py-3">${text}</div>`;
+function openConfirm() {
+  const p = gatherPayload();
+  const msgDiv = document.getElementById('message');
+  msgDiv.innerHTML = '';
+
+  if (!/^[0-9]+$/.test(p.roll_no)) {
+    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Roll number must contain digits only.</div>';
+    return;
+  }
+  if (!p.class_name || !p.system || !p.subject || !p.course_type) {
+    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Please fill all required fields (including Annual / Semester).</div>';
+    return;
+  }
+  if (!/^[0-9]{5}$/.test(p.code)) {
+    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Code must be exactly 5 digits.</div>';
+    return;
+  }
+
+  const summary = document.getElementById('confirmSummary');
+  summary.innerHTML = `
+    <div class="flex justify-between"><span class="text-muted">Roll No</span><span class="font-medium text-ink">${esc(p.roll_no)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Name</span><span class="font-medium text-ink">${esc(p.name) || '—'}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Class</span><span class="font-medium text-ink">${esc(p.class_name)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">System</span><span class="font-medium text-ink">${esc(p.system)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Subject</span><span class="font-medium text-ink">${esc(p.subject)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Course Type</span><span class="font-medium text-ink">${esc(p.course_type)}</span></div>
+    <div class="flex justify-between"><span class="text-muted">Code</span><span class="font-medium text-ink">${esc(p.code)}</span></div>
+  `;
+  document.getElementById('confirmModal').classList.remove('hidden');
+}
+function closeConfirm() {
+  document.getElementById('confirmModal').classList.add('hidden');
+}
+
+async function confirmSubmit() {
+  closeConfirm();
+  const p = gatherPayload();
+  const msgDiv = document.getElementById('message');
+  const btn = document.getElementById('submitBtn');
+
+  // No coords yet? Give location one quick last try (8s, not the full 30s).
+  // Whatever happens, the request is sent — the server decides what to do.
+  if (!coords) {
+    btn.disabled = true;
+    btn.textContent = 'Checking location...';
+    await fetchLocation(8000);
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+
+  const payload = Object.assign({}, p, { device_id, lat: coords ? coords.lat : null, lng: coords ? coords.lng : null });
+  const result = await attemptSubmit(payload, 2); // try up to 3 times total before giving up on a live send
+
+  if (result.reached) {
+    if (result.data.success) {
+      msgDiv.innerHTML = `<div class="rounded-lg border border-ok/40 bg-ok/10 text-ok text-sm px-3.5 py-3">✅ ${result.data.message}</div>`;
+    } else {
+      msgDiv.innerHTML = `<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ ${esc(result.data.error)}</div>`;
+    }
   } else {
-    messageEl.innerHTML = `<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-4 py-3">${text}</div>`;
+    const q = getQueue();
+    q.push(payload);
+    saveQueue(q);
+    msgDiv.innerHTML = '<div class="rounded-lg border border-golddim/50 bg-golddim/10 text-[#e8c468] text-sm px-3.5 py-3">📴 No internet connection right now. Your attendance has been saved on this phone and will be submitted automatically the moment you\'re back online — no need to do anything else.</div>';
   }
-  
-  // Scroll to message
-  messageEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  btn.disabled = false;
+  btn.textContent = 'Mark Attendance';
 }
 </script>
 </body>

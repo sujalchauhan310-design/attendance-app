@@ -52,34 +52,28 @@
 
   <!-- Session setup card -->
   <div class="bg-surface border border-line rounded-xl p-5 space-y-4 shadow-lg shadow-black/20 mb-5">
-     <!-- STEP 1: System Selection First (NEP Compliant) -->
     <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">
-        <span class="text-gold">Step 1:</span> System 
-        <span class="text-xs font-normal text-muted">(Annual or Semester — select this first)</span>
-      </label>
-      <select id="systemSelect" class="w-full bg-surface2 border-2 border-gold/60 rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold transition">
-        <option value="">Select system first</option>
-        <option value="Annual">Annual System</option>
-        <option value="Semester">Semester System</option>
-      </select>
-    </div>
-
-    <!-- STEP 2: Class Selection (Shows after system selected) -->
-    <div id="classSection" style="display:none;">
-      <label class="block text-sm font-medium text-ink mb-1.5">
-        <span class="text-gold">Step 2:</span> Course / Year
-      </label>
+      <label class="block text-sm font-medium text-ink mb-1.5">Course / Year</label>
       <select id="className" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-        <option value="">Select your class</option>
+        <option value="">Select class</option>
+        <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
+        <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
+        <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
+        <option>MA 1st</option><option>MA 2nd</option>
       </select>
     </div>
 
-    <!-- STEP 3: Subject Selection (Shows after class selected) -->
-    <div id="subjectSection" style="display:none;">
-      <label class="block text-sm font-medium text-ink mb-1.5">
-        <span class="text-gold">Step 3:</span> Subject
-      </label>
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">System <span class="text-xs font-normal text-muted">(Annual or Semester — also decides the report period)</span></label>
+      <select id="systemSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+        <option value="">Select system</option>
+        <option value="Annual">Annual</option>
+        <option value="Semester">Semester</option>
+      </select>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Subject</label>
       <select id="subjectSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
         <option value="">Select subject</option>
         <option>Political Science</option><option>History</option><option>Public Administration</option>
@@ -90,37 +84,40 @@
       </select>
     </div>
 
-    <!-- STEP 4: Course Type Selection (Shows after subject selected) -->
-    <div id="courseTypeSection" style="display:none;">
-      <label class="block text-sm font-medium text-ink mb-1.5">
-        <span class="text-gold">Step 4:</span> Course Type 
-        <span class="text-xs font-normal text-muted">(same subject, different type = separate class)</span>
-      </label>
+    <div>
+      <label class="block text-sm font-medium text-ink mb-1.5">Course Type <span class="text-xs font-normal text-muted">(same subject, different type = separate class)</span></label>
       <select id="courseTypeSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
         <option value="">Select course type</option>
+        <option value="DSC">DSC — Discipline Specific Core</option>
+        <option value="SEC">SEC — Skill Enhancement Course</option>
+        <option value="GE">GE — Generic Elective</option>
+        <option value="AEC">AEC — Ability Enhancement Course</option>
+        <option value="VAC">VAC — Value Added Course</option>
+        <option value="MDC">MDC — Multi-Disciplinary Course</option>
       </select>
     </div>
 
-    <!-- Location & Email Options (Shows after course type selected) -->
-    <div id="optionsSection" style="display:none;">
-      <label class="flex items-center justify-between rounded-lg border border-line bg-surface2/60 px-3.5 py-3 cursor-pointer mb-3">
-        <span class="text-sm text-ink">📍 Require Location Verification <span class="block text-xs text-muted mt-0.5">Student must be near college to mark attendance</span></span>
-        <input type="checkbox" id="requireLocation" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
-      </label>
+    <label class="flex items-center justify-between rounded-lg border border-line bg-surface2/60 px-3.5 py-3 cursor-pointer">
+      <span class="text-sm text-ink">📍 Require Location Verification <span class="block text-xs text-muted mt-0.5">Student must be near college to mark attendance</span></span>
+      <input type="checkbox" id="requireLocation" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
+    </label>
 
-      <label class="flex items-center justify-between rounded-lg border border-line bg-surface2/60 px-3.5 py-3 cursor-pointer">
-        <span class="text-sm text-ink">📧 Email PDF Automatically <span class="block text-xs text-muted mt-0.5">Sends this session's attendance PDF to your inbox 20 min after generating the code</span></span>
-        <input type="checkbox" id="autoSendPdf" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
-      </label>
-    </div>
+<label class="flex items-center justify-between rounded-lg border border-line bg-surface2/60 px-3.5 py-3 cursor-pointer">
+  <span class="text-sm text-ink">📧 Email PDF Automatically <span class="block text-xs text-muted mt-0.5">Sends this session's attendance PDF to your inbox 20 min after generating the code</span></span>
+  <input type="checkbox" id="autoSendPdf" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
+</label>
+    <button id="generateBtn" onclick="openGenerateConfirm()" class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 transition disabled:opacity-50 disabled:cursor-not-allowed">Generate New Code</button>
+  </div>
 
-    <button id="generateBtn" onclick="openGenerateConfirm()" style="display:none;" class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 transition disabled:opacity-50 disabled:cursor-not-allowed">Generate New Code</button>
- </div>
   <!-- Generated code card -->
   <div id="codeSection" style="display:none;" class="bg-surface border border-gold/40 rounded-xl p-6 mb-5 shadow-lg shadow-black/20 text-center">
     <div class="text-6xl font-serif font-bold tracking-[0.2em] text-gold" id="codeDisplay">-----</div>
     <div class="text-sm text-muted mt-3" id="timer"></div>
     <div class="text-xs text-muted mt-1" id="codeLocNote"></div>
+    <div class="text-sm text-ink mt-3" id="codeMarkedCount"></div>
+    <button id="endSessionBtn" onclick="openEndSessionConfirm()"
+      class="mt-4 bg-transparent hover:bg-err/10 border border-err/50 text-err text-sm font-medium rounded-lg px-5 py-2.5 transition"
+      style="display:none;">End code now (stop accepting marks)</button>
   </div>
 
   <!-- Roster upload card -->
@@ -130,6 +127,26 @@
       class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-sm text-ink placeholder-muted/60 font-mono focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition"></textarea>
     <button class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="uploadRoster()">Upload List</button>
     <div id="uploadMsg"></div>
+  </div>
+
+  <!-- Saved roster view card -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
+    <label class="block text-sm font-medium text-ink">Saved Student List <span class="block text-xs font-normal text-muted mt-0.5">What is currently saved against roll numbers for the class selected at the top. This is what locks a student's name, class and major subject on the student form.</span></label>
+    <button class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="loadRoster()">Load Saved List</button>
+    <div id="rosterMsg"></div>
+    <div class="overflow-x-auto -mx-5 px-5">
+      <table id="rosterTable" class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-line text-left text-muted">
+            <th class="py-2 pr-2 font-medium">S.No</th>
+            <th class="py-2 pr-2 font-medium">Name</th>
+            <th class="py-2 pr-2 font-medium">Roll No</th>
+            <th class="py-2 pr-0 font-medium">Major Subject</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-line/60"></tbody>
+      </table>
+    </div>
   </div>
 
   <!-- Unlock device card -->
@@ -145,31 +162,28 @@
 
   <!-- 30-day report card -->
   <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
-    <label class="block text-sm font-medium text-ink">Attendance % Report <span class="block text-xs font-normal text-muted mt-0.5">Downloads a PDF for the class/subject/course-type/system selected above — one row per student with classes attended, classes held and overall %. Shows last 30 days of attendance data.</span></label>
+    <label class="block text-sm font-medium text-ink">Attendance % Report <span class="block text-xs font-normal text-muted mt-0.5">Downloads a PDF for the class/subject/course-type/system selected above — one row per student with classes attended, classes held and overall %. Annual = last 365 days, Semester = last 180 days.</span></label>
     <button id="reportBtn" class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="downloadOverallReport()">Download Report</button>
     <div id="reportMsg"></div>
-  </div>
-
-  <!-- Class analytics card -->
-  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
-    <label class="block text-sm font-medium text-ink">Class Analytics <span class="block text-xs font-normal text-muted mt-0.5">Class average, low-attendance and top-performing students — last 30 days, for the class/subject/course-type/system selected above</span></label>
-    <button id="analyticsBtn" class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="loadTeacherAnalytics()">Load Analytics</button>
-    <div id="analyticsResult" class="hidden space-y-4"></div>
-  </div>
-
-  <!-- Manual attendance / absentees card -->
-  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
-    <label class="block text-sm font-medium text-ink">Manual Attendance <span class="block text-xs font-normal text-muted mt-0.5">Roster students (by Class) who haven't self-marked yet, for the subject/course-type/system selected above — mark them present directly if their phone/GPS isn't working</span></label>
-    <button id="rosterStatusBtn" class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="loadRosterStatus()">Load List</button>
-    <div id="rosterStatusResult" class="hidden"></div>
   </div>
 
 
   <!-- Attendance list card -->
   <div class="bg-surface border border-line rounded-xl p-5 shadow-lg shadow-black/20">
-    <label class="block text-sm font-medium text-ink mb-1.5">Attendance List — pick a session <span class="block text-xs font-normal text-muted mt-0.5">Each code you generate is a separate session with its own list &amp; PDF</span></label>
+    <label class="block text-sm font-medium text-ink mb-1.5">Attendance List — pick a session <span class="block text-xs font-normal text-muted mt-0.5">Each code you generate is a separate session with its own list &amp; PDF. The day is in IST — past days can be opened too, as long as the records are still kept (about 13 months).</span></label>
+
+    <div class="flex flex-wrap items-end gap-3 mb-4">
+      <div class="flex-1 min-w-[170px]">
+        <label class="block text-xs font-medium text-muted mb-1">Register day</label>
+        <input type="date" id="registerDate"
+          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+      </div>
+      <button class="bg-surface2 hover:bg-line border border-line text-ink text-sm font-medium rounded-lg px-4 py-2.5 transition" onclick="setRegisterToday()">Today</button>
+      <button class="bg-surface2 hover:bg-line border border-line text-ink text-sm font-medium rounded-lg px-4 py-2.5 transition" onclick="loadSessions(); loadAttendance();">Load day</button>
+    </div>
+
     <select id="sessionSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink mb-4 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-      <option value="">All sessions today</option>
+      <option value="">All sessions that day</option>
     </select>
 
     <div class="flex items-center justify-between mb-3">
@@ -187,7 +201,6 @@
             <th class="py-2 pr-2 font-medium">Major Subject</th>
             <th class="py-2 pr-2 font-medium">Type</th>
             <th class="py-2 pr-2 font-medium">Marked At</th>
-            <th class="py-2 pr-2 font-medium">Remarks</th>
             <th class="py-2 pr-0 font-medium text-right">Actions</th>
           </tr>
         </thead>
@@ -198,6 +211,26 @@
     <div class="flex flex-col sm:flex-row gap-3 mt-5">
       <button class="flex-1 bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg py-2.5 transition" onclick="loadAttendance()">Refresh List</button>
       <button class="flex-1 bg-transparent hover:bg-surface2 border border-line text-muted hover:text-ink font-medium rounded-lg py-2.5 transition" onclick="printList()">Print / Save as PDF</button>
+    </div>
+  </div>
+
+  <!-- Present / absent card -->
+  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mt-5">
+    <label class="block text-sm font-medium text-ink">Present / Absent <span class="block text-xs font-normal text-muted mt-0.5">Who marked attendance, and — from your saved student list — who did not, for the class / subject / course type / session / day chosen above.</span></label>
+    <div class="flex flex-col sm:flex-row gap-3">
+      <button class="flex-1 bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg py-2.5 transition" onclick="loadPresentAbsent()">Load Present / Absent</button>
+      <button class="flex-1 bg-transparent hover:bg-surface2 border border-line text-muted hover:text-ink font-medium rounded-lg py-2.5 transition" onclick="copyAbsentList()">Copy Absent List</button>
+    </div>
+    <div id="paSummary" class="text-sm text-muted"></div>
+    <div class="grid sm:grid-cols-2 gap-4">
+      <div>
+        <h3 class="text-xs font-semibold text-ok mb-2 tracking-wide">PRESENT (0)</h3>
+        <div id="paPresent" class="text-sm text-ink space-y-1 max-h-80 overflow-y-auto"></div>
+      </div>
+      <div>
+        <h3 class="text-xs font-semibold text-err mb-2 tracking-wide">ABSENT (0)</h3>
+        <div id="paAbsent" class="text-sm text-ink space-y-1 max-h-80 overflow-y-auto"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -236,11 +269,6 @@
         <input id="editSubject" type="text"
           class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
       </div>
-      <div>
-        <label class="block text-xs font-medium text-muted mb-1">Remarks <span class="font-normal">(optional — e.g. "10 min late")</span></label>
-        <input id="editRemarks" type="text"
-          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
-      </div>
     </div>
     <div id="editModalErr" class="hidden text-xs text-err mt-3"></div>
     <div class="flex gap-3 mt-5">
@@ -262,6 +290,18 @@
   </div>
 </div>
 
+<!-- End session confirm modal -->
+<div id="endSessionModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
+    <h2 class="font-serif text-lg font-semibold text-ink mb-1">End this code now?</h2>
+    <p class="text-sm text-muted mb-4" id="endSessionText">Students will no longer be able to mark attendance with this code. Attendance already recorded is kept.</p>
+    <div class="flex gap-3">
+      <button onclick="closeEndSessionConfirm()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
+      <button onclick="confirmEndSession()" class="flex-1 py-2.5 rounded-lg bg-err text-[#2a0d0d] font-semibold hover:bg-err/90 transition">End Code</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // Student names are typed by students — always escape before putting in HTML.
 function esc(s) {
@@ -274,6 +314,32 @@ let lastDate = '';
 let lastSessionLabel = '';
 let editingRecordId = null;
 let deletingRecordId = null;
+let activeSessionId = null;   // the session whose code is currently showing
+let lastAbsentList = [];      // so the teacher can copy the absentees
+
+// ---- Register day (always IST, server-side days) -------------------------
+// The server treats a day as IST. A phone set to another timezone (or with a
+// wrong clock) could otherwise ask for the wrong date, so the date is computed
+// from IST here too instead of trusting the device's own calendar.
+function istToday() {
+  return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+function selectedDate() {
+  return document.getElementById('registerDate').value || istToday();
+}
+function setRegisterToday() {
+  const el = document.getElementById('registerDate');
+  el.value = istToday();
+  loadSessions();
+  loadAttendance();
+}
+function initRegisterDate() {
+  const el = document.getElementById('registerDate');
+  el.value = istToday();
+  el.max = istToday(); // future dates have no register
+  el.addEventListener('change', () => { loadSessions(); loadAttendance(); });
+}
+
 // ---- Persist selections + active session in localStorage ----
 const SELECTION_KEY = 'attendance_teacher_selection';
 const ACTIVE_SESSION_KEY = 'attendance_teacher_active_session';
@@ -294,27 +360,10 @@ function restoreSelection() {
   try {
     const saved = JSON.parse(localStorage.getItem(SELECTION_KEY) || 'null');
     if (!saved) return;
-    // Setting .value on a <select> does NOT fire a 'change' event, so the
-    // progressive reveal (System -> Class -> Subject -> Course Type ->
-    // Generate button) would otherwise stay hidden even though the saved
-    // value is already selected. Dispatch a real 'change' after each one so
-    // the same cascade that runs on a manual selection runs here too.
-    if (saved.system) {
-      document.getElementById('systemSelect').value = saved.system;
-      document.getElementById('systemSelect').dispatchEvent(new Event('change'));
-    }
-    if (saved.class_name) {
-      document.getElementById('className').value = saved.class_name;
-      document.getElementById('className').dispatchEvent(new Event('change'));
-    }
-    if (saved.subject) {
-      document.getElementById('subjectSelect').value = saved.subject;
-      document.getElementById('subjectSelect').dispatchEvent(new Event('change'));
-    }
-    if (saved.course_type) {
-      document.getElementById('courseTypeSelect').value = saved.course_type;
-      document.getElementById('courseTypeSelect').dispatchEvent(new Event('change'));
-    }
+    if (saved.class_name) document.getElementById('className').value = saved.class_name;
+    if (saved.subject) document.getElementById('subjectSelect').value = saved.subject;
+    if (saved.course_type) document.getElementById('courseTypeSelect').value = saved.course_type;
+    if (saved.system) document.getElementById('systemSelect').value = saved.system;
     if (typeof saved.require_location === 'boolean') document.getElementById('requireLocation').checked = saved.require_location;
   } catch (err) {}
 }
@@ -332,24 +381,53 @@ function saveActiveSession(data, class_name, subject, course_type, require_locat
 
 function clearActiveSession() {
   try { localStorage.removeItem(ACTIVE_SESSION_KEY); } catch (err) {}
+  activeSessionId = null;
+}
+
+// Asks the server how long this code is really valid for, and how many
+// students have marked. The device clock is never trusted for this — a phone
+// that is a few minutes off would otherwise show an expired countdown for a
+// code the server still accepts (or the other way round).
+async function refreshSessionStatus(sessionId) {
+  const id = sessionId || activeSessionId;
+  if (!id) return null;
+  const res = await teacherFetch('/api/teacher/session-status?session_id=' + encodeURIComponent(id));
+  if (!res || !res.ok) return null;
+  const data = await res.json();
+  if (!data.found) { clearActiveSession(); document.getElementById('codeSection').style.display = 'none'; return null; }
+
+  activeSessionId = data.session_id;
+  document.getElementById('codeSection').style.display = 'block';
+  document.getElementById('codeDisplay').textContent = data.code;
+  document.getElementById('codeLocNote').textContent = data.require_location
+    ? '📍 Location check is ON for this session'
+    : '📍 Location check is OFF for this session';
+  document.getElementById('codeMarkedCount').textContent =
+    `${data.marked_count} student(s) have marked so far`;
+  document.getElementById('endSessionBtn').style.display = data.active ? 'inline-block' : 'none';
+
+  // Convert the server's remaining seconds into a local countdown.
+  expiryTimestamp = Date.now() + data.seconds_left * 1000;
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(updateTimer, 1000);
+  updateTimer();
+  return data;
 }
 
 async function restoreActiveSession() {
   try {
     const saved = JSON.parse(localStorage.getItem(ACTIVE_SESSION_KEY) || 'null');
-    if (!saved || saved.expiry <= Date.now()) {
+    if (!saved || !saved.session_id) {
       clearActiveSession();
       return;
     }
-    document.getElementById('codeSection').style.display = 'block';
-    document.getElementById('codeDisplay').textContent = saved.code;
-    document.getElementById('codeLocNote').textContent = saved.require_location
-      ? '📍 Location check is ON for this session'
-      : '📍 Location check is OFF for this session';
-    expiryTimestamp = saved.expiry;
-    if (timerInterval) clearInterval(timerInterval);
-    timerInterval = setInterval(updateTimer, 1000);
-    updateTimer();
+    activeSessionId = saved.session_id;
+    const status = await refreshSessionStatus(saved.session_id);
+    if (!status || !status.active) {
+      await loadSessions();
+      await loadAttendance();
+      return;
+    }
     await loadSessions(saved.session_id);
     await loadAttendance();
   } catch (err) {}
@@ -417,20 +495,12 @@ async function confirmGenerate() {
   const data = await res.json().catch(() => ({ error: 'Something went wrong. Try again.' }));
   if (data.error) { alert(data.error); return; }
 
-  document.getElementById('codeSection').style.display = 'block';
-  document.getElementById('codeDisplay').textContent = data.code;
-  document.getElementById('codeLocNote').textContent = require_location
-    ? '📍 Location check is ON for this session'
-    : '📍 Location check is OFF for this session';
-  const CODE_VALID_SECONDS = data.expires_in_seconds || 7 * 60;
-  expiryTimestamp = Date.now() + CODE_VALID_SECONDS * 1000;
+  activeSessionId = data.session_id;
   saveActiveSession(data, class_name, subject, course_type, require_location, system);
   saveSelection();
-
-  if (timerInterval) clearInterval(timerInterval);
-  timerInterval = setInterval(updateTimer, 1000);
-  updateTimer();
-
+  // Pull the authoritative code / countdown / marked count from the server
+  // instead of trusting this device's clock.
+  await refreshSessionStatus(data.session_id);
   await loadSessions(data.session_id);
 }
 
@@ -444,6 +514,7 @@ async function loadSessions(selectId) {
   if (subject) params.set('subject', subject);
   if (course_type) params.set('course_type', course_type);
   if (system) params.set('system', system);
+  params.set('date', selectedDate());
 
   try {
     const res = await teacherFetch('/api/teacher/sessions?' + params.toString());
@@ -452,12 +523,12 @@ async function loadSessions(selectId) {
     const sel = document.getElementById('sessionSelect');
     const previous = selectId || sel.value;
 
-    sel.innerHTML = '<option value="">All sessions today</option>';
-    (data.sessions || []).forEach((s, i) => {
+    sel.innerHTML = '<option value="">All sessions that day</option>';
+    (data.sessions || []).forEach((s) => {
       const opt = document.createElement('option');
       opt.value = s.session_id;
       const time = formatTime(s.created_at);
-      opt.textContent = `${s.class_name} — ${s.subject} (${s.course_type || '-'}, ${s.system || 'Annual'}) — ${time}`;
+      opt.textContent = `${s.class_name} — ${s.subject} (${s.course_type || '-'}, ${s.system || 'Annual'}) — ${time} — ${s.marked_count || 0} marked`;
       sel.appendChild(opt);
     });
     if (previous) sel.value = previous;
@@ -471,12 +542,44 @@ function updateTimer() {
   document.getElementById('timer').textContent = remaining > 0
     ? `Expires in ${min}:${sec.toString().padStart(2,'0')}`
     : 'Code expired — generate a new one';
-    if (remaining <= 0) {
+  if (remaining <= 0) {
     clearInterval(timerInterval);
+    document.getElementById('endSessionBtn').style.display = 'none';
     clearActiveSession();
   }
 }
 
+
+// ---- End the code early ----
+function openEndSessionConfirm() {
+  if (!activeSessionId) return;
+  document.getElementById('endSessionModal').classList.remove('hidden');
+}
+function closeEndSessionConfirm() {
+  document.getElementById('endSessionModal').classList.add('hidden');
+}
+async function confirmEndSession() {
+  closeEndSessionConfirm();
+  const sessionId = activeSessionId;
+  if (!sessionId) return;
+  try {
+    const res = await teacherFetch('/api/teacher/end-session', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ session_id: sessionId })
+    });
+    const data = await res.json();
+    if (!data.success) { alert(data.error || 'Could not end the session.'); return; }
+    document.getElementById('endSessionBtn').style.display = 'none';
+    document.getElementById('timer').textContent = 'Code ended by you — students can no longer mark with it.';
+    document.getElementById('codeMarkedCount').textContent = `${data.marked_count} student(s) marked in this session.`;
+    clearActiveSession();
+    await loadSessions();
+    await loadAttendance();
+  } catch (err) {
+    alert('Network error. Try again.');
+  }
+}
 
 // All times are shown in IST regardless of the device's own timezone.
 function formatTime(ms) {
@@ -571,6 +674,78 @@ async function downloadOverallReport() {
 }
 
 
+// ---- Present / absent list ----
+function paRow(p) {
+  const meta = [p.major_subject, p.course_type].filter(Boolean).join(' · ');
+  return `<div class="flex items-baseline gap-2"><span class="text-muted w-24 shrink-0">${esc(p.roll_no)}</span>` +
+         `<span>${esc(p.student_name) || '-'}</span>` +
+         `${meta ? `<span class="text-xs text-muted">${esc(meta)}</span>` : ''}</div>`;
+}
+
+async function loadPresentAbsent() {
+  const class_name = document.getElementById('className').value.trim();
+  const subject = document.getElementById('subjectSelect').value.trim();
+  const course_type = document.getElementById('courseTypeSelect').value.trim();
+  const system = document.getElementById('systemSelect').value.trim();
+  const session_id = document.getElementById('sessionSelect').value;
+  const summary = document.getElementById('paSummary');
+  if (!class_name) { alert('Select the class (top card) first.'); return; }
+
+  summary.innerHTML = '<span class="text-muted">Loading...</span>';
+  const params = new URLSearchParams({ class_name, date: selectedDate() });
+  if (subject) params.set('subject', subject);
+  if (course_type) params.set('course_type', course_type);
+  if (system) params.set('system', system);
+  if (session_id) params.set('session_id', session_id);
+
+  try {
+    const res = await teacherFetch('/api/teacher/session-report?' + params.toString());
+    const data = await res.json();
+    if (!res.ok) {
+      summary.innerHTML = `<span class="text-err">${esc(data.error || 'Could not load the list.')}</span>`;
+      return;
+    }
+
+    lastAbsentList = data.absent || [];
+    setPaHeading('paPresent', `PRESENT (${data.present_count})`);
+    setPaHeading('paAbsent', `ABSENT (${data.absent_count})`);
+    document.getElementById('paPresent').innerHTML = data.present.length
+      ? data.present.map(paRow).join('')
+      : '<div class="text-muted">Nobody has marked yet.</div>';
+    document.getElementById('paAbsent').innerHTML = data.absent.length
+      ? data.absent.map(paRow).join('')
+      : '<div class="text-muted">Nobody is missing from the saved list.</div>';
+
+    summary.innerHTML =
+      `<span class="text-ink">${data.present_count}</span> present · ` +
+      `<span class="text-ink">${data.absent_count}</span> absent · ` +
+      `saved list size <span class="text-ink">${data.roster_size}</span> · ` +
+      `${esc(data.class_name)}${data.subject ? ' — ' + esc(data.subject) : ''}` +
+      `${data.course_type ? ' (' + esc(data.course_type) + ')' : ''} · ${formatDateHeading(data.date)}` +
+      (data.roster_size ? '' : ' <span class="text-golddim">— upload the student list above to see absentees.</span>');
+  } catch (err) {
+    summary.innerHTML = '<span class="text-err">Network error. Try again.</span>';
+  }
+}
+
+function setPaHeading(divId, text) {
+  const container = document.getElementById(divId).parentElement;
+  const h3 = container ? container.querySelector('h3') : null;
+  if (h3) h3.textContent = text;
+}
+
+function copyAbsentList() {
+  if (!lastAbsentList.length) { alert('Nothing to copy — load the Present / Absent list first.'); return; }
+  const text = lastAbsentList.map((s) => `${s.roll_no}\t${s.student_name || ''}`).join('\n');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text)
+      .then(() => alert(`${lastAbsentList.length} absentee(s) copied.`))
+      .catch(() => alert(text));
+  } else {
+    alert(text);
+  }
+}
+
 async function loadAttendance() {
   const class_name = document.getElementById('className').value.trim();
   const subject = document.getElementById('subjectSelect').value.trim();
@@ -580,7 +755,7 @@ async function loadAttendance() {
   const session_id = sessionSel.value;
   lastSessionLabel = session_id
     ? sessionSel.options[sessionSel.selectedIndex].textContent
-    : 'All sessions today';
+    : 'All sessions that day';
 
   const params = new URLSearchParams();
   if (class_name) params.set('class_name', class_name);
@@ -588,9 +763,18 @@ async function loadAttendance() {
   if (course_type) params.set('course_type', course_type);
   if (system) params.set('system', system);
   if (session_id) params.set('session_id', session_id);
+  params.set('date', selectedDate());
 
   const res = await teacherFetch('/api/teacher/attendance?' + params.toString());
-  if (!res.ok) return; // e.g. wrong password — teacherFetch already alerted
+  if (!res.ok) {
+    // e.g. the selected day is too old, or the wrong teacher password
+    const errData = await res.json().catch(() => ({}));
+    document.getElementById('attendanceCount').textContent = 'Total marked: 0';
+    document.getElementById('attendanceDate').textContent = errData.error || 'Could not load this day';
+    lastRecords = [];
+    renderTable();
+    return;
+  }
   const data = await res.json();
 
   lastRecords = data.records || [];
@@ -600,6 +784,37 @@ async function loadAttendance() {
   document.getElementById('attendanceDate').textContent = formatDateHeading(data.date);
 
   renderTable();
+}
+
+// ---- Saved roster view ----
+async function loadRoster() {
+  const class_name = document.getElementById('className').value.trim();
+  const msgDiv = document.getElementById('rosterMsg');
+  const tbody = document.querySelector('#rosterTable tbody');
+  const params = new URLSearchParams();
+  if (class_name) params.set('class_name', class_name);
+  msgDiv.innerHTML = '<div class="text-sm text-muted">Loading...</div>';
+  tbody.innerHTML = '';
+  try {
+    const res = await teacherFetch('/api/teacher/roster?' + params.toString());
+    const data = await res.json();
+    if (!res.ok) {
+      msgDiv.innerHTML = `<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ ${esc(data.error || 'Could not load the list.')}</div>`;
+      return;
+    }
+    msgDiv.innerHTML = `<div class="text-sm ${data.count ? 'text-ok' : 'text-golddim'}">${data.count ? '✅ ' : ''}${data.count} student(s) saved${class_name ? ' for ' + esc(class_name) : ' in total'}.</div>`;
+    (data.students || []).forEach((s, i) => {
+      const tr = document.createElement('tr');
+      tr.className = 'hover:bg-surface2/50 transition';
+      tr.innerHTML = `<td class="py-2.5 pr-2 text-muted">${i + 1}</td>` +
+        `<td class="py-2.5 pr-2 text-ink">${esc(s.name) || '-'}</td>` +
+        `<td class="py-2.5 pr-2 text-ink">${esc(s.roll_no)}</td>` +
+        `<td class="py-2.5 pr-0 text-ink">${esc(s.major_subject) || '-'}</td>`;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ Network error. Try again.</div>';
+  }
 }
 
 function renderTable() {
@@ -616,7 +831,6 @@ function renderTable() {
       <td class="py-2.5 pr-2 text-ink">${esc(r.major_subject) || '-'}</td>
       <td class="py-2.5 pr-2 text-muted">${esc(r.course_type) || '-'}</td>
       <td class="py-2.5 pr-2 text-muted whitespace-nowrap">${formatTime(r.marked_at)}</td>
-      <td class="py-2.5 pr-2 text-muted">${esc(r.remarks) || '-'}</td>
       <td class="py-2.5 pr-0 text-right whitespace-nowrap">
         <button class="text-xs font-medium text-gold hover:text-gold/80 transition mr-3" onclick="openEditModal('${recordId}')">Edit</button>
         <button class="text-xs font-medium text-err hover:text-err/80 transition" onclick="openDeleteModal('${recordId}')">Delete</button>
@@ -637,7 +851,6 @@ function openEditModal(recordId) {
   document.getElementById('editRollNo').value = r.roll_no || '';
   document.getElementById('editName').value = r.student_name || '';
   document.getElementById('editSubject').value = r.subject || '';
-  document.getElementById('editRemarks').value = r.remarks || '';
   document.getElementById('editModalErr').classList.add('hidden');
   document.getElementById('editModal').classList.remove('hidden');
 }
@@ -650,7 +863,6 @@ async function saveEdit() {
   const roll_no = document.getElementById('editRollNo').value.trim();
   const student_name = document.getElementById('editName').value.trim();
   const subject = document.getElementById('editSubject').value.trim();
-  const remarks = document.getElementById('editRemarks').value.trim();
 
   if (!/^[0-9]+$/.test(roll_no)) {
     errEl.textContent = 'Roll number must contain digits only.';
@@ -662,7 +874,7 @@ async function saveEdit() {
     const res = await teacherFetch('/api/teacher/attendance/update', {
       method: 'PATCH',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ record_id: editingRecordId, roll_no, student_name, subject, remarks })
+      body: JSON.stringify({ record_id: editingRecordId, roll_no, student_name, subject })
     });
     const data = await res.json();
     if (!data.success) {
@@ -745,286 +957,38 @@ function printList() {
   win.print();
 }
 
+document.getElementById('className').addEventListener('change', () => { saveSelection(); loadSessions(); });
+document.getElementById('subjectSelect').addEventListener('change', () => { saveSelection(); loadSessions(); });
+document.getElementById('courseTypeSelect').addEventListener('change', () => { saveSelection(); loadSessions(); });
+document.getElementById('systemSelect').addEventListener('change', () => { saveSelection(); loadSessions(); updateReportLabel(); });
+
 function updateReportLabel() {
   const s = document.getElementById('systemSelect').value;
   document.getElementById('reportBtn').textContent =
-    s === 'Annual' ? 'Download Monthly Report (30 days)'
-    : s === 'Semester' ? 'Download Monthly Report (30 days)'
+    s === 'Annual' ? 'Download Annual Report (365 days)'
+    : s === 'Semester' ? 'Download Semester Report (180 days)'
     : 'Download Report';
 }
-
-async function loadTeacherAnalytics() {
-  const class_name = document.getElementById('className').value.trim();
-  const subject = document.getElementById('subjectSelect').value.trim();
-  const course_type = document.getElementById('courseTypeSelect').value.trim();
-  const system = document.getElementById('systemSelect').value.trim();
-  const btn = document.getElementById('analyticsBtn');
-  const resultEl = document.getElementById('analyticsResult');
-
-  if (!class_name || !subject || !course_type || !system) {
-    resultEl.classList.remove('hidden');
-    resultEl.innerHTML = `<p class="text-sm text-err">Please select System, Class, Subject and Course Type above first.</p>`;
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = 'Loading...';
-  try {
-    const params = new URLSearchParams({ class_name, subject, course_type, system });
-    const res = await teacherFetch('/api/teacher/analytics?' + params.toString());
-    const data = await res.json();
-
-    if (!res.ok) {
-      resultEl.classList.remove('hidden');
-      resultEl.innerHTML = `<p class="text-sm text-err">${esc(data.error || 'Failed to load analytics.')}</p>`;
-      return;
-    }
-
-    resultEl.classList.remove('hidden');
-
-    const lowRows = data.low_attendance.map(s => `
-      <tr class="border-b border-line/60"><td class="py-1.5 pr-2">${esc(s.name || '-')}</td><td class="py-1.5 pr-2">${esc(s.roll_no)}</td><td class="py-1.5 text-right text-err">${((s.count / 30) * 100).toFixed(1)}%</td></tr>
-    `).join('') || `<tr><td colspan="3" class="py-2 text-muted text-center">None 🎉</td></tr>`;
-
-    const topRows = data.top_performers.map(s => `
-      <tr class="border-b border-line/60"><td class="py-1.5 pr-2">${esc(s.name || '-')}</td><td class="py-1.5 pr-2">${esc(s.roll_no)}</td><td class="py-1.5 text-right text-ok">${((s.count / 30) * 100).toFixed(1)}%</td></tr>
-    `).join('') || `<tr><td colspan="3" class="py-2 text-muted text-center">None yet</td></tr>`;
-
-    resultEl.innerHTML = `
-      <div class="grid grid-cols-2 gap-3">
-        <div class="bg-surface2 border border-line rounded-lg p-3 text-center">
-          <div class="text-2xl font-semibold text-ink">${data.total_students}</div>
-          <div class="text-xs text-muted">Students</div>
-        </div>
-        <div class="bg-surface2 border border-line rounded-lg p-3 text-center">
-          <div class="text-2xl font-semibold text-gold">${esc(data.class_average)}</div>
-          <div class="text-xs text-muted">Class Average (30d)</div>
-        </div>
-      </div>
-      <div>
-        <h3 class="text-sm font-medium text-err mb-1.5">⚠️ Low Attendance (&lt;75%)</h3>
-        <table class="w-full text-sm"><tbody>${lowRows}</tbody></table>
-      </div>
-      <div>
-        <h3 class="text-sm font-medium text-ok mb-1.5">⭐ Top Performers (&gt;90%)</h3>
-        <table class="w-full text-sm"><tbody>${topRows}</tbody></table>
-      </div>
-    `;
-  } catch (err) {
-    resultEl.classList.remove('hidden');
-    resultEl.innerHTML = `<p class="text-sm text-err">Network error loading analytics.</p>`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Load Analytics';
-  }
-}
-
-async function loadRosterStatus() {
-  const class_name = document.getElementById('className').value.trim();
-  const subject = document.getElementById('subjectSelect').value.trim();
-  const course_type = document.getElementById('courseTypeSelect').value.trim();
-  const system = document.getElementById('systemSelect').value.trim();
-  const btn = document.getElementById('rosterStatusBtn');
-  const resultEl = document.getElementById('rosterStatusResult');
-
-  if (!class_name || !subject || !course_type || !system) {
-    resultEl.classList.remove('hidden');
-    resultEl.innerHTML = `<p class="text-sm text-err">Please select System, Class, Subject and Course Type above first.</p>`;
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = 'Loading...';
-  try {
-    const params = new URLSearchParams({ class_name, subject, course_type, system });
-    const res = await teacherFetch('/api/teacher/roster-status?' + params.toString());
-    const data = await res.json();
-
-    if (!res.ok) {
-      resultEl.classList.remove('hidden');
-      resultEl.innerHTML = `<p class="text-sm text-err">${esc(data.error || 'Failed to load list.')}</p>`;
-      return;
-    }
-
-    resultEl.classList.remove('hidden');
-    if (data.roster_count === 0) {
-      resultEl.innerHTML = `<p class="text-sm text-muted">No roster uploaded for class "${esc(class_name)}" yet. Upload one in "Upload Student List" above to use this.</p>`;
-      return;
-    }
-    if (data.absent.length === 0) {
-      resultEl.innerHTML = `<p class="text-sm text-ok">✅ Everyone on the roster for this class has already been marked (${data.marked_count}/${data.roster_count}).</p>`;
-      return;
-    }
-
-    const rows = data.absent.map(s => `
-      <div class="flex items-center justify-between py-2 border-b border-line/60" data-roll="${esc(s.roll_no)}">
-        <div><div class="text-sm text-ink font-medium">${esc(s.name) || '(no name on roster)'}</div><div class="text-xs text-muted">Roll ${esc(s.roll_no)}</div></div>
-        <button class="text-xs bg-gold text-[#171208] font-semibold rounded-lg px-3 py-1.5 hover:bg-gold/90 transition shrink-0" onclick="markPresentManually('${esc(s.roll_no)}', this)">Mark Present</button>
-      </div>
-    `).join('');
-    resultEl.innerHTML = `
-      <p class="text-xs text-muted mb-2">${data.marked_count} marked · ${data.absent.length} not yet marked (roster: ${data.roster_count})</p>
-      <div>${rows}</div>
-    `;
-  } catch (err) {
-    resultEl.classList.remove('hidden');
-    resultEl.innerHTML = `<p class="text-sm text-err">Network error loading list.</p>`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Load List';
-  }
-}
-
-async function markPresentManually(rollNo, btnEl) {
-  const class_name = document.getElementById('className').value.trim();
-  const subject = document.getElementById('subjectSelect').value.trim();
-  const course_type = document.getElementById('courseTypeSelect').value.trim();
-  const system = document.getElementById('systemSelect').value.trim();
-
-  btnEl.disabled = true;
-  btnEl.textContent = '...';
-  try {
-    const res = await teacherFetch('/api/teacher/mark-manual', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ class_name, subject, course_type, system, roll_no: rollNo })
-    });
-    const data = await res.json();
-    if (res.ok && data.success) {
-      const row = btnEl.closest('div[data-roll]');
-      if (row) row.remove();
-      loadAttendance(); // refresh the main attendance list too
-    } else {
-      alert(data.error || 'Failed to mark attendance.');
-      btnEl.disabled = false;
-      btnEl.textContent = 'Mark Present';
-    }
-  } catch (err) {
-    alert('Network error. Please try again.');
-    btnEl.disabled = false;
-    btnEl.textContent = 'Mark Present';
-  }
-}
-
 document.getElementById('requireLocation').addEventListener('change', saveSelection);
 
-// NEP Structure: Progressive form reveal
-document.getElementById('systemSelect').addEventListener('change', function() {
-  const system = this.value;
-  const classSection = document.getElementById('classSection');
-  const subjectSection = document.getElementById('subjectSection');
-  const courseTypeSection = document.getElementById('courseTypeSection');
-  const optionsSection = document.getElementById('optionsSection');
-  const generateBtn = document.getElementById('generateBtn');
-  const classNameSelect = document.getElementById('className');
-  const courseTypeSelect = document.getElementById('courseTypeSelect');
-
-  // Course/Year list: Annual = old year-wise classes, Semester = NEP
-  // 4-year, 8-semester structure. Course Type list: Annual = Core/Elective/
-  // Foundation, Semester = DSC/SEC/GE/AEC/VAC/MDC — must match student.html.
-  const prevClassName = classNameSelect.value;
-  const prevCourseType = courseTypeSelect.value;
-  classNameSelect.innerHTML = '<option value="">Select your class</option>';
-  courseTypeSelect.innerHTML = '<option value="">Select course type</option>';
-  if (system === 'Annual') {
-    classNameSelect.innerHTML += `
-      <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
-      <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
-      <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
-      <option>MA 1st</option><option>MA 2nd</option>
-    `;
-    courseTypeSelect.innerHTML += `
-      <option value="DSC">DSC — Discipline Specific Core</option>
-      <option value="SEC">SEC — Skill Enhancement Course</option>
-      <option value="GE">GE — Generic Elective</option>
-      <option value="AEC">AEC — Ability Enhancement Course</option>
-      <option value="VAC">VAC — Value Added Course</option>
-      <option value="MDC">MDC — Multi-Disciplinary Course</option>
-    `;
-  } else if (system === 'Semester') {
-    for (let s = 1; s <= 8; s++) {
-      classNameSelect.innerHTML += `<option>Semester ${s}</option>`;
-    }
-    courseTypeSelect.innerHTML += `
-      <option value="Core">Core</option>
-      <option value="Elective">Elective</option>
-      <option value="Foundation">Foundation</option>
-    `;
-  }
-  // Keep previous selections if still valid under the new lists
-  if ([...classNameSelect.options].some(o => o.value === prevClassName)) classNameSelect.value = prevClassName;
-  if ([...courseTypeSelect.options].some(o => o.value === prevCourseType)) courseTypeSelect.value = prevCourseType;
-  
-  if (system) {
-    classSection.style.display = 'block';
-  } else {
-    classSection.style.display = 'none';
-    subjectSection.style.display = 'none';
-    courseTypeSection.style.display = 'none';
-    optionsSection.style.display = 'none';
-    generateBtn.style.display = 'none';
-  }
-  saveSelection();
-  loadSessions();
-  updateReportLabel();
-});
-
-document.getElementById('className').addEventListener('change', function() {
-  const className = this.value;
-  const subjectSection = document.getElementById('subjectSection');
-  const courseTypeSection = document.getElementById('courseTypeSection');
-  const optionsSection = document.getElementById('optionsSection');
-  const generateBtn = document.getElementById('generateBtn');
-  
-  if (className) {
-    subjectSection.style.display = 'block';
-  } else {
-    subjectSection.style.display = 'none';
-    courseTypeSection.style.display = 'none';
-    optionsSection.style.display = 'none';
-    generateBtn.style.display = 'none';
-  }
-  saveSelection();
-  loadSessions();
-});
-
-document.getElementById('subjectSelect').addEventListener('change', function() {
-  const subject = this.value;
-  const courseTypeSection = document.getElementById('courseTypeSection');
-  const optionsSection = document.getElementById('optionsSection');
-  const generateBtn = document.getElementById('generateBtn');
-  
-  if (subject) {
-    courseTypeSection.style.display = 'block';
-  } else {
-    courseTypeSection.style.display = 'none';
-    optionsSection.style.display = 'none';
-    generateBtn.style.display = 'none';
-  }
-  saveSelection();
-  loadSessions();
-});
-
-document.getElementById('courseTypeSelect').addEventListener('change', function() {
-  const courseType = this.value;
-  const optionsSection = document.getElementById('optionsSection');
-  const generateBtn = document.getElementById('generateBtn');
-  
-  if (courseType) {
-    optionsSection.style.display = 'block';
-    generateBtn.style.display = 'block';
-  } else {
-    optionsSection.style.display = 'none';
-    generateBtn.style.display = 'none';
-  }
-  saveSelection();
-  loadSessions();
-});
-
+// ---- Startup ----
+initRegisterDate();
 restoreSelection();
 updateReportLabel();
-restoreActiveSession();
-loadSessions();
+// Restore the active code (server-checked), then load the day's data.
+(async () => {
+  await restoreActiveSession();
+  await loadSessions();
+  await loadAttendance();
+})();
+
+// Refresh the "N students have marked" counter every 15 seconds while a code
+// is on screen, so the teacher sees the count grow without touching anything.
+setInterval(() => {
+  if (activeSessionId && expiryTimestamp && expiryTimestamp > Date.now()) {
+    refreshSessionStatus(activeSessionId);
+  }
+}, 15000);
 </script>
 </body>
 </html>
