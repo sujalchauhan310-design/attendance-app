@@ -12,6 +12,20 @@
  *  - All validation happens on the server, never trusting client JS
  *  - Data stored permanently in MongoDB (survives server restarts)
  *
+ * ANTI-PROXY (fake attendance) PROTECTION:
+ *  - Two-step marking: the phone first asks for a one-time location token and
+ *    only receives one if the server itself confirms a fresh, accurate GPS fix
+ *    INSIDE the classroom radius. mark-attendance then requires that token.
+ *  - There is NO "give up and accept anyway" fallback (the old 15-attempt
+ *    fallback was removed — it let anyone mark from home just by retrying).
+ *  - A phone whose GPS is too imprecise is refused instead of trusted.
+ *  - Optional manual-approval mode per session: every mark arrives as "pending"
+ *    and only counts once the teacher approves it.
+ *  - Suspicious entries (identical coordinates from different phones, 0 m / very
+ *    poor accuracy, one device marking many roll numbers) are flagged and shown
+ *    in the teacher's Review tab.
+ *  - Teachers can manually mark a genuine student whose phone cannot get a fix.
+ *
  * HOW TO RUN:
  *   1. npm install
  *   2. Set these environment variables (see the CONFIG block below):
@@ -21,6 +35,14 @@
  *        TEACHER_EMAIL      — inbox that receives the PDFs
  *        CRON_SECRET        — locks down the two /api/check-and-send-* endpoints
  *        CLASSROOM_LAT / CLASSROOM_LNG / CLASSROOM_RADIUS_METERS
+ *      Optional anti-proxy tuning:
+ *        STRICT_LOCATION           (default true)  location check cannot be
+ *                                  switched off from the teacher page
+ *        MAX_ACCURACY_METERS       (default 60)    reject vaguer GPS fixes
+ *        GEOFENCE_STRICT_CIRCLE    (default true)  distance + accuracy <= radius
+ *        LOCATION_TOKEN_TTL_SEC    (default 150)   token lifetime
+ *        REQUIRE_APPROVAL_DEFAULT  (default false) new sessions need approval
+ *        TEACHER_MAX_FAILED_LOGINS (default 5) / TEACHER_LOCKOUT_MINUTES (15)
  *   3. node server.js
  *   4. Open http://localhost:3000/teacher.html   (for teacher)
  *      Open http://localhost:3000/student.html   (for student)
@@ -34,6 +56,7 @@ const rateLimit = require("express-rate-limit");
 const PDFDocument = require("pdfkit");
 const { Resend } = require("resend");
 const dns = require("dns");
+const crypto = require("crypto"); // used to hash one-time location tokens
 dns.setDefaultResultOrder("ipv4first"); //render's IPv6 route to gmail is broken; force ipv4
 
 // Body size limit for JSON requests. The roster upload posts a whole class in
@@ -52,13 +75,48 @@ app.use((req, res, next) => {
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   // The student page needs the phone's GPS; allow only our own origin to ask.
   res.setHeader("Permissions-Policy", "geolocation=(self)");
+  // XSS purane browsers me bhi rokne ke liye (modern browsers CSP use karte hain).
+  res.setHeader("X-XSS-Protection", "0"); // 0 = purana buggy filter off, CSP par bharosa
+  // HTTPS par (Render ke peeche) 1 saal tak sirf HTTPS — MITM/downgrade attack band.
+  if (req.secure) res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  // Content Security Policy: sirf apni site ka code/style/font chale.
+  // (teacher.html/student.html me inline onclick/script hain, isliye
+  // 'unsafe-inline' chahiye — bahar ka koi script phir bhi load nahi ho sakta.)
+  res.setHeader(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "img-src 'self' data: blob:",
+      "connect-src 'self'",
+      "form-action 'self'",
+      "base-uri 'self'",
+      "frame-ancestors 'self'",
+      "object-src 'none'",
+    ].join("; ")
+  );
   next();
 });
 
 app.use(express.static(path.join(__dirname, "public")));
 
+// DB down hone par /api routes se HTML error page ke bajaye saaf JSON mile
+// (frontend ke liye "data side crash" jaisa kuch nahi hona chahiye).
+app.use("/api", (req, res, next) => {
+  if (req.path === "/health" || req.path.startsWith("/health/")) return next();
+  if (req.path === "/teacher/login") return next(); // login ko DB ki zaroorat nahi
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      error: "Database se connection nahi hai. Thodi der baad try karein — aapka data safe hai.",
+      db: ["disconnected", "connected", "connecting", "disconnecting"][mongoose.connection.readyState] || "unknown",
+    });
+  }
+  next();
+});
+
 // ---------- CONFIG ----------
-const CODE_EXPIRY_MS = 7 * 60 * 1000; // code is valid for 7 minutes
 const MONGODB_URI = process.env.MONGODB_URI;
 
 // Simple shared password so only the teacher can generate codes / see attendance.
@@ -101,17 +159,95 @@ const GRID_MAX_DAYS = 45;
 // Attendance records are auto-deleted after this many days. Must be longer
 // than the longest report window (Annual = 365 days), otherwise the Annual
 // report would silently be missing older data.
-const ATTENDANCE_RETENTION_DAYS = 400;
+const ATTENDANCE_RETENTION_DAYS = Number(process.env.ATTENDANCE_RETENTION_DAYS) || 400;
 
-// If a student's phone can't give a location, they must retry. After this many
-// failed-location submissions in a day from the same device, the next one is
-// accepted anyway (silently — the student just sees the normal success message).
-const MAX_LOCATION_ATTEMPTS = 15;
+// -----------------------------------------------------------------------
+// DATA RETENTION (12 mahine wala rule)
+// -----------------------------------------------------------------------
+// Student ki identity data (name, class, major subject, email) aur
+// device <-> roll number binding kitne din tak rakhi jaye: 365 din = 12 mahine.
+// Ye ROLLING window hai — jab bhi us roll number par activity hoti hai
+// (attendance mark, roster upload, name lookup, my-attendance), uska timer
+// reset ho jata hai. Isliye padhai karne wale students kabhi delete nahi honge;
+// sirf 12 mahine se bilkul inactive records hi hatenge.
+const STUDENT_RETENTION_DAYS = Number(process.env.STUDENT_RETENTION_DAYS) || 365;
+// Device <-> roll binding ka bhi wahi 12 mahine ka rolling window.
+const DEVICE_LOCK_RETENTION_DAYS = Number(process.env.DEVICE_LOCK_RETENTION_DAYS) || STUDENT_RETENTION_DAYS;
+// Audit log (kaun, kab, kya badla) — 2 saal, taki baad me bhi saboot rahe.
+const AUDIT_RETENTION_DAYS = Number(process.env.AUDIT_RETENTION_DAYS) || 730;
+
+// -----------------------------------------------------------------------
+// ANTI-PROXY SETTINGS (fake attendance rokne ke liye)
+// -----------------------------------------------------------------------
+// STRICT mode: attendance sirf tab mark hoti hai jab server ne khud verify kar
+// liya ho ki student classroom radius ke andar hai aur uska GPS fix bharosemand
+// hai. Purana "15 baar fail hone par chup-chaap accept kar lo" wala fallback
+// poori tarah HATA diya gaya hai — wahi proxy ka sabse bada darwaza tha.
+const STRICT_LOCATION = boolWithDefault(process.env.STRICT_LOCATION, true);
+
+// GPS accuracy (metres) jitni hum maan sakte hain. Network/wifi based location
+// (cell tower / wifi) 1-3 km tak galat ho sakti hai, isliye badi accuracy ko
+// trust karne ke bajaye reject kiya jaata hai.
+const MAX_ACCURACY_METERS = Number(process.env.MAX_ACCURACY_METERS) || 60;
+
+// true hone par poora GPS uncertainty circle radius ke andar hona chahiye
+// (distance + accuracy <= radius) — sirf reported point nahi.
+const GEOFENCE_STRICT_CIRCLE = boolWithDefault(process.env.GEOFENCE_STRICT_CIRCLE, true);
+
+// Verified location token kitni der valid rahega (client usi window me submit kare).
+const LOCATION_TOKEN_TTL_MS = (Number(process.env.LOCATION_TOKEN_TTL_SEC) || 150) * 1000;
+
+// Sabse kam "asli" GPS accuracy. Asli phone ka GPS kabhi exactly 0 m nahi
+// hota; mock/fake-location apps (aur devtools se chipkaya gaya fix) aksar
+// 0 m ya 1 m se kam accuracy dete hain. Isse chhota fix = nakli, reject.
+const MIN_REAL_ACCURACY_METERS = Number(process.env.MIN_REAL_ACCURACY_METERS) || 1;
+
+// GPS fix itna purana nahi hona chahiye. Purana/cached fix = replay ka shak.
+const MAX_FIX_AGE_MS = (Number(process.env.MAX_FIX_AGE_SEC) || 45) * 1000;
+
+// Chrome DevTools / Selenium / Puppeteer jaise automation se aayi request:
+// true hone par poori tarah BLOCK (403), warna sirf flag.
+const BLOCK_AUTOMATION = boolWithDefault(process.env.BLOCK_AUTOMATION, true);
+
+// Teacher login brute-force protection (galat password attempts).
+const TEACHER_LOCKOUT_MINUTES = Number(process.env.TEACHER_LOCKOUT_MINUTES) || 15;
+const TEACHER_MAX_FAILED_LOGINS = Number(process.env.TEACHER_MAX_FAILED_LOGINS) || 5;
+
+// Code kitne minute zinda rahega — teacher in options me se chun sakta hai.
+// Chhota window = code share hokar bahar use hone ka mauka kam.
+const CODE_EXPIRY_OPTIONS_MIN = [2, 5, 7];
+
+// Naya session by default manual-approval mode me khulega ya nahi (server-wide default).
+const REQUIRE_APPROVAL_DEFAULT = boolWithDefault(process.env.REQUIRE_APPROVAL_DEFAULT, false);
+
+// Ek bhi anti-proxy flag (mock location, shared coordinates, reused device,
+// automation) lage to wo mark chup-chaap count nahi hoga — "pending" jayega
+// aur teacher ke approve karne par hi register me judega. Ye ek chhoti class
+// me bhi proxy ko bekaar bana deta hai.
+const AUTO_REVIEW_FLAGGED = boolWithDefault(process.env.AUTO_REVIEW_FLAGGED, true);
 
 // Resend sends over HTTPS (not SMTP), so it isn't blocked on Render's free tier
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-// Gmail address that RECEIVES the PDF (the teacher/sir's inbox)
+// DEFAULT inbox. Ye do kaam karta hai:
+//   1) subject-wise mapping (teacher page > Data & Alerts > Email routing) me
+//      jo subject set nahi hai, uska report yahan aata hai.
+//   2) jis student ka apna email save nahi hai, uska report bhi yahan aata hai.
 const TEACHER_EMAIL = process.env.TEACHER_EMAIL;
+
+// College ka naam — PDF header aur email heading me chhapta hai.
+const COLLEGE_NAME = process.env.COLLEGE_NAME || "College Attendance System";
+// Email bhejne wala address. Apna domain Resend par verify karke
+// EMAIL_FROM="Attendance <no-reply@yourcollege.in>" set kar sakte hain.
+const EMAIL_FROM = process.env.EMAIL_FROM || "Attendance App <onboarding@resend.dev>";
+
+// MongoDB storage quota (MB) — Data & Alerts tab "kitne din me full ho jayega"
+// projection ke liye. Atlas M0 = 512 MB, M2 = 2048, M5 = 5120, M10 = 10240.
+const MONGO_QUOTA_MB = Number(process.env.MONGO_QUOTA_MB) || 512;
+
+// DB down hone par bhi process zinda rahe (crash-loop ke bajaye saaf 503 JSON).
+// Default false = purana behaviour (turant exit) — production me isko true
+// rakhna behtar hai taki ek network hiccup poori site na gira de.
+const ALLOW_START_WITHOUT_DB = boolWithDefault(process.env.ALLOW_START_WITHOUT_DB, false);
 
 const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
@@ -142,6 +278,13 @@ mongoose.connect(MONGODB_URI)
   .then(() => console.log("Connected to MongoDB"))
   .catch((err) => {
     console.error("MongoDB connection failed:", err.message);
+    if (ALLOW_START_WITHOUT_DB) {
+      // Server chalu rahega; DB wale routes saaf-saaf 503 JSON denge aur
+      // mongoose khud background me dobara connect karne ki koshish karta hai.
+      console.error("ALLOW_START_WITHOUT_DB=true — server chalu rahega, DB routes 503 denge.");
+      return;
+    }
+    console.error("Set ALLOW_START_WITHOUT_DB=true to keep the server up while the DB is down.");
     process.exit(1);
   });
 
@@ -149,21 +292,34 @@ mongoose.connect(MONGODB_URI)
 
 // Remembers a student's name, class and major subject against their roll
 // number, so it can auto-fill (and lock) next time — permanently, across any device.
+// 12-mahine wala rule: `updatedAtDate` ek TTL field hai. Har activity par ye
+// abhi ke time par refresh hota hai, isliye jo student padhai kar raha hai uska
+// record kabhi delete nahi hota — sirf 365 din se inactive records MongoDB
+// khud hata deta hai (name/class/email/device data sab saath me).
 const studentSchema = new mongoose.Schema({
   roll_no: { type: String, required: true, unique: true },
   name: { type: String, required: true },
   class_name: { type: String, default: "" },
   major_subject: { type: String, default: "" },
+  // Optional student email. Isi par student ka apna report PDF jata hai;
+  // na hone par DEFAULT email (TEACHER_EMAIL) par chala jata hai.
+  email: { type: String, default: "" },
+  updatedAtDate: { type: Date, default: Date.now, expires: STUDENT_RETENTION_DAYS * 24 * 60 * 60 },
 });
+// Reports register ko class-wise filter karte hain — isliye class par index.
+studentSchema.index({ class_name: 1 });
 const Student = mongoose.model("Student", studentSchema);
 
 // A device is permanently bound to whichever roll number first uses it to
 // mark attendance. Once bound, that device can never mark attendance as a
 // different roll number — until a teacher unlocks it from the dashboard.
+// Binding bhi 12 mahine ke rolling window me rehti hai (har use par refresh).
 const deviceLockSchema = new mongoose.Schema({
   device_id: { type: String, required: true, unique: true },
   roll_no: { type: String, required: true },
   locked_at: Number,
+  last_seen_at: Number, // last time this device marked/read something
+  updatedAtDate: { type: Date, default: Date.now, expires: DEVICE_LOCK_RETENTION_DAYS * 24 * 60 * 60 },
 });
 const DeviceLock = mongoose.model("DeviceLock", deviceLockSchema);
 
@@ -175,6 +331,34 @@ const monthlyReportLogSchema = new mongoose.Schema({
   sent_at: Number,
 });
 const MonthlyReportLog = mongoose.model("MonthlyReportLog", monthlyReportLogSchema);
+
+// Subject-wise email routing. Teacher page se manage hota hai, code change ya
+// redeploy ki zaroorat nahi. Match ka rule: subject zaroori, course_type/
+// class_name optional ("khaali = sab"). Sabse specific match jeetta hai; koi
+// match na mile to DEFAULT email (TEACHER_EMAIL) par report jati hai.
+const emailSettingSchema = new mongoose.Schema({
+  subject: { type: String, required: true },
+  course_type: { type: String, default: "" }, // "" = har course type
+  class_name: { type: String, default: "" }, // "" = har class
+  emails: { type: [String], default: [] },
+  updated_at: Number,
+});
+emailSettingSchema.index({ subject: 1, course_type: 1, class_name: 1 }, { unique: true });
+const EmailSetting = mongoose.model("EmailSetting", emailSettingSchema);
+
+// Audit trail — kis teacher ne kab kya badla (delete/edit/manual mark/unlock/
+// generate code/email settings). Isse data chupke se badalna pakda jata hai;
+// entry sirf server likh sakta hai, teacher page se edit/delete nahi hoti.
+const auditLogSchema = new mongoose.Schema({
+  at: { type: Number, default: Date.now },
+  action: { type: String, required: true },
+  actor: { type: String, default: "" }, // IP (aur aage chale to teacher name)
+  target: { type: String, default: "" },
+  details: { type: String, default: "" },
+  atDate: { type: Date, default: Date.now, expires: AUDIT_RETENTION_DAYS * 24 * 60 * 60 },
+});
+auditLogSchema.index({ at: -1 });
+const AuditLog = mongoose.model("AuditLog", auditLogSchema);
 
 // Counts "no location came through" submissions per device per day (stored in
 // the DB so a server restart doesn't reset the count). Auto-deleted after 2 days.
@@ -195,6 +379,7 @@ const activeCodeSchema = new mongoose.Schema({
                         // a different type is a different class, no clash
 system: { type: String, enum: ["Annual", "Semester"], default: "Annual" }, // Annual / Semester system
 require_location: {type: Boolean, default: true },
+require_approval: { type: Boolean, default: false }, // teacher approves each mark (highest anti-proxy setting)
 send_pdf: { type: Boolean, default: true }, // auto-email attendance PDF 20 min after generation
 pdf_sent: { type: Boolean, default: false }, // prevents sending twice if server restarts
   created_at: Number,
@@ -204,6 +389,36 @@ pdf_sent: { type: Boolean, default: false }, // prevents sending twice if server
   createdAtDate: { type: Date, default: Date.now, expires: 90 * 24 * 60 * 60 },
 });
 const ActiveCode = mongoose.model("ActiveCode", activeCodeSchema);
+
+// One-time proof that a device really was inside the classroom when it asked to
+// mark attendance. The student's phone first sends its GPS fix to
+// /api/student/location-token; only if the server itself confirms the fix is
+// inside the radius (and accurate enough) does it hand back a random token.
+// mark-attendance refuses to save anything without a matching, unused, unexpired
+// token bound to the SAME device + session + code. That kills three common
+// proxy tricks: replaying a copied request body, scripting the endpoint from
+// home, and editing lat/lng in the browser's network tab.
+const locationTokenSchema = new mongoose.Schema({
+  token_hash: { type: String, required: true, unique: true }, // SHA-256 of the raw token
+  device_id: { type: String, required: true },
+  session_id: { type: String, required: true },
+  code: String,
+  lat: Number,
+  lng: Number,
+  accuracy: Number,
+  distance_m: Number,
+  ip: String,
+  used: { type: Boolean, default: false },
+  expires_at: Number,
+  // Phone se aaye hint flags (advisory) + server ka automation detection.
+  // Ye token ke saath mark-attendance tak carry hote hain, taki entry par
+  // flag lag sake aur "flag wale mark auto-pending" rule kaam kare.
+  hint_flags: { type: [String], default: [] },
+  automation: { type: Boolean, default: false },
+  createdAtDate: { type: Date, default: Date.now, expires: 30 * 60 }, // auto-clean after 30 min
+});
+const LocationToken = mongoose.model("LocationToken", locationTokenSchema);
+
 
 const attendanceSchema = new mongoose.Schema({
   roll_no: String,
@@ -217,6 +432,21 @@ const attendanceSchema = new mongoose.Schema({
   date: String,           // YYYY-MM-DD
   marked_at: Number,
   device_id: String,
+  // ---- anti-proxy audit trail ----
+  // "present" = counted. "pending" = location verified but the teacher is using
+  // manual-approval mode, so it only counts after the teacher approves it.
+  status: { type: String, enum: ["present", "pending"], default: "present" },
+  // Exactly how the server verified presence (kept so a teacher can review and
+  // spot anything suspicious later). distance_m/accuracy come from the one-time
+  // location token, never straight from the client.
+  lat: Number,
+  lng: Number,
+  accuracy: Number,
+  distance_m: Number,
+  ip: String,
+  flags: { type: [String], default: [] }, // e.g. ["shared_coordinates","accuracy_poor"]
+  source: { type: String, default: "student" }, // "student" | "teacher-manual"
+  approved_at: Number,
   // Real Date object (separate from the display-only `date` string) used
   // purely to drive the 60-day auto-delete below.
   createdAtDate: { type: Date, default: Date.now },
@@ -230,6 +460,12 @@ attendanceSchema.index(
   { roll_no: 1, class_name: 1, subject: 1, course_type: 1, system: 1, date: 1 },
   { unique: true }
 );
+// Live dashboard / session report / review in sab ke query patterns ke liye
+// indexes — bina in ke collection badhne par queries slow (aur time-out) hone lagti hain.
+attendanceSchema.index({ session_id: 1 });
+attendanceSchema.index({ date: 1, class_name: 1 });
+attendanceSchema.index({ device_id: 1, date: 1 });
+attendanceSchema.index({ roll_no: 1, date: 1 });
 // Auto-delete attendance records ATTENDANCE_RETENTION_DAYS (400) days after they were created. IMPORTANT:
 // the monthly combined report (sent on/around the 1st of each month, covering
 // the previous month) always runs well within this 60-day window, so the PDF
@@ -241,6 +477,41 @@ const Attendance = mongoose.model("Attendance", attendanceSchema);
 // Mongoose never drops old indexes on its own, so it was silently blocking
 // every second attendance for the same roll_no+class_name+date, no matter
 // what subject/course_type the student picked. Drop it once at startup.
+// One-time/maintenance cleanup at startup. Mongoose kabhi purane indexes khud
+// nahi hatata, aur TTL window badalne par purana index chalta rehta hai —
+// isliye har boot par "jo chahiye wahi hai kya" check karke sudhaar lete hain.
+//
+// TTL (auto-delete) ka matlab yahan:
+//   Attendance   -> ATTENDANCE_RETENTION_DAYS (default 400) din
+//   Student      -> STUDENT_RETENTION_DAYS (default 365 = 12 mahine, rolling)
+//   DeviceLock   -> DEVICE_LOCK_RETENTION_DAYS (365 = 12 mahine, rolling)
+//   AuditLog     -> AUDIT_RETENTION_DAYS (default 730 din)
+// MongoDB TTL monitor har ~60 second me chalta hai, isliye delete halka-halka
+// hota hai — server par koi load nahi padta.
+
+// Ensures a TTL index exists with exactly the wanted window, and backfills the
+// TTL field for documents created before this feature existed (a document
+// without the field is NEVER auto-deleted by Mongo).
+async function ensureTtlWindow(Model, field, seconds, label, backfill) {
+  const indexes = await Model.collection.indexes().catch(() => []);
+  for (const idx of indexes) {
+    const k = idx.key || {};
+    const sameField = k[field] !== undefined;
+    const isTtl = idx.expireAfterSeconds !== undefined;
+    if (sameField && isTtl && idx.expireAfterSeconds !== seconds) {
+      await Model.collection.dropIndex(idx.name);
+      console.log(`Dropped stale TTL index on ${label}:`, idx.name);
+    }
+  }
+  if (backfill) {
+    // Purane documents me ye field nahi hai — ek fixed date daal dete hain
+    // (aaj), warna wo kabhi expire hi nahi hote.
+    const res = await Model.updateMany({ [field]: { $exists: false } }, { $set: { [field]: new Date() } });
+    if (res.modifiedCount) console.log(`Backfilled ${field} on ${res.modifiedCount} ${label} document(s)`);
+  }
+  await Model.createIndexes().catch((e) => console.error(`${label} index create failed:`, e.message));
+}
+
 mongoose.connection.once("open", async () => {
   try {
     const indexes = await Attendance.collection.indexes();
@@ -261,6 +532,14 @@ mongoose.connection.once("open", async () => {
       }
     }
     await Attendance.createIndexes(); // (re)create the current indexes from the schema
+
+    // 12-mahine wala rolling retention (Student + DeviceLock) aur 2-saal ka
+    // audit log. Pehli baar chalne par purane documents ka timer aaj se
+    // shuru hota hai, uske baad ye sirf drift fix karta hai.
+    await ensureTtlWindow(Student, "updatedAtDate", STUDENT_RETENTION_DAYS * 24 * 60 * 60, "Student", true);
+    await ensureTtlWindow(DeviceLock, "updatedAtDate", DEVICE_LOCK_RETENTION_DAYS * 24 * 60 * 60, "DeviceLock", true);
+    await ensureTtlWindow(AuditLog, "atDate", AUDIT_RETENTION_DAYS * 24 * 60 * 60, "AuditLog", false);
+    await EmailSetting.createIndexes().catch(() => {});
   } catch (e) {
     console.error("Index cleanup failed:", e.message);
   }
@@ -402,6 +681,302 @@ function distanceInMeters(lat1, lng1, lat2, lng2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
+// ---------- RETENTION / AUDIT / EMAIL-ROUTING HELPERS ----------
+
+// 12-mahine wale rolling timer ko refresh karta hai. Har activity par call
+// hota hai (attendance mark, name lookup, my-attendance, roster upload) —
+// isliye jo student roz aata hai uska data kabhi delete nahi hota, aur jo
+// 12 mahine se gayab hai uska record apne aap hat jata hai.
+// Ye best-effort hai: yahan fail hone par asli request kabhi na ruke.
+async function touchStudentActivity(roll_no) {
+  try {
+    await Student.updateOne({ roll_no: String(roll_no) }, { $set: { updatedAtDate: new Date() } });
+  } catch (e) {
+    console.error("touchStudentActivity failed (non-fatal):", e.message);
+  }
+}
+
+async function touchDeviceActivity(device_id, roll_no) {
+  try {
+    const set = { updatedAtDate: new Date(), last_seen_at: Date.now() };
+    if (roll_no) set.roll_no = String(roll_no);
+    await DeviceLock.updateOne({ device_id: String(device_id) }, { $set: set });
+  } catch (e) {
+    console.error("touchDeviceActivity failed (non-fatal):", e.message);
+  }
+}
+
+// Audit trail (chupke se data badalna pakadne ke liye). Fire-and-forget —
+// audit log likhne me dikkat aaye to asli kaam nahi rukna chahiye.
+function audit(action, req, target, details) {
+  try {
+    AuditLog.create({
+      action,
+      actor: (req && (req.ip || "")) || "",
+      target: target ? String(target).slice(0, 200) : "",
+      details: details ? String(details).slice(0, 500) : "",
+    }).catch((e) => console.error("Audit log write failed:", e.message));
+  } catch (e) {
+    console.error("Audit log write failed:", e.message);
+  }
+}
+
+// Subject-wise email routing.
+//   - setting.subject zaroori hai (exact, case-insensitive)
+//   - course_type / class_name khali ("") = "har ek ke liye"
+//   - sabse specific match jeetta hai; barabar specific wale sab mila diye jate hain
+//   - kuch bhi match na ho -> DEFAULT email (TEACHER_EMAIL)
+// Return: { emails: [...], source: "subject-mapping" | "default" }
+async function resolveReportRecipients({ class_name, subject, course_type }) {
+  const s = String(subject || "").trim().toLowerCase();
+  const ct = String(course_type || "").trim().toLowerCase();
+  const cn = String(class_name || "").trim().toLowerCase();
+  const fallback = TEACHER_EMAIL ? [TEACHER_EMAIL] : [];
+
+  if (!s) return { emails: fallback, source: "default" };
+  try {
+    const all = await EmailSetting.find({}).lean();
+    const matching = all.filter((r) => {
+      if (String(r.subject || "").trim().toLowerCase() !== s) return false;
+      const rct = String(r.course_type || "").trim().toLowerCase();
+      const rcn = String(r.class_name || "").trim().toLowerCase();
+      if (rct && rct !== ct) return false;
+      if (rcn && rcn !== cn) return false;
+      return true;
+    });
+    if (matching.length) {
+      const best = Math.max(...matching.map((r) => (r.course_type ? 2 : 0) + (r.class_name ? 1 : 0)));
+      const emails = new Set();
+      for (const r of matching) {
+        if ((r.course_type ? 2 : 0) + (r.class_name ? 1 : 0) !== best) continue;
+        (r.emails || []).forEach((e) => emails.add(String(e).trim()));
+      }
+      const list = [...emails].filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
+      if (list.length) return { emails: list, source: "subject-mapping" };
+    }
+  } catch (e) {
+    console.error("Email routing lookup failed:", e.message);
+  }
+  return { emails: fallback, source: "default" };
+}
+
+// MongoDB storage ka asli hisaab + "kitne din me full hoga" projection.
+// 500 students x 5 classes = 2500 marks/day par Atlas M0 (512 MB) kaise bharta
+// hai — ye number teacher ko seedha dashboard par dikhta hai.
+async function getStorageStats() {
+  if (mongoose.connection.readyState !== 1) return null;
+  try {
+    const dbStats = await mongoose.connection.db.stats();
+    const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    const [att, students, locks, sessions, mails, recentMarks] = await Promise.all([
+      Attendance.estimatedDocumentCount(),
+      Student.estimatedDocumentCount(),
+      DeviceLock.estimatedDocumentCount(),
+      ActiveCode.estimatedDocumentCount(),
+      EmailSetting.estimatedDocumentCount(),
+      Attendance.countDocuments({ createdAtDate: { $gte: since } }),
+    ]);
+    const dataSize = Number(dbStats.dataSize) || 0;
+    const indexSize = Number(dbStats.indexSize) || 0;
+    const objects = Number(dbStats.objects) || 0;
+    const avgDocBytes = objects ? Math.round(dataSize / objects) : 0;
+    const docsPerDay = Math.round(recentMarks / 14);
+    const quotaBytes = MONGO_QUOTA_MB * 1024 * 1024;
+    const usedBytes = dataSize + indexSize;
+    const remainingBytes = Math.max(0, quotaBytes - usedBytes);
+    const growPerDayBytes = docsPerDay * Math.max(avgDocBytes, 1);
+    const daysLeft = growPerDayBytes > 0 ? Math.floor(remainingBytes / growPerDayBytes) : null;
+    return {
+      quota_mb: MONGO_QUOTA_MB,
+      used_mb: Number((usedBytes / (1024 * 1024)).toFixed(2)),
+      data_mb: Number((dataSize / (1024 * 1024)).toFixed(2)),
+      index_mb: Number((indexSize / (1024 * 1024)).toFixed(2)),
+      used_percent: Number(((usedBytes / quotaBytes) * 100).toFixed(1)),
+      avg_doc_bytes: avgDocBytes,
+      docs_per_day_estimate: docsPerDay,
+      days_left_estimate: daysLeft,
+      projected_full_date:
+        daysLeft === null ? null : new Date(Date.now() + daysLeft * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      counts: { attendance: att, students, device_locks: locks, sessions, email_settings: mails },
+    };
+  } catch (e) {
+    console.error("Storage stats failed:", e.message);
+    return null;
+  }
+}
+
+// Robots / automation (devtools script, Selenium, Puppeteer, curl) se aayi
+// request. Browser se aane wali normal request me ye pattern nahi hota.
+const AUTOMATION_UA_RE =
+  /headless|phantomjs|puppeteer|playwright|selenium|webdriver|curl\/|wget\/|python-requests|python-urllib|node-fetch|axios\/|okhttp|go-http-client|libwww-perl|postmanruntime|insomnia/i;
+
+function isAutomationRequest(req, clientHints) {
+  const ua = String((req.headers && req.headers["user-agent"]) || "");
+  if (AUTOMATION_UA_RE.test(ua)) return true;
+  if (Array.isArray(clientHints) && clientHints.includes("webdriver")) return true;
+  return false;
+}
+
+// Client (phone) se aane wale "hint" flags — ye ADVISORY hain, proof nahi.
+// In par sirf flag lagta hai (aur AUTO_REVIEW_FLAGGED on hone par mark pending
+// ho jata hai), kyunki client ko koi bhi cheez bolne ka haq hai.
+const ALLOWED_CLIENT_HINT_FLAGS = ["webdriver", "mock_location_suspected", "screen_off", "devtools_suspected"];
+
+function readClientHintFlags(body) {
+  const raw = body && Array.isArray(body.client_flags) ? body.client_flags : [];
+  const out = [];
+  for (const f of raw) {
+    const v = String(f || "").trim().slice(0, 40).toLowerCase();
+    if (ALLOWED_CLIENT_HINT_FLAGS.includes(v) && !out.includes(v)) out.push(v);
+  }
+  return out;
+}
+
+// IST wall-clock "HH:MM" — dashboard/CSV ke liye.
+function istHHMM(ms) {
+  try {
+    return new Date(ms).toLocaleTimeString("en-IN", { timeZone: IST_TIMEZONE, hour: "2-digit", minute: "2-digit" });
+  } catch (e) {
+    return "--:--";
+  }
+}
+
+// CSV ke liye safe cell (comma/quote/newline handle karta hai).
+function csvCell(value) {
+  const s = value === null || value === undefined ? "" : String(value);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+// ---------- GEOFENCE / ANTI-PROXY HELPERS ----------
+
+// Kisi bhi value ko SHA-256 hex me badalta hai (location token store karne ke
+// liye — DB me kabhi raw token nahi rakha jata).
+function sha256Hex(value) {
+  return crypto.createHash("sha256").update(String(value)).digest("hex");
+}
+
+// Reads a GPS fix out of a request body and decides whether it is good enough
+// to prove "this student is inside the classroom".
+//  - Real numbers only, in valid lat/lng range.
+//  - A reported accuracy is MANDATORY: wifi/cell based location can be 1-3 km
+//    off, so an imprecise fix is refused instead of trusted.
+//  - The whole uncertainty circle must fit inside the radius (distance +
+//    accuracy <= radius) — otherwise "120 m away, ±200 m accuracy" would pass.
+function readGpsFix(body) {
+  const lat = typeof body.lat === "number" ? body.lat : parseFloat(body.lat);
+  const lng = typeof body.lng === "number" ? body.lng : parseFloat(body.lng);
+  const accuracyRaw = typeof body.accuracy === "number" ? body.accuracy : parseFloat(body.accuracy);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return {
+      ok: false,
+      code: "no_location",
+      error: "Your location could not be read. Turn on GPS/Location for your browser, tap \"Get location again\" and try once more.",
+    };
+  }
+  const accuracy = Number.isFinite(accuracyRaw) && accuracyRaw > 0 ? accuracyRaw : null;
+  if (accuracy === null) {
+    return {
+      ok: false,
+      code: "no_accuracy",
+      error: "Your phone did not report an accurate location. Step near a window or outside for a moment, then try again.",
+    };
+  }
+  if (accuracy > MAX_ACCURACY_METERS) {
+    return {
+      ok: false,
+      code: "accuracy_too_low",
+      error: `Your location is too imprecise (about ${Math.round(accuracy)} m off). Move near a window or an open area and try again — attendance needs a clear GPS fix.`,
+    };
+  }
+
+  // MOCK / FAKE LOCATION CHECK.
+  // Asli phone ka GPS kabhi itna precise nahi hota (1 metre se kam). Mock
+  // location apps, "developer options > mock location", aur devtools se
+  // chipkaye gaye fix aksar 0 m / 0.5 m accuracy dete hain. Aise fix par
+  // attendance bilkul nahi banegi — pehla darwaza yahin band.
+  if (accuracy < MIN_REAL_ACCURACY_METERS) {
+    return {
+      ok: false,
+      code: "mock_location",
+      error:
+        "Your phone reported a location that a real GPS cannot produce (fake/mock location). Turn OFF any fake-location app or Developer options > Mock location, then try again.",
+    };
+  }
+
+  // FIX FRESHNESS CHECK.
+  // Phone se fix ka timestamp aata hai (pos.timestamp). Purana ya cache kiya
+  // hua fix bhej kar (replay) attendance banane ka rasta band. Purane pages
+  // jo timestamp nahi bhejte, unke liye ye step chhup-chaap skip ho jata hai
+  // — baaki checks (token, radius) waise bhi lage rehte hain.
+  const fixAt = Number(body.fix_timestamp);
+  if (Number.isFinite(fixAt) && fixAt > 0) {
+    const ageMs = Date.now() - fixAt;
+    if (ageMs > MAX_FIX_AGE_MS) {
+      return {
+        ok: false,
+        code: "stale_fix",
+        error: "Your location reading is too old. Tap \"Get location again\" and submit immediately.",
+      };
+    }
+    // Phone ki clock aage ho sakti hai, isliye sirf bahut bada future jump
+    // (2 minute se zyada) hi reject karte hain — warna genuine students block ho jayenge.
+    if (ageMs < -120000) {
+      return {
+        ok: false,
+        code: "bad_fix_time",
+        error: "Your phone's clock/time is out of sync. Set the date & time to automatic and try again.",
+      };
+    }
+  }
+
+  const distance = distanceInMeters(CLASSROOM.lat, CLASSROOM.lng, lat, lng);
+  const effective = GEOFENCE_STRICT_CIRCLE ? distance + accuracy : distance;
+  if (effective > RADIUS_METERS) {
+    return {
+      ok: false,
+      code: "outside_radius",
+      error: `You are not inside the classroom (about ${Math.round(distance)} m away). Attendance can only be marked from inside the class.`,
+      distance,
+    };
+  }
+  return { ok: true, lat, lng, accuracy, distance };
+}
+
+// Spots patterns that usually mean a faked or shared location. Nothing here
+// blocks a student on its own — it tags the entry so the teacher can review it
+// in the Review tab (and so approval mode has something to act on).
+// `extraFlags` = client hints + automation flags jo route ne pehle hi detect kar liye.
+async function computeAntiProxyFlags({ sessionId, device_id, roll_no, date, lat, lng, accuracy, extraFlags }) {
+  const flags = [];
+  if (Array.isArray(extraFlags)) {
+    for (const f of extraFlags) if (f && !flags.includes(f)) flags.push(f);
+  }
+  if (!Number.isFinite(accuracy)) flags.push("accuracy_missing");
+  else if (accuracy === 0) flags.push("accuracy_zero"); // a real GPS fix is never exactly 0 m
+  else if (accuracy < 4) flags.push("accuracy_too_perfect"); // phone GPS itna shudh nahi hota
+  else if (accuracy > 35) flags.push("accuracy_poor");
+
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    const EPS = 0.00002; // ~2 metres
+    const samePoint = await Attendance.findOne({
+      session_id: sessionId,
+      device_id: { $ne: device_id },
+      lat: { $gte: lat - EPS, $lte: lat + EPS },
+      lng: { $gte: lng - EPS, $lte: lng + EPS },
+    }).lean();
+    // Two different phones never report the exact same 5-decimal coordinate —
+    // when they do, the same fix was almost certainly copied/handed around.
+    if (samePoint) flags.push("shared_coordinates");
+  }
+
+  const reusedDevice = await Attendance.findOne({ date, device_id, roll_no: { $ne: roll_no } }).lean();
+  if (reusedDevice) flags.push("device_used_for_other_roll");
+
+  return flags;
+}
+
 // Builds a simple attendance-table PDF (as a Buffer) for one session.
 function buildAttendancePdfBuffer(session, records) {
   return new Promise((resolve, reject) => {
@@ -465,6 +1040,7 @@ async function buildOverallReportRows(class_name, subject, course_type, system, 
     course_type,
     system: systemMatch(system),
     date: { $in: dates },
+    status: { $ne: "pending" }, // pending marks are not counted until approved
   }).lean();
 
   const classDays = new Set(records.map((r) => r.date)).size;
@@ -635,13 +1211,13 @@ async function sendMonthlyCombinedReport() {
   const already = await MonthlyReportLog.findOne({ month: label });
   if (already) return { skipped: true, reason: "already sent for " + label };
 
-  if (!resend || !TEACHER_EMAIL) {
+  if (!resend) {
     console.warn("Skipping monthly report — email is not configured.");
     return { skipped: true, reason: "email not configured" };
   }
 
   const combosAgg = await Attendance.aggregate([
-    { $match: { date: { $in: dates } } },
+    { $match: { date: { $in: dates }, status: { $ne: "pending" } } },
     { $group: { _id: { class_name: "$class_name", subject: "$subject", course_type: "$course_type", system: { $ifNull: ["$system", "Annual"] } } } },
   ]);
   const combos = combosAgg.map((c) => c._id);
@@ -650,7 +1226,7 @@ async function sendMonthlyCombinedReport() {
   for (const combo of combos) {
     const { rows, classDays } = await buildOverallReportRows(combo.class_name, combo.subject, combo.course_type, combo.system, dates);
     if (!rows.length) continue;
-    const pdfBuffer = await buildOverallReportPdfBuffer(
+    const pdfBuffer = await buildOverallPdf(
       { class_name: combo.class_name, subject: combo.subject, course_type: combo.course_type, system: combo.system, dates, classDays },
       rows
     );
@@ -665,18 +1241,31 @@ async function sendMonthlyCombinedReport() {
     return { skipped: true, reason: "no attendance data for " + label };
   }
 
-  const { error: monthlyError } = await resend.emails.send({
-    from: "Attendance App <onboarding@resend.dev>",
-    to: TEACHER_EMAIL,
+  // Monthly report sab configured inboxes par jata hai: subject-wise mapping
+  // wale saare emails + DEFAULT email (dedupe karke). Koi email configure na
+  // ho to sendReportEmail saaf error deta hai (silent fail nahi).
+  const allSettings = await EmailSetting.find({}).lean().catch(() => []);
+  const monthlyRecipients = [
+    ...new Set(
+      [
+        ...allSettings.flatMap((s) => s.emails || []),
+        ...(TEACHER_EMAIL ? [TEACHER_EMAIL] : []),
+      ]
+        .map((e) => String(e || "").trim())
+        .filter(Boolean)
+    ),
+  ];
+
+  const monthlySent = await sendReportEmail({
+    to: monthlyRecipients,
     subject: `Monthly Attendance Reports — ${label}`,
     text: `Attached: ${attachments.length} attendance report(s) covering ${label}, one PDF per class/subject/course-type/system combination.`,
     attachments,
   });
-
-  if (monthlyError) throw new Error(monthlyError.message || "Resend rejected the email");
+  if (!monthlySent.ok) throw new Error(monthlySent.error || "Email send failed");
   await MonthlyReportLog.create({ month: label, sent_at: Date.now() });
   console.log(`Monthly combined report emailed for ${label} (${attachments.length} attachment(s))`);
-  return { sent: true, month: label, count: attachments.length };
+  return { sent: true, month: label, count: attachments.length, recipients: monthlySent.recipients };
 }
 
 
@@ -684,7 +1273,7 @@ async function sendMonthlyCombinedReport() {
 async function sendAttendancePdfEmail(sessionId) {
   let claimed = false;
   try {
-    if (!resend || !TEACHER_EMAIL) {
+    if (!resend) {
       console.warn(`Skipping PDF email for session ${sessionId} — email is not configured.`);
       return;
     }
@@ -698,30 +1287,86 @@ async function sendAttendancePdfEmail(sessionId) {
     if (!session) return;
     claimed = true;
 
-    const records = await Attendance.find({ session_id: sessionId }).lean();
+    // Only counted (non-pending) marks go on the emailed PDF.
+    const records = await Attendance.find({ session_id: sessionId, status: { $ne: "pending" } }).lean();
     records.sort(compareRollNo);
 
-    const pdfBuffer = await buildAttendancePdfBuffer(
-      // The date shown on the PDF is the date the class actually happened
-      // (the session's own timestamp, in IST) — not "today". Otherwise a code
-      // generated at 11:55pm and emailed at 12:15am would print the wrong day.
-      { ...session.toObject(), dateForPdf: istDateStringFromMs(session.created_at || Date.now()) },
-      records
-    );
-
-    const { error: sendError } = await resend.emails.send({
-      from: "Attendance App <onboarding@resend.dev>",
-      to: TEACHER_EMAIL,
-      subject: `Attendance — ${session.class_name} — ${session.subject} (${session.course_type}, ${session.system || "Annual"})`,
-      text: `Attached: attendance for ${session.class_name} — ${session.subject} (${session.course_type}), ${records.length} student(s) marked present. Generated automatically 20 minutes after the code was created.`,
-      attachments: [{
-        filename: `attendance-${session.class_name}-${session.subject}-${session.course_type}.pdf`.replace(/\s+/g, "_"),
-        content: pdfBuffer,
-      }],
+    // Subject-wise routing: is subject ke liye email set hai to wahan, warna
+    // DEFAULT email (TEACHER_EMAIL) par. Dono na ho to sendReportEmail saaf
+    // error deta hai aur session wapas "un-claimed" ho jata hai (cron retry).
+    const routing = await resolveReportRecipients({
+      class_name: session.class_name,
+      subject: session.subject,
+      course_type: session.course_type,
     });
 
-    if (sendError) throw new Error(sendError.message || "Resend rejected the email");
-    console.log(`Attendance PDF emailed for session ${sessionId}`);
+    const dateForPdf = istDateStringFromMs(session.created_at || Date.now());
+    const pdfBuffer = await buildSessionPdf({ ...session.toObject(), dateForPdf }, records);
+
+    // Email body me sirf "PDF attached" nahi — analytics summary bhi jati hai.
+    const mod = getPdfReports();
+    const analytics = typeof mod.computeSessionAnalytics === "function" ? mod.computeSessionAnalytics(records, {}) : null;
+    const html =
+      typeof mod.buildReportEmailHtml === "function"
+        ? mod.buildReportEmailHtml({
+            title: "Attendance Register",
+            subtitle: `${session.class_name} — ${session.subject} (${session.course_type}, ${session.system || "Annual"}) — ${dateForPdf}`,
+            collegeName: COLLEGE_NAME,
+            kpis: [
+              { label: "Present", value: records.length, tone: "green" },
+              {
+                label: "Flagged",
+                value: analytics ? analytics.flagged_count : 0,
+                tone: analytics && analytics.flagged_count ? "red" : "green",
+              },
+              {
+                label: "Avg accuracy",
+                value: analytics && analytics.avg_accuracy ? Math.round(analytics.avg_accuracy) + " m" : "-",
+                tone: "sky",
+              },
+              { label: "Devices", value: analytics ? analytics.device_count : 0, tone: "sky" },
+            ],
+            analyticsRows: analytics
+              ? [
+                  { label: "First mark", value: analytics.first_marked_at ? istHHMM(analytics.first_marked_at) : "-" },
+                  { label: "Last mark", value: analytics.last_marked_at ? istHHMM(analytics.last_marked_at) : "-" },
+                  {
+                    label: "Closest / farthest",
+                    value: `${Math.round(analytics.min_distance_m || 0)} m / ${Math.round(analytics.max_distance_m || 0)} m`,
+                  },
+                  { label: "Email routed", value: routing.source === "subject-mapping" ? "subject-wise mapping" : "default inbox" },
+                ]
+              : [],
+            riskRows: analytics
+              ? analytics.risk_rows.slice(0, 10).map((r) => ({
+                  roll_no: r.roll_no,
+                  name: r.student_name,
+                  detail: (r.flags || []).join(", "),
+                }))
+              : [],
+            bottomRows: [],
+            footerNote:
+              "Ye report code generate hone ke 20 minute baad automatically bheji gayi hai. Pending (approval ka intezaar) marks is PDF me count nahi hote.",
+            generatedAt: Date.now(),
+          })
+        : null;
+
+    const sent = await sendReportEmail({
+      to: routing.emails,
+      subject: `Attendance — ${session.class_name} — ${session.subject} (${session.course_type}, ${session.system || "Annual"}) — ${dateForPdf}`,
+      text: `Attached: attendance for ${session.class_name} — ${session.subject} (${session.course_type}) on ${dateForPdf}. ${records.length} student(s) marked present${
+        analytics && analytics.flagged_count ? `, ${analytics.flagged_count} flagged for review` : ""
+      }. Email route: ${routing.source === "subject-mapping" ? "subject-wise mapping" : "default inbox"}.`,
+      html,
+      attachments: [
+        {
+          filename: `attendance-${session.class_name}-${session.subject}-${session.course_type}-${dateForPdf}.pdf`.replace(/\s+/g, "_"),
+          content: pdfBuffer,
+        },
+      ],
+    });
+    if (!sent.ok) throw new Error(sent.error || "Email send failed");
+    console.log(`Attendance PDF emailed for session ${sessionId} to ${sent.recipients.join(", ")}`);
   } catch (err) {
     console.error(`Failed to email attendance PDF for session ${sessionId}:`, err.message);
     // Un-claim so the cron retries it later
@@ -729,38 +1374,250 @@ async function sendAttendancePdfEmail(sessionId) {
   }
 }
 
+// ---------- ADVANCED PDF + EMAIL REPORTS ----------
+// `lib/pdf-reports.js` (naya analytics-rich PDF module) available ho to wahi
+// use hota hai; nahi ho to purane simple builder par fallback — taki module
+// missing/error hone par reporting bilkul band na ho jaye.
+let pdfReportsModule = null;
+function getPdfReports() {
+  if (pdfReportsModule) return pdfReportsModule;
+  try {
+    pdfReportsModule = require("./lib/pdf-reports");
+  } catch (e) {
+    console.warn("lib/pdf-reports.js load nahi hua — purane simple PDF par fallback:", e.message);
+    pdfReportsModule = {};
+  }
+  return pdfReportsModule;
+}
+
+function pdfOpts(extra) {
+  return Object.assign({ collegeName: COLLEGE_NAME, generatedAt: Date.now() }, extra || {});
+}
+
+async function buildSessionPdf(session, records) {
+  const mod = getPdfReports();
+  if (typeof mod.buildSessionPdfBuffer === "function") {
+    try {
+      return await mod.buildSessionPdfBuffer(session, records, pdfOpts());
+    } catch (e) {
+      console.error("Advanced session PDF fail hua, purana use kar rahe hain:", e.message);
+    }
+  }
+  return buildAttendancePdfBuffer(session, records);
+}
+
+async function buildOverallPdf(meta, rows) {
+  const mod = getPdfReports();
+  if (typeof mod.buildOverallReportPdfBuffer === "function") {
+    try {
+      return await mod.buildOverallReportPdfBuffer(meta, rows, pdfOpts());
+    } catch (e) {
+      console.error("Advanced overall PDF fail hua, purana use kar rahe hain:", e.message);
+    }
+  }
+  return buildOverallReportPdfBuffer(meta, rows);
+}
+
+// Student ka personal report PDF (single student, subject-wise). Module na ho
+// to purane session-PDF builder se simple report ban jati hai.
+async function buildStudentPdf(meta, student, rows) {
+  const mod = getPdfReports();
+  if (typeof mod.buildStudentReportPdfBuffer === "function") {
+    try {
+      return await mod.buildStudentReportPdfBuffer(meta, student, rows, pdfOpts());
+    } catch (e) {
+      console.error("Student report PDF fail hua, simple fallback:", e.message);
+    }
+  }
+  const fakeRecords = rows.map((r, i) => ({
+    student_name: student.name || "",
+    roll_no: student.roll_no || "",
+    subject: r.subject,
+    course_type: `${r.course_type} (${r.attended}/${r.held} = ${r.pct}%)`,
+    marked_at: Date.now() - i * 1000,
+  }));
+  return buildAttendancePdfBuffer(
+    {
+      class_name: student.class_name || "-",
+      subject: "Overall attendance",
+      course_type: meta.system || "Annual",
+      system: meta.system || "Annual",
+      dateForPdf: istDateStringFromMs(Date.now()),
+    },
+    fakeRecords
+  );
+}
+
+// Ek hi jagah se email bhejna: recipients, HTML body + text, attachments,
+// aur saaf error handling (throw nahi — {ok:false, error} return).
+async function sendReportEmail({ to, subject, text, html, attachments }) {
+  if (!resend) return { ok: false, error: "RESEND_API_KEY set nahi hai — automatic email band hai." };
+  const recipients = (Array.isArray(to) ? to : [to]).map((e) => String(e || "").trim()).filter(Boolean);
+  if (!recipients.length) {
+    return { ok: false, error: "Koi email address configured nahi hai (TEACHER_EMAIL ya subject mapping set karein)." };
+  }
+  try {
+    const payload = { from: EMAIL_FROM, to: recipients, subject, text };
+    if (html) payload.html = html;
+    if (attachments && attachments.length) payload.attachments = attachments;
+    const { error } = await resend.emails.send(payload);
+    if (error) throw new Error(error.message || "Resend rejected the email");
+    return { ok: true, recipients };
+  } catch (e) {
+    console.error("Email send failed:", e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+
 // ---------- TEACHER AUTH ----------
 // A simple shared password, sent as a header on every teacher request.
 // Keeps random people who find the link from generating codes or seeing attendance.
-function requireTeacherAuth(req, res, next) {
-  const provided = req.headers["x-teacher-password"];
-  if (provided !== TEACHER_PASSWORD) {
-    return res.status(401).json({ error: "Incorrect teacher password." });
+// Wrong passwords are rate-limited per IP: without this, someone could sit and
+// brute-force the password and then read (or delete) the whole register.
+const teacherLoginAttempts = new Map(); // ip -> { fails, lockedUntil }
+
+// Password ko constant-time compare karna (timing attack se bachne ke liye).
+// Dono taraf SHA-256 lagakar length bhi barabar kar dete hain, kyunki
+// crypto.timingSafeEqual alag length par throw karta hai.
+function safeEqual(a, b) {
+  const ha = crypto.createHash("sha256").update(String(a === undefined || a === null ? "" : a)).digest();
+  const hb = crypto.createHash("sha256").update(String(b === undefined || b === null ? "" : b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
+
+// ---------- TEACHER SESSION TOKEN ----------
+// Har request me password bhejne ki zaroorat nahi: ek baar login karo, phir ek
+// signed token use karo. Token HMAC-SHA256 se banta hai (secret = password se
+// nikalta hai), isliye koi usko na ban kar sakta hai na badal kar — aur 12
+// ghante me khud expire ho jata hai (leaked token hamesha ke liye kaam nahi karega).
+const TEACHER_TOKEN_TTL_MS = (Number(process.env.TEACHER_TOKEN_TTL_HOURS) || 12) * 60 * 60 * 1000;
+const TEACHER_TOKEN_SECRET = crypto
+  .createHash("sha256")
+  .update(`${TEACHER_PASSWORD}|teacher-token-v1|${process.env.TOKEN_SALT || "default-salt"}`)
+  .digest("hex");
+
+function makeTeacherToken() {
+  const payload = `v1.${Date.now() + TEACHER_TOKEN_TTL_MS}`;
+  const sig = crypto.createHmac("sha256", TEACHER_TOKEN_SECRET).update(payload).digest("hex");
+  return `${payload}.${sig}`;
+}
+
+function verifyTeacherToken(token) {
+  if (typeof token !== "string") return false;
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  const [v, exp, sig] = parts;
+  if (v !== "v1") return false;
+  const expNum = Number(exp);
+  if (!Number.isFinite(expNum) || expNum <= Date.now()) return false;
+  const expected = crypto.createHmac("sha256", TEACHER_TOKEN_SECRET).update(`v1.${exp}`).digest("hex");
+  return safeEqual(sig, expected);
+}
+
+// Login: password check karke token deta hai. Purane teacher pages jo har
+// request me password bhejte hain, wo bhi chalta rahega (neeche fallback).
+app.post("/api/teacher/login", async (req, res) => {
+  const ip = req.ip || "unknown";
+  const now = Date.now();
+  const state = teacherLoginAttempts.get(ip);
+  if (state && state.lockedUntil > now) {
+    const mins = Math.ceil((state.lockedUntil - now) / 60000);
+    return res.status(429).json({ error: `Too many wrong password attempts. Try again in ${mins} minute(s).` });
   }
+  const provided = req.body && req.body.password;
+  if (!safeEqual(provided, TEACHER_PASSWORD)) {
+    const fails = (state && state.lockedUntil <= now ? state.fails : 0) + 1;
+    const locked = fails >= TEACHER_MAX_FAILED_LOGINS;
+    teacherLoginAttempts.set(ip, {
+      fails: locked ? 0 : fails,
+      lockedUntil: locked ? now + TEACHER_LOCKOUT_MINUTES * 60000 : 0,
+    });
+    audit("teacher.login.failed", req, "", "wrong password");
+    return res.status(401).json({
+      error: locked
+        ? `Too many wrong password attempts. Locked for ${TEACHER_LOCKOUT_MINUTES} minute(s).`
+        : "Incorrect teacher password.",
+    });
+  }
+  if (state) teacherLoginAttempts.delete(ip);
+  audit("teacher.login", req, "", "login ok");
+  res.json({
+    ok: true,
+    token: makeTeacherToken(),
+    expires_in_seconds: Math.round(TEACHER_TOKEN_TTL_MS / 1000),
+    server_now: now,
+  });
+});
+
+function requireTeacherAuth(req, res, next) {
+  const ip = req.ip || "unknown";
+  const now = Date.now();
+  const state = teacherLoginAttempts.get(ip);
+
+  // 1) Naya tarika: 12-ghante ka signed token.
+  const token = req.headers["x-teacher-token"];
+  if (token) {
+    if (verifyTeacherToken(token)) return next();
+    return res.status(401).json({ error: "Teacher session expire ho gaya — dobara sign in karein." });
+  }
+
+  if (state && state.lockedUntil > now) {
+    const mins = Math.ceil((state.lockedUntil - now) / 60000);
+    return res.status(429).json({ error: `Too many wrong password attempts. Try again in ${mins} minute(s).` });
+  }
+
+  // 2) Purana tarika (backward compatible): password header.
+  const provided = req.headers["x-teacher-password"];
+  if (!safeEqual(provided, TEACHER_PASSWORD)) {
+    const fails = (state && state.lockedUntil <= now ? state.fails : 0) + 1;
+    const locked = fails >= TEACHER_MAX_FAILED_LOGINS;
+    teacherLoginAttempts.set(ip, {
+      fails: locked ? 0 : fails,
+      lockedUntil: locked ? now + TEACHER_LOCKOUT_MINUTES * 60000 : 0,
+    });
+    return res.status(401).json({
+      error: locked
+        ? `Too many wrong password attempts. Locked for ${TEACHER_LOCKOUT_MINUTES} minute(s).`
+        : "Incorrect teacher password.",
+    });
+  }
+
+  if (state) teacherLoginAttempts.delete(ip);
   next();
 }
 
 // ---------- RATE LIMITING ----------
-// Keyed by device_id (not IP) so one phone can't spam attempts, without
-// blocking an entire college's worth of students who share the same WiFi IP.
-//
-// Deliberately set high (15) so this NEVER fires for normal use — typos,
-// retries, a slow network causing a few genuine re-submits. It's only meant
-// to catch a genuinely abusive pattern (e.g. a script hammering the code
-// guess). And when it does fire, the response is worded identically to the
-// app's ordinary generic error, and the RateLimit-* headers are turned off —
-// nothing here reveals that a limiter exists or was tripped. Someone
-// running a script gets the same non-answer a normal server hiccup gives,
-// with no signal to slow down, back off differently, or that they've been
-// specifically detected.
+// Keyed by device_id AND IP together. The old version used only the
+// client-supplied device_id, which a script could simply randomise on every
+// request to bypass the limiter completely. Now every request is counted
+// against both, so a randomised device_id no longer buys anything.
+const combinedKey = (req) => {
+  const device = (req.body && req.body.device_id) || (req.query && req.query.device_id) || "nodevice";
+  return `${device}|${req.ip || "noip"}`;
+};
+
 const markAttendanceLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 60, // must stay well above MAX_LOCATION_ATTEMPTS, else it would cut off students before the location fallback can apply
+  max: 60, // generous: a whole class marking on shared WiFi must never be cut off
   statusCode: 500, // matches the app's ordinary error status — 429 would give it away
   message: { error: "Something went wrong. Try again." },
   standardHeaders: false,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.body && req.body.device_id) || req.ip,
+  keyGenerator: combinedKey,
+});
+
+// Location verification gets its own, more forgiving limiter (students genuinely
+// retry GPS a few times when a signal is weak) — but still bounded, so the
+// endpoint can't be hammered by a script trying to guess its way in.
+const locationTokenLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  statusCode: 429,
+  message: { error: "Too many location checks. Please wait a minute and try again." },
+  standardHeaders: false,
+  legacyHeaders: false,
+  keyGenerator: combinedKey,
 });
 
 const generateCodeLimiter = rateLimit({
@@ -774,7 +1631,9 @@ const generateCodeLimiter = rateLimit({
 
 const studentLookupLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 80, // a student typing roll numbers on the form will never come close
+  // Was 80 per IP — a whole college behind one NAT/WiFi IP would trip it and
+  // lock out genuine students. Keyed per device+IP now and set much higher.
+  max: 300,
   statusCode: 429,
   message: { error: "Too many lookups. Please wait a few minutes and try again." },
   standardHeaders: true,
@@ -794,6 +1653,18 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
     if (!system) {
       return res.status(400).json({ error: "system must be either Annual or Semester" });
     }
+
+    // Location check: when the server is in strict (anti-proxy) mode this cannot
+    // be switched off from the browser at all — only the server owner can relax
+    // it, by setting STRICT_LOCATION=false.
+    const locationOn = STRICT_LOCATION ? true : boolWithDefault(require_location, true);
+
+    // Optional shorter code window. A code that dies in 2 minutes is far less
+    // useful to a student who is not in the room and got it on WhatsApp.
+    const requestedMin = Number(req.body.expiry_minutes);
+    const expiryMinutes = CODE_EXPIRY_OPTIONS_MIN.includes(requestedMin) ? requestedMin : CODE_EXPIRY_OPTIONS_MIN[CODE_EXPIRY_OPTIONS_MIN.length - 1];
+    const expiryMs = expiryMinutes * 60 * 1000;
+
     const code = generateCode();
     const now = Date.now(); // SERVER time
     const session = await ActiveCode.create({
@@ -802,10 +1673,11 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       subject,
       course_type,
       system,
-      require_location: boolWithDefault(require_location, true), // on unless explicitly turned off
+      require_location: locationOn,
+      require_approval: boolWithDefault(req.body.require_approval, REQUIRE_APPROVAL_DEFAULT),
       send_pdf: boolWithDefault(send_pdf, true),                 // on unless explicitly turned off
       created_at: now,
-      expires_at: now + CODE_EXPIRY_MS,
+      expires_at: now + expiryMs,
     });
     // Auto-email the attendance PDF 20 minutes after this code was generated.
     // The cron endpoint (/api/check-and-send-pdfs) is the safety net for when
@@ -813,10 +1685,11 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
     if (session.send_pdf) {
       setTimeout(() => sendAttendancePdfEmail(session._id.toString()), PDF_EMAIL_DELAY_MS);
     }
+    audit("session.generate", req, `${class_name}/${subject}/${course_type}`, `code=${code} system=${system} expiry=${expiryMinutes}m`);
     res.json({
       code,
       session_id: session._id.toString(),
-      expires_in_seconds: CODE_EXPIRY_MS / 1000,
+      expires_in_seconds: expiryMs / 1000,
       expires_at: session.expires_at,
       server_now: now,
       class_name,
@@ -824,7 +1697,10 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       course_type,
       system,
       require_location: session.require_location,
+      require_approval: session.require_approval,
       send_pdf: session.send_pdf,
+      strict_location: STRICT_LOCATION,
+      expiry_options_minutes: CODE_EXPIRY_OPTIONS_MIN,
     });
   } catch (err) {
     console.error(err);
@@ -844,6 +1720,15 @@ app.get("/api/teacher/session-status", requireTeacherAuth, async (req, res) => {
     const session = await ActiveCode.findById(session_id).lean();
     if (!session) return res.json({ found: false });
     const marked_count = await Attendance.countDocuments({ session_id });
+    // Pending = location verified, waiting for the teacher's approval (only used
+    // when this session is in manual-approval mode).
+    const pending_count = await Attendance.countDocuments({ session_id, status: "pending" });
+    // Roster size + flagged entries let the dashboard show "18 / 42 present" and
+    // a review badge without extra round-trips.
+    const [roster_size, flagged_count] = await Promise.all([
+      session.class_name ? Student.countDocuments({ class_name: session.class_name }) : Promise.resolve(0),
+      Attendance.countDocuments({ session_id, flags: { $exists: true, $ne: [] } }),
+    ]);
     const now = Date.now();
     res.json({
       found: true,
@@ -854,6 +1739,7 @@ app.get("/api/teacher/session-status", requireTeacherAuth, async (req, res) => {
       course_type: session.course_type,
       system: session.system || "Annual",
       require_location: session.require_location !== false,
+      require_approval: session.require_approval === true,
       send_pdf: session.send_pdf !== false,
       created_at: session.created_at,
       expires_at: session.expires_at,
@@ -861,6 +1747,11 @@ app.get("/api/teacher/session-status", requireTeacherAuth, async (req, res) => {
       seconds_left: Math.max(0, Math.round((session.expires_at - now) / 1000)),
       active: now <= session.expires_at,
       marked_count,
+      confirmed_count: marked_count - pending_count,
+      pending_count,
+      roster_size,
+      flagged_count,
+      strict_location: STRICT_LOCATION,
     });
   } catch (err) {
     console.error(err);
@@ -886,6 +1777,7 @@ app.post("/api/teacher/end-session", requireTeacherAuth, async (req, res) => {
       await session.save();
     }
     const marked_count = await Attendance.countDocuments({ session_id });
+    audit("session.end", req, session_id, `code=${session.code} marked=${marked_count}`);
     res.json({ success: true, code: session.code, marked_count });
   } catch (err) {
     console.error(err);
@@ -920,13 +1812,18 @@ app.get("/api/teacher/session-report", requireTeacherAuth, async (req, res) => {
       filter.session_id = session_id;
     }
 
-    const [present, roster] = await Promise.all([
+    const [allMarks, roster] = await Promise.all([
       Attendance.find(filter).lean(),
       Student.find({ class_name }).lean(),
     ]);
-    present.sort(compareRollNo);
+    allMarks.sort(compareRollNo);
 
-    const presentRolls = new Set(present.map((r) => String(r.roll_no)));
+    // Split the day's marks: confirmed present vs waiting for approval.
+    const present = allMarks.filter((r) => r.status !== "pending");
+    const pending = allMarks.filter((r) => r.status === "pending");
+    // A pending mark still means the student turned up (their fix was inside the
+    // room), so they are not listed as absent while a teacher decides.
+    const presentRolls = new Set(allMarks.map((r) => String(r.roll_no)));
     // Only roll numbers we know about can be "absent" — a number that has never
     // been seen anywhere cannot be counted as missing from a class.
     const absent = roster
@@ -942,8 +1839,10 @@ app.get("/api/teacher/session-report", requireTeacherAuth, async (req, res) => {
       system: systemFilter || "",
       roster_size: roster.length,
       present_count: present.length,
+      pending_count: pending.length,
       absent_count: absent.length,
       present,
+      pending,
       absent,
     });
   } catch (err) {
@@ -959,10 +1858,13 @@ app.get("/api/student/lookup-name", studentLookupLimiter, async (req, res) => {
     const { roll_no } = req.query;
     if (!roll_no) return res.json({ name: "", class_name: "", major_subject: "" });
     const student = await Student.findOne({ roll_no: roll_no.trim() });
+    // Lookup bhi activity hai — 12-mahine wala rolling timer refresh ho jata hai.
+    if (student) await touchStudentActivity(roll_no.trim());
     res.json({
       name: student ? student.name : "",
       class_name: student ? student.class_name || "" : "",
       major_subject: student ? student.major_subject || "" : "",
+      email: student ? student.email || "" : "",
     });
   } catch (err) {
     console.error(err);
@@ -984,23 +1886,35 @@ app.post("/api/teacher/upload-roster", requireTeacherAuth, async (req, res) => {
     }
     const lines = roster_text.split("\n").map((l) => l.trim()).filter(Boolean);
     let skipped = 0;
+    let withEmail = 0;
     // One bulkWrite instead of one query per line — a 500-student roster used to
     // mean 500 sequential round-trips to Atlas (slow, and easy to time out).
+    // Column order: roll_no, name, class_name, major_subject, email(optional)
+    // (email na ho to report DEFAULT email par jati hai — student ka data phir
+    // bhi kaam karta hai, kuch toot-ta nahi.)
     const ops = [];
     for (const line of lines) {
       const parts = line.split(/,|\t/).map((p) => p.trim());
-      const [roll_no, name, class_name, major_subject] = parts;
+      const [roll_no, name, class_name, major_subject, emailRaw] = parts;
       if (!roll_no || !name) {
         skipped++;
         continue;
       }
-      ops.push({
-        updateOne: {
-          filter: { roll_no },
-          update: { $set: { roll_no, name, class_name: class_name || "", major_subject: major_subject || "" } },
-          upsert: true,
-        },
-      });
+      const email = emailRaw && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailRaw) ? emailRaw : "";
+      if (emailRaw && !email) skipped++; // line saved, sirf galat email skip hui
+      if (email) withEmail++;
+      const set = {
+        roll_no,
+        name,
+        class_name: class_name || "",
+        major_subject: major_subject || "",
+        // 12-mahine wala rolling timer — upload bhi activity hai.
+        updatedAtDate: new Date(),
+      };
+      // Email sirf tab set karo jab diya gaya ho, warna pehle se saved email
+      // galti se blank ho jayega.
+      if (email) set.email = email;
+      ops.push({ updateOne: { filter: { roll_no }, update: { $set: set }, upsert: true } });
     }
 
     let added = 0;
@@ -1017,7 +1931,8 @@ app.post("/api/teacher/upload-roster", requireTeacherAuth, async (req, res) => {
       }
       added = (result.upsertedCount || 0) + (result.matchedCount || 0);
     }
-    res.json({ success: true, added, skipped, total: lines.length });
+    audit("roster.upload", req, `${lines.length} line(s)`, `added=${added} skipped=${skipped} with_email=${withEmail}`);
+    res.json({ success: true, added, skipped, with_email: withEmail, total: lines.length });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong uploading the list." });
@@ -1042,6 +1957,8 @@ app.get("/api/teacher/roster", requireTeacherAuth, async (req, res) => {
         name: s.name,
         class_name: s.class_name || "",
         major_subject: s.major_subject || "",
+        email: s.email || "",
+        updated_at: s.updatedAtDate ? new Date(s.updatedAtDate).toISOString().slice(0, 10) : "",
       })),
     });
   } catch (err) {
@@ -1168,6 +2085,7 @@ app.patch("/api/teacher/attendance/update", requireTeacherAuth, async (req, res)
     existing.subject = finalSubject;
     await existing.save();
 
+    audit("attendance.update", req, `id=${existing._id}`, `roll_no=${cleanRoll} subject=${finalSubject} date=${existing.date}`);
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -1186,6 +2104,12 @@ app.delete("/api/teacher/attendance/delete", requireTeacherAuth, async (req, res
     if (!deleted) {
       return res.status(404).json({ error: "Attendance entry not found." });
     }
+    audit(
+      "attendance.delete",
+      req,
+      `id=${record_id}`,
+      `roll_no=${deleted.roll_no} ${deleted.class_name}/${deleted.subject}/${deleted.course_type} date=${deleted.date}`
+    );
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -1203,10 +2127,208 @@ app.delete("/api/teacher/device-lock", requireTeacherAuth, async (req, res) => {
     }
     const cleanRoll = String(roll_no).trim();
     const result = await DeviceLock.deleteMany({ roll_no: cleanRoll });
+    audit("device.unlock", req, `roll_no=${cleanRoll}`, `removed=${result.deletedCount}`);
     res.json({ success: true, removed: result.deletedCount });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong unlocking the device." });
+  }
+});
+
+// ---------- APPROVAL MODE + MANUAL MARK (anti-proxy helpers) ----------
+
+// Turn manual-approval mode on/off for a session that is already running.
+// ON = every new mark arrives as "pending" and only counts once the teacher
+// approves it. Useful for a class where proxy attempts are known to happen.
+app.post("/api/teacher/session/set-approval", requireTeacherAuth, async (req, res) => {
+  try {
+    const { session_id } = req.body;
+    if (!session_id || !mongoose.Types.ObjectId.isValid(session_id)) {
+      return res.status(400).json({ error: "A valid session_id is required." });
+    }
+    const require_approval = boolWithDefault(req.body.require_approval, false);
+    const session = await ActiveCode.findByIdAndUpdate(session_id, { require_approval }, { new: true });
+    if (!session) return res.status(404).json({ error: "Session not found." });
+    const pending_count = await Attendance.countDocuments({ session_id, status: "pending" });
+    audit("session.set-approval", req, session_id, `require_approval=${require_approval} pending=${pending_count}`);
+    res.json({ success: true, require_approval: session.require_approval, pending_count });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong updating approval mode." });
+  }
+});
+
+// Approve one pending mark — the teacher saw the student in class.
+app.post("/api/teacher/attendance/approve", requireTeacherAuth, async (req, res) => {
+  try {
+    const { record_id } = req.body;
+    if (!record_id) return res.status(400).json({ error: "record_id is required." });
+    const record = await Attendance.findByIdAndUpdate(
+      record_id,
+      { status: "present", approved_at: Date.now() },
+      { new: true }
+    );
+    if (!record) return res.status(404).json({ error: "Attendance entry not found." });
+    audit("attendance.approve", req, `id=${record_id}`, `roll_no=${record.roll_no} ${record.class_name}/${record.subject}`);
+    res.json({ success: true, status: record.status });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong approving the entry." });
+  }
+});
+
+// Reject (remove) one pending mark — the student was not actually in class.
+// The row is deleted so the student can submit again if this was a mistake.
+app.post("/api/teacher/attendance/reject", requireTeacherAuth, async (req, res) => {
+  try {
+    const { record_id } = req.body;
+    if (!record_id) return res.status(400).json({ error: "record_id is required." });
+    const deleted = await Attendance.findOneAndDelete({ _id: record_id, status: "pending" });
+    if (!deleted) {
+      return res.status(404).json({ error: "No pending entry found for that id (already approved or deleted?)." });
+    }
+    audit("attendance.reject", req, `id=${record_id}`, `roll_no=${deleted.roll_no} ${deleted.class_name}/${deleted.subject} flags=${(deleted.flags || []).join("|")}`);
+    res.json({ success: true, removed: 1 });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong rejecting the entry." });
+  }
+});
+
+// Approve every pending mark of one session in a single tap.
+app.post("/api/teacher/attendance/approve-all", requireTeacherAuth, async (req, res) => {
+  try {
+    const { session_id } = req.body;
+    if (!session_id || !mongoose.Types.ObjectId.isValid(session_id)) {
+      return res.status(400).json({ error: "A valid session_id is required." });
+    }
+    const result = await Attendance.updateMany(
+      { session_id, status: "pending" },
+      { status: "present", approved_at: Date.now() }
+    );
+    audit("attendance.approve-all", req, session_id, `approved=${result.modifiedCount || 0}`);
+    res.json({ success: true, approved: result.modifiedCount || 0 });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong approving the entries." });
+  }
+});
+
+// Manual mark — the safety valve for a genuine student whose phone cannot get a
+// usable GPS fix (old handset, basement room, no signal). Only a logged-in
+// teacher can do this, and the entry is tagged "teacher-manual" so the register
+// always shows it as a human decision rather than a verified fix.
+app.post("/api/teacher/attendance/manual-mark", requireTeacherAuth, async (req, res) => {
+  try {
+    const { roll_no, class_name, subject, course_type, name } = req.body;
+    if (!roll_no || !class_name || !subject || !course_type) {
+      return res.status(400).json({ error: "Roll number, class, subject and course type are required." });
+    }
+    if (!/^[0-9]+$/.test(String(roll_no).trim())) {
+      return res.status(400).json({ error: "Roll number must contain digits only." });
+    }
+    const system = normalizeSystem(req.body.system);
+    if (!system) return res.status(400).json({ error: "system must be either Annual or Semester." });
+
+    const day = parseReportDate(req.body.date);
+    if (day.error) return res.status(400).json({ error: day.error });
+
+    const cleanRoll = String(roll_no).trim();
+    const now = Date.now();
+
+    // A roster/previous record always wins over anything typed in now, so a
+    // teacher cannot accidentally rename a student from this screen.
+    const existingStudent = await Student.findOne({ roll_no: cleanRoll });
+    const student_name = existingStudent ? existingStudent.name : (name ? String(name).trim() : "");
+    if (!student_name) {
+      return res.status(400).json({ error: "This roll number is new — enter the student's name as well." });
+    }
+    if (!existingStudent) {
+      try {
+        await Student.create({ roll_no: cleanRoll, name: student_name, class_name, major_subject: "" });
+      } catch (e) {
+        if (e.code !== 11000) throw e; // 11000 = a retry already created it, fine
+      }
+    }
+
+    const clash = await Attendance.findOne({ roll_no: cleanRoll, class_name, subject, course_type, system: systemMatch(system), date: day.date });
+    if (clash) {
+      if (clash.status === "pending") {
+        // They had already verified their location and were only waiting for a tap.
+        clash.status = "present";
+        clash.approved_at = now;
+        await clash.save();
+        return res.json({ success: true, marked: false, approved: true, message: `${student_name} was already waiting for approval — approved now.` });
+      }
+      return res.status(409).json({ error: `${student_name} already has an entry for this subject and course type on ${day.date}.` });
+    }
+
+    await Attendance.create({
+      roll_no: cleanRoll,
+      student_name,
+      subject,
+      course_type,
+      system,
+      major_subject: existingStudent ? existingStudent.major_subject || "" : "",
+      class_name,
+      session_id: "",
+      date: day.date,
+      marked_at: now,
+      device_id: "teacher-manual",
+      status: "present",
+      source: "teacher-manual",
+      flags: [],
+      approved_at: now,
+    });
+
+    res.json({ success: true, marked: true, message: `${student_name} (Roll No ${cleanRoll}) marked present by you for ${day.date}.` });
+    audit("attendance.manual-mark", req, `roll_no=${cleanRoll}`, `${class_name}/${subject}/${course_type} date=${day.date}`);
+    await touchStudentActivity(cleanRoll);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong marking attendance manually." });
+  }
+});
+
+// Everything a teacher needs to judge one day at a glance: marks waiting for
+// approval, entries flagged by the anti-proxy checks, and which devices failed
+// location verification (a device failing 10 times today deserves a look).
+app.get("/api/teacher/review", requireTeacherAuth, async (req, res) => {
+  try {
+    const day = parseReportDate(req.query.date);
+    if (day.error) return res.status(400).json({ error: day.error });
+    const classFilter = req.query.class_name ? { class_name: req.query.class_name } : {};
+
+    const [pending, flagged, failures] = await Promise.all([
+      Attendance.find({ date: day.date, status: "pending", ...classFilter }).lean(),
+      Attendance.find({ date: day.date, flags: { $exists: true, $ne: [] }, ...classFilter }).lean(),
+      LocationAttempt.find({ date: day.date, count: { $gt: 0 } }).sort({ count: -1 }).limit(25).lean(),
+    ]);
+
+    // Map failing devices to their roll numbers so the teacher can tell who it is.
+    const locks = await DeviceLock.find({ device_id: { $in: failures.map((f) => f.device_id) } }).lean();
+    const rollByDevice = new Map(locks.map((l) => [l.device_id, l.roll_no]));
+    const studentRolls = [...new Set(locks.map((l) => l.roll_no))];
+    const students = await Student.find({ roll_no: { $in: studentRolls } }).lean();
+    const nameByRoll = new Map(students.map((s) => [s.roll_no, s.name]));
+
+    pending.sort(compareRollNo);
+    flagged.sort(compareRollNo);
+
+    res.json({
+      date: day.date,
+      pending_count: pending.length,
+      flagged_count: flagged.length,
+      pending,
+      flagged,
+      location_failures: failures.map((f) => {
+        const roll = rollByDevice.get(f.device_id) || "";
+        return { device_id: f.device_id, roll_no: roll, student_name: roll ? nameByRoll.get(roll) || "" : "", count: f.count };
+      }),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong loading the review list." });
   }
 });
 
@@ -1226,7 +2348,7 @@ app.get("/api/teacher/reports/overall-download", requireTeacherAuth, async (req,
     const n = REPORT_DAYS[system];
     const dates = lastNDates(n);
     const { rows, classDays } = await buildOverallReportRows(class_name, subject, course_type, system, dates);
-    const pdfBuffer = await buildOverallReportPdfBuffer({ class_name, subject, course_type, system, dates, classDays }, rows);
+    const pdfBuffer = await buildOverallPdf({ class_name, subject, course_type, system, dates, classDays }, rows);
     const filename = `${n}day-report-${class_name}-${subject}-${course_type}-${system}.pdf`.replace(/\s+/g, "_");
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -1268,6 +2390,10 @@ app.get("/api/student/my-attendance", studentLookupLimiter, async (req, res) => 
       });
     }
 
+    // Active student + active device ke 12-mahine wale timer refresh.
+    await touchStudentActivity(cleanRoll);
+    await touchDeviceActivity(device_id, cleanRoll);
+
     const student = await Student.findOne({ roll_no: cleanRoll }).lean();
     const days = REPORT_DAYS[system];
     const dates = lastNDates(days);
@@ -1276,7 +2402,17 @@ app.get("/api/student/my-attendance", studentLookupLimiter, async (req, res) => 
       roll_no: cleanRoll,
       system: systemMatch(system),
       date: { $in: dates },
+      status: { $ne: "pending" }, // not counted until the teacher approves (if approval mode is on)
     }).lean();
+
+    // Marks that are still waiting for the teacher's approval — shown to the
+    // student so an approval-mode session doesn't look like lost attendance.
+    const pendingCount = await Attendance.countDocuments({
+      roll_no: cleanRoll,
+      system: systemMatch(system),
+      date: { $in: dates },
+      status: "pending",
+    });
 
     // Group the student's own marks by class + subject + course type — the same
     // subject taught as DSC and as SEC is two classes with two percentages.
@@ -1336,6 +2472,7 @@ app.get("/api/student/my-attendance", studentLookupLimiter, async (req, res) => 
       total_attended: totalAttended,
       total_held: totalHeld,
       overall_pct: totalHeld ? Number(((totalAttended / totalHeld) * 100).toFixed(1)) : 0,
+      pending_count: pendingCount,
       subjects,
     });
   } catch (err) {
@@ -1344,10 +2481,119 @@ app.get("/api/student/my-attendance", studentLookupLimiter, async (req, res) => 
   }
 });
 
+// ---------- LOCATION VERIFICATION (step 1 of marking attendance) ----------
+// The student's phone sends its GPS fix here. The server checks that the code is
+// live, that the fix is inside the classroom radius AND that the fix is accurate
+// enough to believe — only then does it return a short-lived, single-use,
+// device-bound token. mark-attendance refuses to save anything without that
+// token, so three classic proxy tricks all fail:
+//   1. copying the request body out of DevTools and replaying it elsewhere,
+//   2. scripting this endpoint from home (no fix → no token),
+//   3. hand-editing lat/lng in the browser's network tab (token is bound to the
+//      exact fix the server itself validated).
+app.post("/api/student/location-token", locationTokenLimiter, async (req, res) => {
+  try {
+    const { device_id, code, class_name, subject, course_type } = req.body;
+    if (!device_id) {
+      return res.status(400).json({ error: "Device could not be identified. Please reload the page and try again." });
+    }
+    if (!class_name || !code || !subject || !course_type) {
+      return res.status(400).json({ error: "Fill in your class, subject, course type and the code first." });
+    }
+    const system = normalizeSystem(req.body.system);
+    if (!system) {
+      return res.status(400).json({ error: "Please choose Annual or Semester." });
+    }
+
+    const now = Date.now();
+    const activeCode = await ActiveCode.findOne({ class_name, subject, course_type, system: systemMatch(system) }).sort({ created_at: -1 });
+    if (!activeCode) {
+      return res.status(400).json({ error: "No active code found for this class, subject, course type and system. Check your selections, or ask your teacher to generate a code." });
+    }
+    if (now > activeCode.expires_at) {
+      return res.status(400).json({ error: "This code has expired. Ask your teacher for the current code." });
+    }
+    if (activeCode.code !== String(code).trim()) {
+      return res.status(400).json({ error: "Incorrect code." });
+    }
+
+    // The teacher explicitly turned location check off for this session (only
+    // possible when the server allows it) → nothing to verify, no token needed.
+    if (activeCode.require_location === false) {
+      return res.json({ success: true, token: null, location_not_required: true, require_approval: activeCode.require_approval === true });
+    }
+
+    // ---- AUTOMATION / DEVTOOLS CHECK ----
+    // DevTools console se script chalana, Selenium/Puppeteer/Playwright, ya
+    // curl se endpoint hit karna — in sab se attendance banane ka rasta band.
+    // Server browser ke User-Agent ka pattern dekhta hai aur phone se aaye
+    // advisory hints (navigator.webdriver) bhi leta hai.
+    const hintFlags = readClientHintFlags(req.body);
+    const automation = isAutomationRequest(req, hintFlags);
+    if (automation && BLOCK_AUTOMATION) {
+      return res.status(403).json({
+        error:
+          "Attendance cannot be marked from this browser setup (automation/devtools detected). Student page ko Chrome ya Safari me normally kholein.",
+        reason: "automation_blocked",
+      });
+    }
+    if (automation) hintFlags.push("automation_suspected");
+
+    const fix = readGpsFix(req.body);
+    if (!fix.ok) {
+      // Best-effort audit: how many times did this device fail to prove it was
+      // in class today? Shown to the teacher in the Review tab.
+      try {
+        await LocationAttempt.findOneAndUpdate(
+          { device_id, date: todayDateString() },
+          { $inc: { count: 1 } },
+          { upsert: true, new: true, setDefaultsOnInsert: true } // createdAtDate default drives the 2-day TTL
+        );
+      } catch (e) { /* audit only — never block the response */ }
+      return res.status(403).json({ error: fix.error, reason: fix.code, distance_m: Math.round(fix.distance || 0), radius_m: RADIUS_METERS });
+    }
+
+    // Random token; only its SHA-256 hash is stored, so even a database leak
+    // cannot be used to mark attendance.
+    const rawToken = crypto.randomBytes(24).toString("hex");
+    await LocationToken.create({
+      token_hash: sha256Hex(rawToken),
+      device_id: String(device_id),
+      session_id: activeCode._id.toString(),
+      code: activeCode.code,
+      lat: fix.lat,
+      lng: fix.lng,
+      accuracy: fix.accuracy,
+      distance_m: Math.round(fix.distance * 100) / 100,
+      ip: req.ip,
+      expires_at: now + LOCATION_TOKEN_TTL_MS,
+      hint_flags: hintFlags,
+      automation,
+    });
+
+    res.json({
+      success: true,
+      token: rawToken,
+      expires_in_seconds: Math.round(LOCATION_TOKEN_TTL_MS / 1000),
+      distance_m: Math.round(fix.distance),
+      accuracy_m: Math.round(fix.accuracy),
+      radius_m: RADIUS_METERS,
+      require_approval: activeCode.require_approval === true,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong checking your location. Try again." });
+  }
+});
+
 // ---------- STUDENT ROUTE ----------
 app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res) => {
   try {
     const { roll_no, class_name, code, device_id, name, subject, course_type, major_subject, lat, lng } = req.body;
+    // Optional student email (report yahin bheja jayega; na ho to DEFAULT email).
+    const cleanEmail = req.body.email && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(req.body.email).trim())
+      ? String(req.body.email).trim()
+      : "";
 
     if (!roll_no || !class_name || !code || !subject || !course_type) {
       return res.status(400).json({ error: "All fields are required" });
@@ -1357,6 +2603,15 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
     }
     if (!device_id) {
       return res.status(400).json({ error: "Device could not be identified. Please reload the page and try again." });
+    }
+    // Automation/devtools se direct API call? Block (jaisa location-token route me).
+    const clientHints = readClientHintFlags(req.body);
+    if (isAutomationRequest(req, clientHints) && BLOCK_AUTOMATION) {
+      return res.status(403).json({
+        error:
+          "Attendance cannot be marked from this browser setup (automation/devtools detected). Student page ko Chrome ya Safari me normally kholein.",
+        reason: "automation_blocked",
+      });
     }
     const system = normalizeSystem(req.body.system);
     if (!system) {
@@ -1379,38 +2634,64 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       return res.status(400).json({ error: "Incorrect code." });
     }
 
-    // 1b. Location.
-    //   (a) A location came through and is outside the radius → ALWAYS reject.
-    //   (b) A location came through and is inside → fine.
-    //   (c) NO location came through (denied / timed out / Safari quirk) and
-    //       the teacher has location check ON → ask the student to retry. Once
-    //       the same device has failed MAX_LOCATION_ATTEMPTS times today, the
-    //       next submission is accepted silently, with the normal success
-    //       message (nothing tells the student location wasn't used).
-    //   (d) NO location and the teacher turned location check OFF → accept.
-    const hasLocation =
-      typeof lat === "number" && typeof lng === "number" &&
-      Number.isFinite(lat) && Number.isFinite(lng) &&
-      Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
-    if (hasLocation) {
-      const dist = distanceInMeters(CLASSROOM.lat, CLASSROOM.lng, lat, lng);
-      if (dist > RADIUS_METERS) {
+    // 1b. Location — the anti-proxy core.
+    //     There is deliberately NO fallback any more. To mark attendance the
+    //     phone must present a one-time token from /api/student/location-token,
+    //     which the server issues only after it has itself confirmed a fresh,
+    //     accurate GPS fix inside the classroom radius. A copied request body, a
+    //     script run from home, or hand-edited lat/lng all have no valid token.
+    let location = { lat: null, lng: null, accuracy: null, distance_m: null, flags: [] };
+    if (activeCode.require_location !== false) {
+      const rawToken = typeof req.body.location_token === "string" ? req.body.location_token.trim() : "";
+      if (!rawToken) {
         return res.status(403).json({
-          error: `You appear to be too far from the classroom (${Math.round(dist)}m away). Attendance can only be marked inside class.`,
+          error: "Location verification is required before attendance can be marked. Tap \"Get location again\" and submit once more.",
+          reason: "no_token",
         });
       }
-    } else if (activeCode.require_location !== false) {
-      const attempt = await LocationAttempt.findOneAndUpdate(
-        { device_id, date: todayDateString() },
-        { $inc: { count: 1 } },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
+      // Claim the token atomically: single-use, and bound to this device, this
+      // session and this exact code, so it cannot be replayed or borrowed.
+      const claim = await LocationToken.findOneAndUpdate(
+        {
+          token_hash: sha256Hex(rawToken),
+          device_id: String(device_id),
+          session_id: activeCode._id.toString(),
+          code: activeCode.code,
+          used: false,
+          expires_at: { $gt: now },
+        },
+        { used: true },
+        { new: true }
       );
-      if (attempt.count <= MAX_LOCATION_ATTEMPTS) {
+      if (!claim) {
         return res.status(403).json({
-          error: "Your location could not be verified. Turn on location for your browser, tap \"Retry Location\", and try again.",
+          error: "Your location check expired or could not be verified. Tap \"Get location again\" and submit once more.",
+          reason: "bad_token",
         });
       }
-      // else: over the limit → fall through and mark attendance normally
+      // Belt-and-braces: validate the stored fix again against the geofence, so
+      // even a stale or reused token can never smuggle in an out-of-class fix.
+      const recheck = readGpsFix({ lat: claim.lat, lng: claim.lng, accuracy: claim.accuracy });
+      if (!recheck.ok) {
+        return res.status(403).json({ error: recheck.error, reason: recheck.code });
+      }
+      location = {
+        lat: claim.lat,
+        lng: claim.lng,
+        accuracy: claim.accuracy,
+        distance_m: claim.distance_m,
+        flags: await computeAntiProxyFlags({
+          sessionId: activeCode._id.toString(),
+          device_id: String(device_id),
+          roll_no: cleanRoll,
+          date: todayDateString(),
+          lat: claim.lat,
+          lng: claim.lng,
+          accuracy: claim.accuracy,
+          // Token ke saath jo hints/automation aaye the + abhi ke client hints.
+          extraFlags: [...(claim.hint_flags || []), ...(claim.automation ? ["automation_suspected"] : []), ...clientHints],
+        }),
+      };
     }
 
     // 1c. Permanent device lock — a device binds to whichever roll number
@@ -1429,7 +2710,11 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
     const date = todayDateString();
     const alreadyMarked = await Attendance.findOne({ roll_no: cleanRoll, class_name, subject, course_type, system: systemMatch(system), date });
     if (alreadyMarked) {
-      return res.status(409).json({ error: "Attendance already marked for this subject and course type today." });
+      return res.status(409).json({
+        error: alreadyMarked.status === "pending"
+          ? "Your attendance for this subject and course type is already recorded — it is waiting for your teacher's approval."
+          : "Attendance already marked for this subject and course type today.",
+      });
     }
 
     // 2b. Check if this same device already marked someone's attendance for
@@ -1471,13 +2756,19 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       } else if (student_major_subject) {
         await Student.findOneAndUpdate({ roll_no: cleanRoll }, { major_subject: student_major_subject });
       }
+
+      // Email: pehli baar diya gaya ho to save kar lo (naam/class ki tarah
+      // ek baar lock). Iske baad student ka report isi email par jayega.
+      if (cleanEmail && !existingStudent.email) {
+        await Student.findOneAndUpdate({ roll_no: cleanRoll }, { email: cleanEmail });
+      }
    } else {
       student_name = name ? name.trim() : "";
       if (!student_name) {
         return res.status(400).json({ error: "Please enter your name — this is your first time marking attendance." });
       }
       try {
-        await Student.create({ roll_no: cleanRoll, name: student_name, class_name, major_subject: student_major_subject });
+        await Student.create({ roll_no: cleanRoll, name: student_name, class_name, major_subject: student_major_subject, email: cleanEmail });
       } catch (createErr) {
         if (createErr.code === 11000) {
           // A retry from a flaky connection already created this student a
@@ -1491,7 +2782,14 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       }
     }
 
-    // 4. Save attendance
+    // 4. Save attendance. In manual-approval mode the entry is saved as
+    //    "pending" — the location was verified, but a human (the teacher) has the
+    //    final say, so a proxy carrying a friend's phone still cannot slip in.
+    //    AUTO_REVIEW_FLAGGED hone par koi bhi anti-proxy flag wali entry bhi
+    //    apne aap "pending" hoti hai — chupke se proxy nahi nikal sakti.
+    const flagged = (location.flags || []).length > 0;
+    const autoReview = AUTO_REVIEW_FLAGGED && flagged && activeCode.require_approval !== true;
+    const status = activeCode.require_approval === true || autoReview ? "pending" : "present";
     await Attendance.create({
       roll_no: cleanRoll,
       student_name,
@@ -1504,12 +2802,20 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       date,
       marked_at: now,
       device_id,
+      status,
+      lat: location.lat,
+      lng: location.lng,
+      accuracy: location.accuracy,
+      distance_m: location.distance_m,
+      ip: req.ip,
+      flags: location.flags,
+      source: "student",
     });
 
     // 5. Lock this device to this roll number permanently, if not already locked
     if (!deviceLock) {
       try {
-        await DeviceLock.create({ device_id, roll_no: cleanRoll, locked_at: now });
+        await DeviceLock.create({ device_id, roll_no: cleanRoll, locked_at: now, last_seen_at: now });
       } catch (lockErr) {
         // Extremely rare race (e.g. a double-tap creating two requests at once).
         // Attendance above is already saved successfully — don't fail the
@@ -1518,7 +2824,27 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       }
     }
 
-    res.json({ success: true, message: "Attendance marked successfully!", roll_no, date });
+    // 12-mahine wale rolling retention timer ko refresh karo: active student
+    // aur active device kabhi auto-delete nahi honge.
+    await touchStudentActivity(cleanRoll);
+    await touchDeviceActivity(device_id);
+
+    res.json({
+      success: true,
+      pending: status === "pending",
+      status,
+      auto_review: autoReview,
+      flags: location.flags || [],
+      message:
+        status === "pending"
+          ? autoReview
+            ? "Location verified, but this entry needs your teacher's review before it counts."
+            : "Location verified — your attendance is waiting for your teacher's approval."
+          : "Attendance marked successfully!",
+      roll_no,
+      date,
+      distance_m: location.distance_m,
+    });
  } catch (err) {
     if (err.code === 11000) {
       // Figure out WHICH unique index actually clashed — don't always blame
@@ -1538,6 +2864,516 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
     res.status(500).json({ error: "Something went wrong. Try again." });
   }
 });
+// ---------- LIVE SESSION DASHBOARD ----------
+// Teacher page is endpoint ko har ~5 second me poll karta hai (classroom me
+// projector par live chalane ke liye). Ek hi call me: counters, 10-minute
+// timeline, naye marks ka feed aur pending approvals — isliye server par
+// bhaari load nahi padta.
+app.get("/api/teacher/session-live", requireTeacherAuth, async (req, res) => {
+  try {
+    const { session_id } = req.query;
+    if (!session_id || !mongoose.Types.ObjectId.isValid(session_id)) {
+      return res.status(400).json({ error: "A valid session_id is required." });
+    }
+    const session = await ActiveCode.findById(session_id).lean();
+    if (!session) return res.json({ ok: true, found: false });
+
+    const limit = Math.min(Math.max(Number(req.query.limit) || 60, 1), 200);
+    const sinceMs = Number(req.query.since_ms);
+    const now = Date.now();
+
+    // Feed: since_ms diya ho to sirf uske baad ke naye marks (polling ke liye
+    // perfect — purane marks dobara nahi aate).
+    const feedFilter = { session_id };
+    if (Number.isFinite(sinceMs) && sinceMs > 0) feedFilter.marked_at = { $gt: sinceMs };
+
+    const [feed, pending, marked_count, pending_count, flagged_count, roster_size] = await Promise.all([
+      Attendance.find(feedFilter).sort({ marked_at: -1 }).limit(limit).lean(),
+      Attendance.find({ session_id, status: "pending" }).sort({ marked_at: -1 }).limit(50).lean(),
+      Attendance.countDocuments({ session_id }),
+      Attendance.countDocuments({ session_id, status: "pending" }),
+      Attendance.countDocuments({ session_id, flags: { $exists: true, $ne: [] } }),
+      session.class_name ? Student.countDocuments({ class_name: session.class_name }) : Promise.resolve(0),
+    ]);
+
+    // Timeline: last 60 minute (ya session shuru hone se ab tak) ke 10-minute
+    // buckets — "kab-kab marks aaye" ka live pattern.
+    const bucketMs = 10 * 60 * 1000;
+    const windowStart = Math.max(Number(session.created_at) || now, now - 60 * 60 * 1000);
+    const firstBucket = Math.floor(windowStart / bucketMs) * bucketMs;
+    const buckets = [];
+    for (let from = firstBucket; from <= now; from += bucketMs) {
+      buckets.push({ from, to: from + bucketMs, label: istHHMM(from), count: 0 });
+    }
+    const stamps = await Attendance.find({ session_id, marked_at: { $gte: firstBucket } })
+      .select("marked_at")
+      .lean();
+    for (const s of stamps) {
+      const idx = Math.floor((Number(s.marked_at) - firstBucket) / bucketMs);
+      if (idx >= 0 && idx < buckets.length) buckets[idx].count++;
+    }
+
+    const confirmed_count = marked_count - pending_count;
+    const toFeedRow = (m) => ({
+      record_id: m._id.toString(),
+      roll_no: m.roll_no,
+      student_name: m.student_name || "",
+      subject: m.subject || "",
+      course_type: m.course_type || "",
+      marked_at: m.marked_at,
+      marked_at_hhmm: istHHMM(m.marked_at),
+      status: m.status || "present",
+      flags: m.flags || [],
+      distance_m: m.distance_m === null || m.distance_m === undefined ? null : Math.round(m.distance_m),
+      accuracy: m.accuracy === null || m.accuracy === undefined ? null : Math.round(m.accuracy),
+      source: m.source || "student",
+      device_short: m.device_id ? String(m.device_id).slice(-6) : "",
+    });
+
+    res.json({
+      ok: true,
+      found: true,
+      session_id: session._id.toString(),
+      code: session.code,
+      class_name: session.class_name,
+      subject: session.subject,
+      course_type: session.course_type,
+      system: session.system || "Annual",
+      require_approval: session.require_approval === true,
+      active: now <= session.expires_at,
+      seconds_left: Math.max(0, Math.round((session.expires_at - now) / 1000)),
+      server_now: now,
+      marked_count,
+      confirmed_count,
+      pending_count,
+      flagged_count,
+      roster_size,
+      attendance_pct: roster_size ? Number(((confirmed_count / roster_size) * 100).toFixed(1)) : 0,
+      timeline: buckets.map((b) => ({ label: b.label, count: b.count })),
+      marks: feed.map(toFeedRow),
+      pending: pending.map(toFeedRow),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Live session load nahi hui. Dobara try karein." });
+  }
+});
+
+
+// ---------- SUBJECT-WISE EMAIL ROUTING (teacher page se manage) ----------
+
+// Kahan-kahan report jayegi, ye list. DEFAULT email bhi bhejta hai taki
+// teacher ko pata rahe ki fallback kya hai.
+app.get("/api/teacher/email-settings", requireTeacherAuth, async (req, res) => {
+  try {
+    const settings = await EmailSetting.find({}).sort({ subject: 1, course_type: 1, class_name: 1 }).lean();
+    res.json({
+      ok: true,
+      default_email: TEACHER_EMAIL || "",
+      email_configured: Boolean(resend),
+      settings: settings.map((s) => ({
+        id: s._id.toString(),
+        subject: s.subject,
+        course_type: s.course_type || "",
+        class_name: s.class_name || "",
+        emails: s.emails || [],
+        updated_at: s.updated_at || null,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Email settings load nahi hui." });
+  }
+});
+
+// Ek mapping save/update: subject zaroori, course_type/class_name optional
+// ("khaali = sab ke liye"). Emails comma ya space se alag-alag bhej sakte hain.
+app.post("/api/teacher/email-settings", requireTeacherAuth, async (req, res) => {
+  try {
+    const subject = String(req.body.subject || "").trim();
+    const course_type = String(req.body.course_type || "").trim();
+    const class_name = String(req.body.class_name || "").trim();
+    if (!subject) return res.status(400).json({ error: "Subject likhna zaroori hai." });
+
+    const rawEmails = Array.isArray(req.body.emails) ? req.body.emails.join(",") : String(req.body.emails || "");
+    const emails = [
+      ...new Set(
+        rawEmails
+          .split(/[,;\s]+/)
+          .map((e) => e.trim())
+          .filter(Boolean)
+      ),
+    ];
+    const invalid = emails.filter((e) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
+    if (invalid.length) {
+      return res.status(400).json({ error: `Ye email address theek nahi: ${invalid.join(", ")}` });
+    }
+    if (!emails.length) {
+      return res.status(400).json({ error: "Kam se kam ek email address daalein (jahan report jani chahiye)." });
+    }
+
+    const setting = await EmailSetting.findOneAndUpdate(
+      { subject, course_type, class_name },
+      { $set: { subject, course_type, class_name, emails, updated_at: Date.now() } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    audit("email-settings.save", req, `${subject}/${course_type || "*"}/${class_name || "*"}`, emails.join(", "));
+    res.json({
+      ok: true,
+      setting: {
+        id: setting._id.toString(),
+        subject: setting.subject,
+        course_type: setting.course_type || "",
+        class_name: setting.class_name || "",
+        emails: setting.emails || [],
+        updated_at: setting.updated_at,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Email mapping save nahi hui." });
+  }
+});
+
+// Mapping delete — us subject ka report wapas DEFAULT email par chala jayega.
+app.delete("/api/teacher/email-settings", requireTeacherAuth, async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "A valid id is required." });
+    }
+    const removed = await EmailSetting.findByIdAndDelete(id);
+    if (!removed) return res.status(404).json({ error: "Mapping nahi mili (shayad pehle hi delete ho chuki hai)." });
+    audit("email-settings.delete", req, `${removed.subject}/${removed.course_type || "*"}`, (removed.emails || []).join(", "));
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Email mapping delete nahi hui." });
+  }
+});
+
+// ---------- AUDIT LOG (kisne kab kya badla) ----------
+app.get("/api/teacher/audit", requireTeacherAuth, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 300);
+    const entries = await AuditLog.find({}).sort({ at: -1 }).limit(limit).lean();
+    res.json({
+      ok: true,
+      count: entries.length,
+      entries: entries.map((e) => ({
+        at: e.at,
+        at_hhmm: istHHMM(e.at),
+        at_date: istDateStringFromMs(e.at),
+        action: e.action,
+        actor: e.actor || "",
+        target: e.target || "",
+        details: e.details || "",
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Activity log load nahi hua." });
+  }
+});
+
+// ---------- DATA POLICY + STORAGE ----------
+// 12-mahine wala rule, retention windows aur MongoDB ka "kitne din me full
+// hoga" projection — sab ek jagah, teacher page par dikhane ke liye.
+app.get("/api/teacher/data-policy", requireTeacherAuth, async (req, res) => {
+  try {
+    const [oldest, storage] = await Promise.all([
+      Attendance.find({}).sort({ date: 1 }).limit(1).select("date").lean(),
+      getStorageStats(),
+    ]);
+    res.json({
+      ok: true,
+      attendance_retention_days: ATTENDANCE_RETENTION_DAYS,
+      student_retention_days: STUDENT_RETENTION_DAYS,
+      device_lock_retention_days: DEVICE_LOCK_RETENTION_DAYS,
+      audit_retention_days: AUDIT_RETENTION_DAYS,
+      session_retention_days: 90,
+      oldest_attendance_date: oldest && oldest[0] ? oldest[0].date : null,
+      storage,
+      notes: [
+        `Attendance marks ${ATTENDANCE_RETENTION_DAYS} din baad automatically delete hote hain.`,
+        `Student ka naam/class/email aur device binding ${STUDENT_RETENTION_DAYS} din (12 mahine) ki activity ke baad delete hoti hai — roz attendance mark karne wale students ka data delete nahi hota (rolling window).`,
+        `Teacher ki har badlav (delete/edit/manual mark) ${AUDIT_RETENTION_DAYS} din tak audit log me rehti hai.`,
+      ],
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Data policy load nahi hui." });
+  }
+});
+
+
+// ---------- MANUAL "EMAIL REPORT NOW" ----------
+
+// Ek student ke saare subjects ka summary (attended/held/pct).
+async function collectStudentSubjectRows(roll_no, system) {
+  const days = REPORT_DAYS[system];
+  const dates = lastNDates(days);
+  const records = await Attendance.find({
+    roll_no,
+    system: systemMatch(system),
+    date: { $in: dates },
+    status: { $ne: "pending" },
+  }).lean();
+
+  const groups = new Map();
+  for (const r of records) {
+    const key = [r.class_name, r.subject, r.course_type].join("|");
+    if (!groups.has(key)) {
+      groups.set(key, { class_name: r.class_name, subject: r.subject, course_type: r.course_type, present: new Set() });
+    }
+    groups.get(key).present.add(r.date);
+  }
+
+  const heldAgg = await Attendance.aggregate([
+    { $match: { system: systemMatch(system), date: { $in: dates } } },
+    { $group: { _id: { class_name: "$class_name", subject: "$subject", course_type: "$course_type", date: "$date" } } },
+    { $group: { _id: { class_name: "$_id.class_name", subject: "$_id.subject", course_type: "$_id.course_type" }, held: { $sum: 1 } } },
+  ]);
+  const heldMap = new Map(heldAgg.map((h) => [[h._id.class_name, h._id.subject, h._id.course_type].join("|"), h.held]));
+
+  const rows = [...groups.entries()].map(([key, g]) => {
+    const attended = g.present.size;
+    const held = heldMap.get(key) || attended;
+    return {
+      class_name: g.class_name,
+      subject: g.subject,
+      course_type: g.course_type,
+      attended,
+      held,
+      pct: held ? Number(((attended / held) * 100).toFixed(1)) : 0,
+    };
+  });
+  rows.sort((a, b) => String(a.subject + a.course_type).localeCompare(String(b.subject + b.course_type)));
+  return { dates, days, rows };
+}
+
+// Ek session ka register PDF — subject-wise routing (na mile to DEFAULT email).
+async function emailSessionReportNow(req, session_id) {
+  if (!session_id || !mongoose.Types.ObjectId.isValid(session_id)) {
+    return { status: 400, body: { error: "A valid session_id is required." } };
+  }
+  const session = await ActiveCode.findById(session_id).lean();
+  if (!session) return { status: 404, body: { error: "Session nahi mila." } };
+
+  const records = await Attendance.find({ session_id, status: { $ne: "pending" } }).lean();
+  records.sort(compareRollNo);
+  const routing = await resolveReportRecipients({
+    class_name: session.class_name,
+    subject: session.subject,
+    course_type: session.course_type,
+  });
+  const dateForPdf = istDateStringFromMs(session.created_at || Date.now());
+  const pdf = await buildSessionPdf({ ...session, dateForPdf }, records);
+  const sent = await sendReportEmail({
+    to: routing.emails,
+    subject: `Attendance — ${session.class_name} — ${session.subject} (${session.course_type}) — ${dateForPdf}`,
+    text: `${records.length} student(s) marked present in ${session.class_name} — ${session.subject} (${session.course_type}) on ${dateForPdf}.`,
+    attachments: [
+      {
+        filename: `attendance-${session.class_name}-${session.subject}-${session.course_type}-${dateForPdf}.pdf`.replace(/\s+/g, "_"),
+        content: pdf,
+      },
+    ],
+  });
+  audit("report.email.session", req, session_id, `${sent.ok ? "sent" : "failed"}: ${(sent.recipients || []).join(", ")}`);
+  if (!sent.ok) return { status: 500, body: { error: sent.error } };
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      sent: true,
+      recipients: sent.recipients,
+      attachments: 1,
+      records: records.length,
+      source: routing.source,
+      message: `Report emailed to ${sent.recipients.join(", ")} (${routing.source}).`,
+    },
+  };
+}
+
+// Overall (365/180 din) % report us subject ke email par.
+async function emailOverallReportNow(req, { class_name, subject, course_type, system }) {
+  if (!class_name || !subject || !course_type) {
+    return { status: 400, body: { error: "class_name, subject and course_type are required." } };
+  }
+  const dates = lastNDates(REPORT_DAYS[system]);
+  const { rows, classDays } = await buildOverallReportRows(class_name, subject, course_type, system, dates);
+  const pdf = await buildOverallPdf({ class_name, subject, course_type, system, dates, classDays }, rows);
+  const routing = await resolveReportRecipients({ class_name, subject, course_type });
+  const sent = await sendReportEmail({
+    to: routing.emails,
+    subject: `${REPORT_DAYS[system]}-Day Attendance Report — ${class_name} — ${subject} (${course_type}, ${system})`,
+    text: `${rows.length} student(s), classes held: ${classDays}. Attached PDF me har student ka attendance % (attended / held) hai.`,
+    attachments: [
+      {
+        filename: `${REPORT_DAYS[system]}day-report-${class_name}-${subject}-${course_type}-${system}.pdf`.replace(/\s+/g, "_"),
+        content: pdf,
+      },
+    ],
+  });
+  audit("report.email.overall", req, `${class_name}/${subject}/${course_type}`, `${sent.ok ? "sent" : "failed"}: ${(sent.recipients || []).join(", ")}`);
+  if (!sent.ok) return { status: 500, body: { error: sent.error } };
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      sent: true,
+      recipients: sent.recipients,
+      attachments: 1,
+      students: rows.length,
+      classes_held: classDays,
+      source: routing.source,
+      message: `Overall report emailed to ${sent.recipients.join(", ")} (${routing.source}).`,
+    },
+  };
+}
+
+// Ek student ka personal report: uske apne email par, warna DEFAULT email par.
+async function emailStudentReportNow(req, { roll_no, system }) {
+  const cleanRoll = String(roll_no || "").trim();
+  if (!/^[0-9]+$/.test(cleanRoll)) return { status: 400, body: { error: "Roll number digits me hona chahiye." } };
+  const student = await Student.findOne({ roll_no: cleanRoll }).lean();
+  if (!student) {
+    return { status: 404, body: { error: `Roll No ${cleanRoll} roster me nahi hai. Pehle roster upload karein.` } };
+  }
+  const { rows, days, dates } = await collectStudentSubjectRows(cleanRoll, system);
+  if (!rows.length) {
+    return { status: 404, body: { error: `Roll No ${cleanRoll} ki last ${days} din me koi attendance nahi mili.` } };
+  }
+  const pdf = await buildStudentPdf(
+    { system, days, from_date: dates[0], to_date: dates[dates.length - 1], class_name: student.class_name || "", subject: student.major_subject || "All subjects", course_type: "-" },
+    { roll_no: student.roll_no, name: student.name, class_name: student.class_name || "", major_subject: student.major_subject || "", email: student.email || "" },
+    rows
+  );
+  const usedStudentEmail = Boolean(student.email);
+  const recipients = usedStudentEmail ? [student.email] : TEACHER_EMAIL ? [TEACHER_EMAIL] : [];
+  const sent = await sendReportEmail({
+    to: recipients,
+    subject: `Attendance Report — ${student.name} (Roll No ${cleanRoll}) — ${system}`,
+    text: `${student.name} (Roll No ${cleanRoll}) ka ${days}-din ka attendance: ${rows.map((r) => `${r.subject} ${r.pct}%`).join(", ")}.`,
+    attachments: [{ filename: `student-report-${cleanRoll}-${system}.pdf`.replace(/\s+/g, "_"), content: pdf }],
+  });
+  audit("report.email.student", req, `roll_no=${cleanRoll}`, `${sent.ok ? "sent" : "failed"}: ${(sent.recipients || []).join(", ")}`);
+  if (!sent.ok) return { status: 500, body: { error: sent.error } };
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      sent: true,
+      recipients: sent.recipients,
+      attachments: 1,
+      used_student_email: usedStudentEmail,
+      message: usedStudentEmail
+        ? `Student ka report ${student.email} par bhej diya.`
+        : `Student ka email saved nahi hai — report DEFAULT email (${sent.recipients.join(", ")}) par bheji gayi.`,
+    },
+  };
+}
+
+// Manual "Email now" — teen mode: session / overall / student.
+app.post("/api/teacher/email-reports", requireTeacherAuth, async (req, res) => {
+  try {
+    const mode = String((req.body && req.body.mode) || "").trim().toLowerCase();
+    const system = normalizeSystem(req.body.system);
+    if (!system) return res.status(400).json({ error: "system must be either Annual or Semester." });
+
+    let result;
+    if (mode === "session") {
+      result = await emailSessionReportNow(req, req.body.session_id);
+    } else if (mode === "overall") {
+      result = await emailOverallReportNow(req, {
+        class_name: req.body.class_name,
+        subject: req.body.subject,
+        course_type: req.body.course_type,
+        system,
+      });
+    } else if (mode === "student") {
+      result = await emailStudentReportNow(req, { roll_no: req.body.roll_no, system });
+    } else {
+      return res.status(400).json({ error: "mode must be session, overall or student." });
+    }
+    return res.status(result.status).json(result.body);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Report email nahi ja payi. Dobara try karein." });
+  }
+});
+
+// ---------- CSV EXPORT (Excel/Sheets me kholne ke liye) ----------
+app.get("/api/teacher/export.csv", requireTeacherAuth, async (req, res) => {
+  try {
+    const { class_name, subject, course_type } = req.query;
+    const day = parseReportDate(req.query.date);
+    if (day.error) return res.status(400).json({ error: day.error });
+    const system = normalizeSystem(req.query.system);
+    const filter = { date: day.date };
+    if (class_name) filter.class_name = class_name;
+    if (subject) filter.subject = subject;
+    if (course_type) filter.course_type = course_type;
+    if (system) filter.system = systemMatch(system);
+
+    // Bada din = bahut rows; cap laga kar memory bachate hain.
+    const MAX_ROWS = 5000;
+    const rows = await Attendance.find(filter).limit(MAX_ROWS).lean();
+    rows.sort(compareRollNo);
+
+    const header = [
+      "Roll No",
+      "Name",
+      "Class",
+      "Subject",
+      "Course Type",
+      "System",
+      "Date",
+      "Marked At (IST)",
+      "Status",
+      "Source",
+      "Distance (m)",
+      "Accuracy (m)",
+      "Flags",
+      "Device",
+    ];
+    const lines = [header.join(",")];
+    for (const r of rows) {
+      lines.push(
+        [
+          r.roll_no,
+          r.student_name,
+          r.class_name,
+          r.subject,
+          r.course_type,
+          r.system || "Annual",
+          r.date,
+          istHHMM(r.marked_at),
+          r.status || "present",
+          r.source || "student",
+          r.distance_m === null || r.distance_m === undefined ? "" : Math.round(r.distance_m),
+          r.accuracy === null || r.accuracy === undefined ? "" : Math.round(r.accuracy),
+          (r.flags || []).join("|"),
+          String(r.device_id || "").slice(-6),
+        ]
+          .map(csvCell)
+          .join(",")
+      );
+    }
+    // BOM (U+FEFF) — Excel me accents/naam theek dikhein.
+    const csv = "\uFEFF" + lines.join("\r\n");
+    const filename = `attendance-${class_name || "all"}-${day.date}.csv`.replace(/[^\w.\-]+/g, "_");
+    audit("report.csv", req, `${class_name || "all"}/${subject || "*"}`, `date=${day.date} rows=${rows.length}`);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(csv);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "CSV export nahi ho paya." });
+  }
+});
+
 // ---------- CRON / MONITORING ----------
 // Shared guard for the two cron endpoints below. If CRON_SECRET is not set the
 // endpoints behave exactly as before (open), so an existing cron-job.org setup
@@ -1555,16 +3391,47 @@ function requireCronAuth(req, res, next) {
 // ~15 minutes idle, so pinging this every 10 minutes from a cron keeps the
 // server (and the code-generating teacher) responsive — and unlike the cron
 // endpoints above it can never send an email.
-app.get("/api/health", (req, res) => {
+app.get("/api/health", async (req, res) => {
   const STATES = ["disconnected", "connected", "connecting", "disconnecting"];
-  res.json({
+  const body = {
     ok: mongoose.connection.readyState === 1,
     db: STATES[mongoose.connection.readyState] || "unknown",
     ist_date: todayDateString(),
     server_time: new Date().toISOString(),
     uptime_seconds: Math.round(process.uptime()),
     emails_configured: Boolean(resend && TEACHER_EMAIL),
-  });
+    // Anti-proxy settings, so a deploy can be checked without reading the code.
+    anti_proxy: {
+      strict_location: STRICT_LOCATION,
+      max_accuracy_meters: MAX_ACCURACY_METERS,
+      strict_circle: GEOFENCE_STRICT_CIRCLE,
+      radius_meters: RADIUS_METERS,
+      location_token_ttl_sec: Math.round(LOCATION_TOKEN_TTL_MS / 1000),
+      approval_default: REQUIRE_APPROVAL_DEFAULT,
+      code_expiry_options_minutes: CODE_EXPIRY_OPTIONS_MIN,
+      // Naye anti-proxy switches (dev-option / fake-location rokne ke liye).
+      mock_min_accuracy_meters: MIN_REAL_ACCURACY_METERS,
+      max_fix_age_sec: Math.round(MAX_FIX_AGE_MS / 1000),
+      block_automation: BLOCK_AUTOMATION,
+      auto_review_flagged: AUTO_REVIEW_FLAGGED,
+    },
+    // 12-mahine wala retention + token window.
+    data_policy: {
+      attendance_retention_days: ATTENDANCE_RETENTION_DAYS,
+      student_retention_days: STUDENT_RETENTION_DAYS,
+      device_lock_retention_days: DEVICE_LOCK_RETENTION_DAYS,
+      audit_retention_days: AUDIT_RETENTION_DAYS,
+      teacher_token_hours: Math.round(TEACHER_TOKEN_TTL_MS / 3600000),
+    },
+    email_routing: {
+      default_inbox_configured: Boolean(TEACHER_EMAIL),
+      subject_mapping_supported: true,
+    },
+  };
+  // Storage ka bhaari hisaab sirf maangne par (?storage=1) — health ko halka
+  // aur fast rakhna zaroori hai, kyunki cron isi ko ping karta hai.
+  if (String(req.query.storage) === "1") body.storage = await getStorageStats();
+  res.json(body);
 });
 
 // Checks for any session whose 20-minute PDF window has passed but the PDF
@@ -1616,6 +3483,43 @@ app.get("/api/check-and-send-monthly-report", requireCronAuth, async (req, res) 
     }
   }
 });
+// ---------- ERROR HANDLING (crash-proofing) ----------
+// Ye handlers LAST me hone chahiye, isliye neeche (START SERVER se pehle) lagte
+// hain. Bina in ke: malformed JSON par Express HTML error page bhejta tha →
+// frontend ka res.json() fail hota tha aur "data side crash" jaisa dikhta tha.
+
+// /api par anjaan route → HTML ke bajaye saaf JSON 404.
+app.use("/api", (req, res) => {
+  res.status(404).json({ error: "Ye API route exist nahi karta." });
+});
+
+// Saare request errors ek jagah: always JSON, never a stack trace to the client.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  if (err && (err.type === "entity.parse.failed" || err instanceof SyntaxError)) {
+    return res.status(400).json({
+      error: "Bheja gaya data theek nahi tha (invalid JSON). Page reload karke dobara try karein.",
+    });
+  }
+  if (err && err.type === "entity.too.large") {
+    return res.status(413).json({
+      error: "Bheja gaya data bahut bada hai. Roster ko chhote-chhote hisson me upload karein.",
+    });
+  }
+  console.error("Request error:", (err && err.message) || err);
+  res.status(500).json({ error: "Server par kuch gadbad hui. Dobara try karein." });
+});
+
+// Process-level safety nets: ek unexpected error poori site na gira de.
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled promise rejection:", (reason && reason.message) || reason);
+});
+process.on("uncaughtException", (err) => {
+  // Log karke server chalta rehta hai — attendance app ke liye availability
+  // zyada zaroori hai, aur har route apna error khud handle karta hai.
+  console.error("Uncaught exception:", (err && err.message) || err);
+});
+
 // ---------- START SERVER ----------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

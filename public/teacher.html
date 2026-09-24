@@ -2,993 +2,2619 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Teacher — Attendance Register</title>
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0d111c">
+<meta name="theme-color" content="#0a0e18">
+<meta name="description" content="Teacher dashboard — generate codes, review attendance, approve entries.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lora:wght@500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  tailwind.config = {
-    theme: {
-      extend: {
-        colors: {
-          base: '#0d111c',
-          surface: '#161b29',
-          surface2: '#1e2436',
-          line: '#2b3348',
-          ink: '#ece9de',
-          muted: '#8b93a7',
-          gold: '#cda43f',
-          golddim: '#8a6d1a',
-          ok: '#34d399',
-          err: '#f87171',
-        },
-        fontFamily: {
-          serif: ['Lora', 'Georgia', 'serif'],
-          sans: ['Inter', 'system-ui', 'sans-serif'],
-        },
-      },
-    },
-  };
-</script>
-<style>
-  body { background: #0d111c; }
-  input, select, textarea { color-scheme: dark; }
-  ::selection { background: #cda43f; color: #0d111c; }
-  table { border-collapse: collapse; }
-</style>
+<link rel="stylesheet" href="app.css">
 </head>
-<body class="bg-base text-ink font-sans min-h-screen">
-<div class="max-w-3xl mx-auto px-4 py-8 pb-16">
+<body>
 
-  <div class="mb-6">
-    <div class="text-xs tracking-wide text-gold/80 font-medium mb-1">Teacher Portal</div>
-    <h1 class="font-serif text-2xl font-semibold text-ink">Attendance Register</h1>
-    <p class="text-sm text-muted mt-1">Generate a code for your class, then review who has marked attendance.</p>
-  </div>
+<!-- ==================== LOGIN ==================== -->
+<div class="app" id="loginView">
+  <header class="page-head">
+    <div class="kicker">Teacher Portal</div>
+    <h1>Attendance Register</h1>
+    <p class="muted">Sign in karke code generate karein aur attendance review karein.</p>
+  </header>
 
-  <!-- Session setup card -->
-  <div class="bg-surface border border-line rounded-xl p-5 space-y-4 shadow-lg shadow-black/20 mb-5">
+  <section class="card accent">
+    <div class="field mb-2">
+      <label class="label" for="teacherPassword">Teacher password</label>
+      <input id="teacherPassword" class="input" type="password" autocomplete="current-password"
+        placeholder="Password" onkeydown="if(event.key==='Enter'){signIn();}">
+      <p class="hint">Server par <span class="mono">TEACHER_PASSWORD</span> se set hota hai. 5 galat koshishon par 15 minute ke liye lock ho jaata hai.</p>
+    </div>
+    <button type="button" class="btn btn-primary btn-block" id="signInBtn" onclick="signIn()">Sign in</button>
+    <div id="loginMsg" class="mt-2"></div>
+  </section>
+
+  <p class="muted fs-xs center mt-3">Ye private admin page hai — link kisi ke saath share na karein.</p>
+</div>
+
+<!-- ==================== DASHBOARD ==================== -->
+<div class="app wide hide" id="dashView">
+
+  <header class="page-head row between wrap" style="gap:10px;">
     <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Course / Year</label>
-      <select id="className" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-        <option value="">Select class</option>
-        <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
-        <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
-        <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
-        <option>MA 1st</option><option>MA 2nd</option>
-      </select>
+      <div class="kicker">Teacher Portal</div>
+      <h1 style="margin-top:2px;">Attendance Register</h1>
     </div>
-
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">System <span class="text-xs font-normal text-muted">(Annual or Semester — also decides the report period)</span></label>
-      <select id="systemSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-        <option value="">Select system</option>
-        <option value="Annual">Annual</option>
-        <option value="Semester">Semester</option>
-      </select>
+    <div class="row" style="gap:8px;">
+      <button type="button" class="btn btn-sm btn-ghost" onclick="loadEverything()">↻ Refresh</button>
+      <button type="button" class="btn btn-sm btn-ghost" onclick="signOut()">Sign out</button>
     </div>
+  </header>
 
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Subject</label>
-      <select id="subjectSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-        <option value="">Select subject</option>
-        <option>Political Science</option><option>History</option><option>Public Administration</option>
-        <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
-        <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
-        <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
-        <option>Computer Science</option><option>Physical Education</option><option>Other</option>
-      </select>
-    </div>
-
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Course Type <span class="text-xs font-normal text-muted">(same subject, different type = separate class)</span></label>
-      <select id="courseTypeSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-        <option value="">Select course type</option>
-        <option value="DSC">DSC — Discipline Specific Core</option>
-        <option value="SEC">SEC — Skill Enhancement Course</option>
-        <option value="GE">GE — Generic Elective</option>
-        <option value="AEC">AEC — Ability Enhancement Course</option>
-        <option value="VAC">VAC — Value Added Course</option>
-        <option value="MDC">MDC — Multi-Disciplinary Course</option>
-      </select>
-    </div>
-
-    <label class="flex items-center justify-between rounded-lg border border-line bg-surface2/60 px-3.5 py-3 cursor-pointer">
-      <span class="text-sm text-ink">📍 Require Location Verification <span class="block text-xs text-muted mt-0.5">Student must be near college to mark attendance</span></span>
-      <input type="checkbox" id="requireLocation" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
-    </label>
-
-<label class="flex items-center justify-between rounded-lg border border-line bg-surface2/60 px-3.5 py-3 cursor-pointer">
-  <span class="text-sm text-ink">📧 Email PDF Automatically <span class="block text-xs text-muted mt-0.5">Sends this session's attendance PDF to your inbox 20 min after generating the code</span></span>
-  <input type="checkbox" id="autoSendPdf" checked class="w-5 h-5 accent-gold shrink-0 ml-3">
-</label>
-    <button id="generateBtn" onclick="openGenerateConfirm()" class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 transition disabled:opacity-50 disabled:cursor-not-allowed">Generate New Code</button>
-  </div>
-
-  <!-- Generated code card -->
-  <div id="codeSection" style="display:none;" class="bg-surface border border-gold/40 rounded-xl p-6 mb-5 shadow-lg shadow-black/20 text-center">
-    <div class="text-6xl font-serif font-bold tracking-[0.2em] text-gold" id="codeDisplay">-----</div>
-    <div class="text-sm text-muted mt-3" id="timer"></div>
-    <div class="text-xs text-muted mt-1" id="codeLocNote"></div>
-    <div class="text-sm text-ink mt-3" id="codeMarkedCount"></div>
-    <button id="endSessionBtn" onclick="openEndSessionConfirm()"
-      class="mt-4 bg-transparent hover:bg-err/10 border border-err/50 text-err text-sm font-medium rounded-lg px-5 py-2.5 transition"
-      style="display:none;">End code now (stop accepting marks)</button>
-  </div>
-
-  <!-- Roster upload card -->
-  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
-    <label class="block text-sm font-medium text-ink">Upload Student List <span class="block text-xs font-normal text-muted mt-0.5">One-time setup — saves everyone's name, class &amp; major subject so it auto-fills (and locks) for any roll number. Also how you fix a locked value later — just re-paste that student's corrected line.</span></label>
-    <textarea id="rosterText" rows="5" placeholder="Paste one student per line, like:&#10;101,Priya Sharma,BA 1st,History&#10;102,Rahul Verma,BA 1st,Sociology&#10;103,Anjali Singh,BSc 2nd"
-      class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-sm text-ink placeholder-muted/60 font-mono focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition"></textarea>
-    <button class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="uploadRoster()">Upload List</button>
-    <div id="uploadMsg"></div>
-  </div>
-
-  <!-- Saved roster view card -->
-  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
-    <label class="block text-sm font-medium text-ink">Saved Student List <span class="block text-xs font-normal text-muted mt-0.5">What is currently saved against roll numbers for the class selected at the top. This is what locks a student's name, class and major subject on the student form.</span></label>
-    <button class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="loadRoster()">Load Saved List</button>
-    <div id="rosterMsg"></div>
-    <div class="overflow-x-auto -mx-5 px-5">
-      <table id="rosterTable" class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-line text-left text-muted">
-            <th class="py-2 pr-2 font-medium">S.No</th>
-            <th class="py-2 pr-2 font-medium">Name</th>
-            <th class="py-2 pr-2 font-medium">Roll No</th>
-            <th class="py-2 pr-0 font-medium">Major Subject</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-line/60"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Unlock device card -->
-  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
-    <label class="block text-sm font-medium text-ink">Unlock Device <span class="block text-xs font-normal text-muted mt-0.5">A phone/device permanently locks to the first roll number used on it. Enter that roll number to free it up again.</span></label>
-    <div class="flex gap-2">
-      <input id="unlockRollNo" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Roll number to unlock"
-        class="flex-1 bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
-      <button class="bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="unlockDevice()">Unlock</button>
-    </div>
-    <div id="unlockMsg"></div>
-  </div>
-
-  <!-- 30-day report card -->
-  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mb-5">
-    <label class="block text-sm font-medium text-ink">Attendance % Report <span class="block text-xs font-normal text-muted mt-0.5">Downloads a PDF for the class/subject/course-type/system selected above — one row per student with classes attended, classes held and overall %. Annual = last 365 days, Semester = last 180 days.</span></label>
-    <button id="reportBtn" class="w-full sm:w-auto bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg px-5 py-2.5 transition" onclick="downloadOverallReport()">Download Report</button>
-    <div id="reportMsg"></div>
-  </div>
-
-
-  <!-- Attendance list card -->
-  <div class="bg-surface border border-line rounded-xl p-5 shadow-lg shadow-black/20">
-    <label class="block text-sm font-medium text-ink mb-1.5">Attendance List — pick a session <span class="block text-xs font-normal text-muted mt-0.5">Each code you generate is a separate session with its own list &amp; PDF. The day is in IST — past days can be opened too, as long as the records are still kept (about 13 months).</span></label>
-
-    <div class="flex flex-wrap items-end gap-3 mb-4">
-      <div class="flex-1 min-w-[170px]">
-        <label class="block text-xs font-medium text-muted mb-1">Register day</label>
-        <input type="date" id="registerDate"
-          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+  <!-- context bar -->
+  <section class="card">
+    <div class="grid-2">
+      <div class="field">
+        <label class="label" for="className">Course / Year</label>
+        <select id="className" class="select">
+          <option value="">Select class</option>
+          <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
+          <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
+          <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
+          <option>MA 1st</option><option>MA 2nd</option>
+        </select>
       </div>
-      <button class="bg-surface2 hover:bg-line border border-line text-ink text-sm font-medium rounded-lg px-4 py-2.5 transition" onclick="setRegisterToday()">Today</button>
-      <button class="bg-surface2 hover:bg-line border border-line text-ink text-sm font-medium rounded-lg px-4 py-2.5 transition" onclick="loadSessions(); loadAttendance();">Load day</button>
+      <div class="field">
+        <label class="label" for="systemSelect">System</label>
+        <select id="systemSelect" class="select">
+          <option value="">Select system</option>
+          <option value="Annual">Annual</option>
+          <option value="Semester">Semester</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="label" for="subjectSelect">Subject</label>
+        <select id="subjectSelect" class="select">
+          <option value="">Select subject</option>
+          <option>Political Science</option><option>History</option><option>Public Administration</option>
+          <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
+          <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
+          <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
+          <option>Computer Science</option><option>Physical Education</option><option>Other</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="label" for="courseTypeSelect">Course Type</label>
+        <select id="courseTypeSelect" class="select">
+          <option value="">Select course type</option>
+          <option value="DSC">DSC — Discipline Specific Core</option>
+          <option value="SEC">SEC — Skill Enhancement Course</option>
+          <option value="GE">GE — Generic Elective</option>
+          <option value="AEC">AEC — Ability Enhancement Course</option>
+          <option value="VAC">VAC — Value Added Course</option>
+          <option value="MDC">MDC — Multi-Disciplinary Course</option>
+        </select>
+      </div>
+      <div class="field mb-0">
+        <label class="label" for="registerDate">Register date <span class="opt">(IST)</span></label>
+        <div class="row" style="gap:8px;">
+          <input id="registerDate" class="input" type="date" onchange="onDateChange()">
+          <button type="button" class="btn btn-sm nowrap" onclick="setRegisterToday()">Today</button>
+        </div>
+      </div>
+      <div class="field mb-0">
+        <label class="label">Anti-proxy status</label>
+        <div class="row" style="gap:6px; flex-wrap:wrap;">
+          <span class="chip chip-ok" id="strictChip">🛡 Strict location</span>
+          <span class="chip" id="radiusChip2">Radius —</span>
+        </div>
+      </div>
     </div>
+  </section>
 
-    <select id="sessionSelect" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink mb-4 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
-      <option value="">All sessions that day</option>
-    </select>
-
-    <div class="flex items-center justify-between mb-3">
-      <h2 class="font-serif text-lg font-semibold text-ink" id="attendanceCount">Total marked: 0</h2>
-      <span class="text-xs text-muted" id="attendanceDate"></span>
-    </div>
-
-    <div class="overflow-x-auto -mx-5 px-5">
-      <table id="attendanceTable" class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-line text-left text-muted">
-            <th class="py-2 pr-2 font-medium">S.No</th>
-            <th class="py-2 pr-2 font-medium">Name</th>
-            <th class="py-2 pr-2 font-medium">Roll No</th>
-            <th class="py-2 pr-2 font-medium">Major Subject</th>
-            <th class="py-2 pr-2 font-medium">Type</th>
-            <th class="py-2 pr-2 font-medium">Marked At</th>
-            <th class="py-2 pr-0 font-medium text-right">Actions</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-line/60"></tbody>
-      </table>
-    </div>
-
-    <div class="flex flex-col sm:flex-row gap-3 mt-5">
-      <button class="flex-1 bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg py-2.5 transition" onclick="loadAttendance()">Refresh List</button>
-      <button class="flex-1 bg-transparent hover:bg-surface2 border border-line text-muted hover:text-ink font-medium rounded-lg py-2.5 transition" onclick="printList()">Print / Save as PDF</button>
-    </div>
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-tab="live" onclick="switchTab('live')" role="tab">⚡ Live</button>
+    <button class="tab" data-tab="register" onclick="switchTab('register')" role="tab">📋 Register</button>
+    <button class="tab" data-tab="roster" onclick="switchTab('roster')" role="tab">👥 Roster</button>
+    <button class="tab" data-tab="reports" onclick="switchTab('reports')" role="tab">📄 Reports</button>
+    <button class="tab" data-tab="review" onclick="switchTab('review')" role="tab">🛡 Review <span class="count hide" id="reviewCount">0</span></button>
+    <button class="tab" data-tab="ops" onclick="switchTab('ops')" role="tab">⚙️ Data & Alerts</button>
   </div>
 
-  <!-- Present / absent card -->
-  <div class="bg-surface border border-line rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 mt-5">
-    <label class="block text-sm font-medium text-ink">Present / Absent <span class="block text-xs font-normal text-muted mt-0.5">Who marked attendance, and — from your saved student list — who did not, for the class / subject / course type / session / day chosen above.</span></label>
-    <div class="flex flex-col sm:flex-row gap-3">
-      <button class="flex-1 bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg py-2.5 transition" onclick="loadPresentAbsent()">Load Present / Absent</button>
-      <button class="flex-1 bg-transparent hover:bg-surface2 border border-line text-muted hover:text-ink font-medium rounded-lg py-2.5 transition" onclick="copyAbsentList()">Copy Absent List</button>
+  <!-- ==================== LIVE ==================== -->
+  <section class="tab-panel active" id="panel-live">
+    <div class="grid-2">
+
+      <!-- generate -->
+      <div class="card accent">
+        <div class="card-title"><h3>Generate code</h3><span class="chip chip-gold" id="liveComboChip">—</span></div>
+        <p class="card-sub">Upar chuni hui class + subject + course type ke liye naya code.</p>
+
+        <div class="field">
+          <label class="label" for="expiryMinutes">Code kitni der chalega</label>
+          <select id="expiryMinutes" class="select">
+            <option value="2">2 minute — sabse safe</option>
+            <option value="5">5 minute</option>
+            <option value="7" selected>7 minute (default)</option>
+          </select>
+          <p class="hint">Chhota window = code WhatsApp par share hokar bahar use hone ka mauka kam.</p>
+        </div>
+
+        <div class="stack" style="gap:10px;">
+          <div class="switch-row">
+            <div><div class="t">📍 Location check</div><div class="d" id="locSwitchNote">Anti-proxy lock: server par hamesha ON</div></div>
+            <label class="switch"><input type="checkbox" id="requireLocation" checked onchange="saveSelection()"><i></i></label>
+          </div>
+          <div class="switch-row">
+            <div><div class="t">✅ Approval mode</div><div class="d">Har mark aapke approve karne par count hoga</div></div>
+            <label class="switch"><input type="checkbox" id="requireApproval"><i></i></label>
+          </div>
+          <div class="switch-row">
+            <div><div class="t">📧 PDF email</div><div class="d">20 minute baad attendance PDF inbox par</div></div>
+            <label class="switch"><input type="checkbox" id="autoSendPdf" checked><i></i></label>
+          </div>
+        </div>
+
+        <button type="button" class="btn btn-primary btn-block mt-3" id="generateBtn" onclick="openGenerateConfirm()">Generate new code</button>
+        <div id="generateMsg" class="mt-2"></div>
+      </div>
+
+      <!-- active code -->
+      <div class="card hide" id="codeCard">
+        <div class="card-title"><h3>Aaj ka code</h3><span class="chip chip-ok" id="codeStateChip">Live</span></div>
+
+        <div class="ring-wrap">
+          <svg viewBox="0 0 120 120" aria-hidden="true">
+            <circle class="track" cx="60" cy="60" r="52"></circle>
+            <circle class="bar" id="ringBar" cx="60" cy="60" r="52" stroke-dasharray="326.7" stroke-dashoffset="0"></circle>
+          </svg>
+          <div class="mid"><div class="num" id="ringTime">--:--</div><div class="lbl">baaki</div></div>
+        </div>
+
+        <div class="center mt-2">
+          <div class="mono" id="codeDisplay" style="font-size:2.4rem; letter-spacing:.28em; font-weight:700; color:var(--gold);">-----</div>
+          <div class="muted fs-sm mt-1" id="codeCombo"></div>
+        </div>
+
+        <div class="row" style="gap:8px; margin-top:12px;">
+          <button type="button" class="btn btn-sm grow" onclick="copyCode()">Copy code</button>
+          <button type="button" class="btn btn-sm btn-ghost grow" id="endSessionBtn" onclick="openEndSessionConfirm()">End code now</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="stat-grid">
+          <div class="stat"><div class="k">Marked</div><div class="v" id="statMarked">0</div></div>
+          <div class="stat"><div class="k">Present</div><div class="v ok" id="statPresent">0</div></div>
+          <div class="stat"><div class="k">Pending</div><div class="v warn" id="statPending">0</div></div>
+          <div class="stat"><div class="k">Flagged</div><div class="v err" id="statFlagged">0</div></div>
+        </div>
+
+        <div class="mt-2">
+          <div class="row between fs-sm"><span class="muted" id="progressLabel">0 / 0 present</span><span class="muted" id="progressPct">0%</span></div>
+          <div class="progress mt-1"><i id="progressBar"></i></div>
+        </div>
+
+        <div class="stack mt-3" style="gap:10px;">
+          <div class="switch-row">
+            <div><div class="t">✅ Approval mode</div><div class="d" id="approvalModeNote">Off — marks turant count ho rahe hain</div></div>
+            <label class="switch"><input type="checkbox" id="liveApprovalToggle" onchange="toggleApprovalMode()"><i></i></label>
+          </div>
+          <button type="button" class="btn btn-sm btn-ok hide" id="approveAllBtn" onclick="approveAllPending()">Approve all pending</button>
+        </div>
+
+        <div class="muted fs-xs mt-2" id="codeNotes"></div>
+      </div>
+
+      <!-- live polling: server se har 5 second me naya data (countdown se alag) -->
+      <div class="card" id="livePollCard" style="grid-column:1/-1;">
+        <div class="card-title"><h3>Live feed — 5 second refresh</h3><span class="chip" id="livePollState">Idle</span></div>
+        <p class="card-sub">Server se har 5 second me naya data: kaun abhi mark hua, kitni entries pending hain, aur kis minute me kitne students aaye. Ye countdown timer se alag chalta hai — code ka waqt isi ke bharose nahi rukta.</p>
+
+        <div class="stat-grid">
+          <div class="stat"><div class="k">Present</div><div class="v ok" id="liveStatPresent">0</div></div>
+          <div class="stat"><div class="k">Pending</div><div class="v warn" id="liveStatPending">0</div></div>
+          <div class="stat"><div class="k">Flagged</div><div class="v err" id="liveStatFlagged">0</div></div>
+          <div class="stat"><div class="k">Roster size</div><div class="v" id="liveStatRoster">0</div></div>
+        </div>
+
+        <div class="mt-2">
+          <div class="row between fs-sm">
+            <span class="muted" id="liveProgressLabel">0 / 0 confirmed</span>
+            <span class="muted" id="liveProgressPct">0%</span>
+          </div>
+          <div class="progress mt-1"><i id="liveProgressBar"></i></div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="card-title"><h3>Timeline</h3><span class="muted fs-xs">kis time par kitne marks</span></div>
+        <div id="liveTimeline" style="display:flex; align-items:flex-end; gap:6px; height:132px; margin-top:10px; overflow-x:auto;"></div>
+        <div id="liveTimelineEmpty" class="muted fs-sm"></div>
+
+        <div class="divider"></div>
+
+        <div class="card-title"><h3>New marks</h3><span class="muted fs-xs" id="livePollUpdated">—</span></div>
+        <div id="liveNewMarks" class="rec-list"><div class="muted fs-sm">Polling start hote hi naye marks yahan aayenge.</div></div>
+
+        <div class="divider"></div>
+
+        <div class="card-title"><h3>Pending approval (live)</h3><span class="chip chip-warn" id="livePendingChip">0</span></div>
+        <div id="livePendingList" class="rec-list"><div class="muted fs-sm">Abhi koi pending entry nahi.</div></div>
+
+        <div class="divider"></div>
+
+        <div class="row wrap" style="gap:8px;">
+          <button type="button" class="btn btn-sm" id="liveEmailBtn" onclick="emailSessionReport(true)">📧 Email report now</button>
+          <button type="button" class="btn btn-sm btn-ghost" id="liveCsvBtn" onclick="downloadCsv('liveCsvBtn')">⬇️ Download CSV</button>
+          <button type="button" class="btn btn-sm btn-ghost" id="liveFullBtn" onclick="toggleLiveFullscreen()">⛶ Full screen</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick="pollLiveSessionSafe()">↻ Refresh now</button>
+        </div>
+        <div id="livePollMsg" class="mt-2"></div>
+      </div>
+
+      <!-- live feed -->
+      <div class="card" style="grid-column:1/-1;">
+        <div class="card-title"><h3>Live marks</h3><span class="muted fs-xs" id="liveUpdated">—</span></div>
+        <div id="liveFeed" class="rec-list"></div>
+      </div>
     </div>
-    <div id="paSummary" class="text-sm text-muted"></div>
-    <div class="grid sm:grid-cols-2 gap-4">
-      <div>
-        <h3 class="text-xs font-semibold text-ok mb-2 tracking-wide">PRESENT (0)</h3>
-        <div id="paPresent" class="text-sm text-ink space-y-1 max-h-80 overflow-y-auto"></div>
+  </section>
+
+  <!-- ==================== REGISTER ==================== -->
+  <section class="tab-panel" id="panel-register">
+    <div class="card">
+      <div class="card-title">
+        <h3>Attendance register</h3>
+        <span class="muted fs-xs" id="registerDateLabel">—</span>
       </div>
-      <div>
-        <h3 class="text-xs font-semibold text-err mb-2 tracking-wide">ABSENT (0)</h3>
-        <div id="paAbsent" class="text-sm text-ink space-y-1 max-h-80 overflow-y-auto"></div>
+
+      <div class="field">
+        <label class="label" for="sessionSelect">Session (us din ke generate kiye code)</label>
+        <select id="sessionSelect" class="select" onchange="loadAttendance(); loadPresentAbsent();">
+          <option value="">All sessions that day</option>
+        </select>
       </div>
+
+      <div class="stat-grid">
+        <div class="stat"><div class="k">Present</div><div class="v ok" id="regPresent">0</div></div>
+        <div class="stat"><div class="k">Pending</div><div class="v warn" id="regPending">0</div></div>
+        <div class="stat"><div class="k">Roster size</div><div class="v" id="regRoster">0</div></div>
+        <div class="stat"><div class="k">Absent</div><div class="v err" id="regAbsent">0</div></div>
+      </div>
+
+      <div class="row mt-2 wrap" style="gap:8px;">
+        <button type="button" class="btn btn-sm" onclick="loadAttendance()">↻ Reload list</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="printList()">🖨 Print / PDF</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="loadPresentAbsent()">Present / Absent</button>
+      </div>
+    </div>
+
+    <!-- list (desktop table) -->
+    <div class="card only-desktop">
+      <div class="table-wrap">
+        <table class="data" id="attendanceTable">
+          <thead>
+            <tr>
+              <th>#</th><th>Name</th><th>Roll No</th><th>Major</th><th>Type</th>
+              <th>Time</th><th>Check</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="attendanceEmptyDesktop" class="muted fs-sm mt-2"></div>
+    </div>
+
+    <!-- list (mobile cards) -->
+    <div class="card only-mobile">
+      <div id="attendanceCards" class="rec-list"></div>
+      <div id="attendanceEmptyMobile" class="muted fs-sm"></div>
+    </div>
+
+    <!-- present / absent -->
+    <div class="card">
+      <div class="card-title">
+        <h3>Present / Absent</h3>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="copyAbsentList()">Copy absent list</button>
+      </div>
+      <div class="muted fs-sm" id="paSummary">Abhi load nahi hua.</div>
+
+      <div class="grid-2 mt-3">
+        <div>
+          <h3 class="text-ok fs-sm" id="paPresentHeading" style="text-transform:uppercase; letter-spacing:.06em;">PRESENT (0)</h3>
+          <div id="paPresent" class="rec-list mt-2 scroll-y"></div>
+        </div>
+        <div>
+          <h3 class="text-warn fs-sm" id="paPendingHeading" style="text-transform:uppercase; letter-spacing:.06em;">PENDING APPROVAL (0)</h3>
+          <div id="paPending" class="rec-list mt-2 scroll-y"></div>
+          <h3 class="text-err fs-sm mt-3" id="paAbsentHeading" style="text-transform:uppercase; letter-spacing:.06em;">ABSENT (0)</h3>
+          <div id="paAbsent" class="rec-list mt-2 scroll-y"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== ROSTER ==================== -->
+  <section class="tab-panel" id="panel-roster">
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title"><h3>Upload student list</h3><span class="chip">CSV / paste</span></div>
+        <p class="card-sub">Ek line me ek student: <span class="mono">rollno,name,class,major_subject</span> (tab se bhi chalega). Purane roll number update ho jaate hain — isi se naam/class ki galti bhi theek hoti hai.</p>
+        <div class="field">
+          <textarea id="rosterText" class="textarea" rows="7"
+            placeholder="101,Priya Sharma,BA 1st,History&#10;102,Rahul Verma,BA 1st,Sociology&#10;103,Anjali Singh,BSc 2nd"></textarea>
+        </div>
+        <div class="row wrap" style="gap:8px;">
+          <button type="button" class="btn btn-primary" id="uploadBtn" onclick="uploadRoster()">Save list</button>
+          <button type="button" class="btn btn-ghost" onclick="loadRoster()">Show saved list</button>
+        </div>
+        <div id="uploadMsg" class="mt-2"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><h3>Manual mark</h3><span class="chip chip-warn">GPS fail hone par</span></div>
+        <p class="card-sub">Sirf genuine case ke liye: student ka phone GPS fix nahi de pa raha. Aapke naam se mark hota hai, aur register me “manual” chip ke saath dikhta hai.</p>
+        <div class="field">
+          <label class="label" for="manualRollNo">Roll Number</label>
+          <input id="manualRollNo" class="input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 45678">
+        </div>
+        <div class="field">
+          <label class="label" for="manualName">Name <span class="opt">(naya roll number ho tab)</span></label>
+          <input id="manualName" class="input" type="text" placeholder="e.g. Priya Sharma">
+        </div>
+        <button type="button" class="btn btn-block" id="manualBtn" onclick="manualMark()">Mark present (manual)</button>
+        <div id="manualMsg" class="mt-2"></div>
+
+        <div class="divider"></div>
+
+        <div class="card-title"><h3>Unlock a device</h3><span class="chip">Device lock</span></div>
+        <p class="card-sub">Ek phone sirf ek roll number se bandha hota hai. Phone badal gaya ho to yahan se unlock karein.</p>
+        <div class="row" style="gap:8px;">
+          <input id="unlockRollNo" class="input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Roll number">
+          <button type="button" class="btn btn-sm nowrap" onclick="unlockDevice()">Unlock</button>
+        </div>
+        <div id="unlockMsg" class="mt-2"></div>
+      </div>
+
+      <div class="card" style="grid-column:1/-1;">
+        <div class="card-title"><h3>Saved roster</h3><span class="muted fs-xs" id="rosterCount">—</span></div>
+        <div class="table-wrap only-desktop">
+          <table class="data" id="rosterTable">
+            <thead><tr><th>#</th><th>Name</th><th>Roll No</th><th>Class</th><th>Major</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="rosterCards" class="rec-list only-mobile"></div>
+        <div id="rosterMsg" class="mt-2 muted fs-sm">“Show saved list” dabayein (upar wali class ka list aayega).</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== REPORTS ==================== -->
+  <section class="tab-panel" id="panel-reports">
+    <div class="card">
+      <div class="card-title"><h3>Overall attendance % PDF</h3><span class="chip chip-gold" id="reportComboChip">—</span></div>
+      <p class="card-sub">Har student ka attended ÷ held. Window system par depend karta hai: Annual = 365 din, Semester = 180 din. Sirf counted (approved) marks jaate hain.</p>
+      <button type="button" class="btn btn-primary btn-block" id="reportBtn" onclick="downloadOverallReport()">Download report</button>
+      <div id="reportMsg" class="mt-2"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><h3>Email reports</h3><span class="chip chip-gold" id="mailComboChip">—</span></div>
+      <p class="card-sub">PDF seedha teacher ke inbox me jaati hai. Subject-wise routing "⚙️ Data &amp; Alerts" tab me set hoti hai — mapping na ho to default email par chali jaati hai.</p>
+      <div class="row wrap" style="gap:8px;">
+        <button type="button" class="btn btn-sm" id="mailSessionBtn" onclick="emailSessionReport(false)">📧 Email session PDF now</button>
+        <button type="button" class="btn btn-sm" id="mailOverallBtn" onclick="emailOverallReport()">📧 Email overall report</button>
+      </div>
+      <div class="field mt-3 mb-0">
+        <label class="label" for="mailRollNo">Student report — Roll Number</label>
+        <div class="row" style="gap:8px;">
+          <input id="mailRollNo" class="input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 45678">
+          <button type="button" class="btn btn-sm nowrap" id="mailStudentBtn" onclick="emailStudentReport()">Email student report</button>
+        </div>
+        <p class="hint">Us student ka attendance PDF usi ke subject/class ke hisaab se bhejta hai.</p>
+      </div>
+      <div id="mailReportMsg" class="mt-2"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><h3>CSV export (Excel)</h3><span class="chip">.csv</span></div>
+      <p class="card-sub">Us din ka register Excel me kholne ke liye. Upar wali class / subject / course type / system selection apply hoti hai.</p>
+      <button type="button" class="btn btn-block" id="mailCsvBtn" onclick="downloadCsv()">⬇️ Download CSV (Excel)</button>
+      <div id="mailCsvMsg" class="mt-2"></div>
+    </div>
+  </section>
+
+  <!-- ==================== REVIEW ==================== -->
+  <section class="tab-panel" id="panel-review">
+    <div class="card">
+      <div class="card-title"><h3>Anti-proxy review</h3><span class="muted fs-xs" id="reviewDateLabel">—</span></div>
+      <p class="card-sub">Pending marks approve/reject karein, aur jo entries suspicious lagein unhe check karein. Flag ka matlab “cheating” nahi — sirf “ek nazar daal lein”.</p>
+      <div class="row wrap" style="gap:8px;">
+        <button type="button" class="btn btn-sm" onclick="loadReview()">↻ Reload</button>
+        <button type="button" class="btn btn-sm btn-ok" onclick="approveAllPending()">Approve all pending</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><h3>Pending approval</h3><span class="chip chip-warn" id="pendingCountChip">0</span></div>
+      <div id="reviewPending" class="rec-list"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><h3>Flagged entries</h3><span class="chip chip-err" id="flaggedCountChip">0</span></div>
+      <p class="card-sub">Identical coordinates from different phones, 0 m accuracy, ya ek hi device se kai roll numbers — ye patterns proxy ki taraf ishara karte hain.</p>
+      <div id="reviewFlagged" class="rec-list"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><h3>Location fail hui devices</h3><span class="chip" id="failCountChip">0</span></div>
+      <p class="card-sub">In phones ne aaj location verify nahi kar paayi (class ke bahar the, ya GPS off tha).</p>
+      <div id="reviewFailures" class="rec-list"></div>
+    </div>
+  </section>
+
+  <!-- ==================== DATA & ALERTS (ops) ==================== -->
+  <section class="tab-panel" id="panel-ops">
+
+    <!-- email routing -->
+    <div class="card">
+      <div class="card-title"><h3>Email routing (subject-wise)</h3><span class="chip" id="opsEmailCount">0</span></div>
+      <p class="card-sub">Report PDF kis subject ke liye kis address par jaayegi. Subject zaroori hai; course type / class khaali chhodne par "sab par lagu" hota hai. Sabse specific match jeetta hai.</p>
+      <div class="alert alert-info"><span class="ico">✉</span><div>Default email: <strong id="opsEmailDefault">—</strong> — mapping na ho to yahan jayega.</div></div>
+
+      <div class="table-wrap only-desktop mt-2">
+        <table class="data" id="opsEmailTable">
+          <thead><tr><th>Subject</th><th>Course type</th><th>Class</th><th>Emails</th><th>Updated</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="opsEmailCards" class="rec-list only-mobile"></div>
+      <div id="opsEmailEmpty" class="muted fs-sm mt-2"></div>
+
+      <div class="divider"></div>
+
+      <div class="card-title"><h3>Naya mapping</h3><span class="muted fs-xs">optional field khaali = har ek</span></div>
+      <div class="grid-2">
+        <div class="field">
+          <label class="label" for="opsEmailSubject">Subject <span class="opt">(required)</span></label>
+          <input id="opsEmailSubject" class="input" type="text" placeholder="e.g. History">
+        </div>
+        <div class="field">
+          <label class="label" for="opsEmailCourseType">Course type <span class="opt">(optional)</span></label>
+          <input id="opsEmailCourseType" class="input" type="text" placeholder="khaali = sab">
+        </div>
+        <div class="field">
+          <label class="label" for="opsEmailClassName">Class <span class="opt">(optional)</span></label>
+          <input id="opsEmailClassName" class="input" type="text" placeholder="khaali = sab">
+        </div>
+        <div class="field">
+          <label class="label" for="opsEmailEmails">Emails <span class="opt">(comma se alag)</span></label>
+          <input id="opsEmailEmails" class="input" type="text" placeholder="hod@college.edu, teacher@college.edu">
+        </div>
+      </div>
+      <div class="row wrap mt-2" style="gap:8px;">
+        <button type="button" class="btn btn-sm btn-primary" id="opsEmailAddBtn" onclick="saveEmailSetting()">Save mapping</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="loadEmailSettings()">↻ Reload mappings</button>
+      </div>
+      <div id="opsEmailMsg" class="mt-2"></div>
+    </div>
+
+    <!-- data policy -->
+    <div class="card">
+      <div class="card-title"><h3>Data policy &amp; storage</h3><span class="chip chip-gold">retention</span></div>
+      <p class="card-sub">Purana data khud purge hota hai (MongoDB TTL) — ye card sirf dikhata hai ki kitne din ka data rakha jaata hai aur database kitna bhara hai.</p>
+
+      <div class="stat-grid">
+        <div class="stat"><div class="k">Attendance</div><div class="v" id="opsRetAttendance">—</div></div>
+        <div class="stat"><div class="k">Student identity</div><div class="v" id="opsRetStudent">—</div></div>
+        <div class="stat"><div class="k">Audit log</div><div class="v" id="opsRetAudit">—</div></div>
+        <div class="stat"><div class="k">Sabse purana</div><div class="v" id="opsRetOldest" style="font-size:1rem;">—</div></div>
+      </div>
+      <div id="opsPolicyPurge" class="muted fs-sm mt-2"></div>
+
+      <div class="divider"></div>
+
+      <div class="stat-grid">
+        <div class="stat"><div class="k">Attendance rows</div><div class="v" id="opsCountAttendance">0</div></div>
+        <div class="stat"><div class="k">Students</div><div class="v" id="opsCountStudents">0</div></div>
+        <div class="stat"><div class="k">Device locks</div><div class="v" id="opsCountDevices">0</div></div>
+        <div class="stat"><div class="k">Sessions</div><div class="v" id="opsCountSessions">0</div></div>
+        <div class="stat"><div class="k">Email rules</div><div class="v" id="opsCountEmails">0</div></div>
+      </div>
+
+      <div class="mt-3">
+        <div class="row between fs-sm"><span class="muted" id="opsStorageLabel">Storage —</span><span class="muted" id="opsStoragePct">0%</span></div>
+        <div class="progress mt-1"><i id="opsStorageBar"></i></div>
+        <div class="muted fs-xs mt-1" id="opsStorageHint"></div>
+      </div>
+      <div id="opsStorageWarn" class="mt-2"></div>
+      <div class="muted fs-xs mt-2" id="opsStorageStats"></div>
+      <div id="opsPolicyNotes" class="mt-2"></div>
+      <div class="row wrap mt-2" style="gap:8px;">
+        <button type="button" class="btn btn-sm btn-ghost" onclick="loadDataPolicy()">↻ Reload policy</button>
+      </div>
+    </div>
+
+    <!-- audit log -->
+    <div class="card">
+      <div class="card-title"><h3>Activity / audit log</h3><span class="muted fs-xs" id="opsAuditCount">—</span></div>
+      <p class="card-sub">Kaun, kab, kya badla — sabse naya sabse upar. Edit / delete / manual mark / device unlock / code generate / email routing sab yahan record hota hai.</p>
+      <div class="row wrap" style="gap:8px;">
+        <select id="opsAuditLimit" class="select" style="max-width:160px;" onchange="loadAudit()">
+          <option value="25">25 entries</option>
+          <option value="50" selected>50 entries</option>
+          <option value="100">100 entries</option>
+        </select>
+        <button type="button" class="btn btn-sm" onclick="loadAudit()">↻ Reload log</button>
+      </div>
+      <div class="table-wrap mt-2">
+        <table class="data" id="opsAuditTable">
+          <thead><tr><th>Time</th><th>Action</th><th>By</th><th>Target</th><th>Details</th></tr></thead>
+          <tbody id="opsAuditBody"></tbody>
+        </table>
+      </div>
+      <div id="opsAuditEmpty" class="muted fs-sm mt-2"></div>
+    </div>
+  </section>
+</div>
+
+<!-- ==================== MODALS ==================== -->
+<div class="modal" id="generateModal" role="dialog" aria-modal="true" aria-labelledby="genTitle">
+  <div class="sheet">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head">
+      <div><h2 id="genTitle">Ye class confirm karein</h2><p class="muted fs-sm mt-1">Code in details ke saath banega — students ko yahi chunna hoga.</p></div>
+      <button type="button" class="sheet-close" onclick="closeModal('generateModal')" aria-label="Close">✕</button>
+    </div>
+    <div class="kv" id="generateSummary"></div>
+    <div class="sheet-foot">
+      <button type="button" class="btn btn-ghost" onclick="closeModal('generateModal')">Cancel</button>
+      <button type="button" class="btn btn-primary" id="confirmGenerateBtn" onclick="confirmGenerate()">Generate code</button>
     </div>
   </div>
 </div>
 
-<!-- Generate code confirm modal -->
-<div id="generateModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
-    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Confirm this class</h2>
-    <p class="text-sm text-muted mb-4">Double-check before generating — this is what students will need to match.</p>
-    <div class="space-y-2 text-sm bg-surface2 border border-line rounded-lg p-3.5" id="generateSummary"></div>
-    <div class="flex gap-3 mt-5">
-      <button onclick="closeGenerateConfirm()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
-      <button onclick="confirmGenerate()" class="flex-1 py-2.5 rounded-lg bg-gold text-[#171208] font-semibold hover:bg-gold/90 transition">Yes, Generate</button>
+<div class="modal" id="endSessionModal" role="dialog" aria-modal="true" aria-labelledby="endTitle">
+  <div class="sheet">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head">
+      <div><h2 id="endTitle">Code abhi band karein?</h2><p class="muted fs-sm mt-1" id="endSessionText">Students is code se attendance mark nahi kar payenge. Jo mark ho chuki hai wo safe rehti hai.</p></div>
+      <button type="button" class="sheet-close" onclick="closeModal('endSessionModal')" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-foot">
+      <button type="button" class="btn btn-ghost" onclick="closeModal('endSessionModal')">Cancel</button>
+      <button type="button" class="btn btn-danger" id="confirmEndBtn" onclick="confirmEndSession()">End code</button>
     </div>
   </div>
 </div>
 
-<!-- Edit entry modal -->
-<div id="editModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
-    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Edit Entry</h2>
-    <p class="text-sm text-muted mb-4">Fix a roll number or subject entered wrong by the student.</p>
-    <div class="space-y-3">
-      <div>
-        <label class="block text-xs font-medium text-muted mb-1">Roll Number</label>
-        <input id="editRollNo" type="text" inputmode="numeric" pattern="[0-9]*"
-          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
-      </div>
-      <div>
-        <label class="block text-xs font-medium text-muted mb-1">Name</label>
-        <input id="editName" type="text"
-          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
-      </div>
-      <div>
-        <label class="block text-xs font-medium text-muted mb-1">Subject</label>
-        <input id="editSubject" type="text"
-          class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
-      </div>
+<div class="modal" id="deleteModal" role="dialog" aria-modal="true" aria-labelledby="delTitle">
+  <div class="sheet">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head">
+      <div><h2 id="delTitle">Entry delete karein?</h2><p class="muted fs-sm mt-1" id="deleteModalText">Ye permanently hat jaayegi.</p></div>
+      <button type="button" class="sheet-close" onclick="closeModal('deleteModal')" aria-label="Close">✕</button>
     </div>
-    <div id="editModalErr" class="hidden text-xs text-err mt-3"></div>
-    <div class="flex gap-3 mt-5">
-      <button onclick="closeEditModal()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
-      <button onclick="saveEdit()" class="flex-1 py-2.5 rounded-lg bg-gold text-[#171208] font-semibold hover:bg-gold/90 transition">Save Changes</button>
+    <div class="sheet-foot">
+      <button type="button" class="btn btn-ghost" onclick="closeModal('deleteModal')">Cancel</button>
+      <button type="button" class="btn btn-danger" id="confirmDeleteBtn" onclick="confirmDelete()">Delete entry</button>
     </div>
   </div>
 </div>
 
-<!-- Delete confirm modal -->
-<div id="deleteModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
-    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Delete this entry?</h2>
-    <p class="text-sm text-muted mb-4" id="deleteModalText">This will permanently remove the entry from the attendance list.</p>
-    <div class="flex gap-3">
-      <button onclick="closeDeleteModal()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
-      <button onclick="confirmDelete()" class="flex-1 py-2.5 rounded-lg bg-err text-[#2a0d0d] font-semibold hover:bg-err/90 transition">Delete</button>
+<div class="modal" id="editModal" role="dialog" aria-modal="true" aria-labelledby="editTitle">
+  <div class="sheet">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head">
+      <div><h2 id="editTitle">Entry edit karein</h2><p class="muted fs-sm mt-1">Galat roll number ya subject theek karne ke liye.</p></div>
+      <button type="button" class="sheet-close" onclick="closeModal('editModal')" aria-label="Close">✕</button>
+    </div>
+    <div class="field">
+      <label class="label" for="editRollNo">Roll Number</label>
+      <input id="editRollNo" class="input" type="text" inputmode="numeric" pattern="[0-9]*">
+    </div>
+    <div class="field">
+      <label class="label" for="editName">Name</label>
+      <input id="editName" class="input" type="text">
+    </div>
+    <div class="field">
+      <label class="label" for="editSubject">Subject</label>
+      <input id="editSubject" class="input" type="text">
+    </div>
+    <div id="editModalErr" class="hide mt-2"></div>
+    <div class="sheet-foot">
+      <button type="button" class="btn btn-ghost" onclick="closeModal('editModal')">Cancel</button>
+      <button type="button" class="btn btn-primary" id="saveEditBtn" onclick="saveEdit()">Save changes</button>
     </div>
   </div>
 </div>
 
-<!-- End session confirm modal -->
-<div id="endSessionModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
-    <h2 class="font-serif text-lg font-semibold text-ink mb-1">End this code now?</h2>
-    <p class="text-sm text-muted mb-4" id="endSessionText">Students will no longer be able to mark attendance with this code. Attendance already recorded is kept.</p>
-    <div class="flex gap-3">
-      <button onclick="closeEndSessionConfirm()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
-      <button onclick="confirmEndSession()" class="flex-1 py-2.5 rounded-lg bg-err text-[#2a0d0d] font-semibold hover:bg-err/90 transition">End Code</button>
+<div class="modal" id="opsDeleteModal" role="dialog" aria-modal="true" aria-labelledby="opsDeleteTitle">
+  <div class="sheet">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head">
+      <div><h2 id="opsDeleteTitle">Email mapping hata dein?</h2><p class="muted fs-sm mt-1" id="opsDeleteText">—</p></div>
+      <button type="button" class="sheet-close" onclick="closeModal('opsDeleteModal')" aria-label="Close">✕</button>
+    </div>
+    <div class="sheet-foot">
+      <button type="button" class="btn btn-ghost" onclick="closeModal('opsDeleteModal')">Cancel</button>
+      <button type="button" class="btn btn-danger" id="opsDeleteConfirmBtn" onclick="confirmDeleteEmailSetting()">Delete mapping</button>
     </div>
   </div>
 </div>
+
+<div class="toast-wrap" id="toasts" aria-live="polite"></div>
 
 <script>
-// Student names are typed by students — always escape before putting in HTML.
+/* =====================================================================
+   Teacher dashboard logic
+   ===================================================================== */
+const $ = (id) => document.getElementById(id);
+
+// Student names / subjects are typed by people — always escape before use in HTML.
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-let expiryTimestamp = null;
-let timerInterval = null;
-let lastRecords = [];
-let lastDate = '';
-let lastSessionLabel = '';
-let editingRecordId = null;
-let deletingRecordId = null;
-let activeSessionId = null;   // the session whose code is currently showing
-let lastAbsentList = [];      // so the teacher can copy the absentees
+const alertErr = (t) => `<div class="alert alert-err"><span class="ico">✕</span><div>${esc(t)}</div></div>`;
+const alertOk = (t) => `<div class="alert alert-ok"><span class="ico">✓</span><div>${esc(t)}</div></div>`;
+const alertWarn = (t) => `<div class="alert alert-warn"><span class="ico">!</span><div>${esc(t)}</div></div>`;
 
-// ---- Register day (always IST, server-side days) -------------------------
-// The server treats a day as IST. A phone set to another timezone (or with a
-// wrong clock) could otherwise ask for the wrong date, so the date is computed
-// from IST here too instead of trusting the device's own calendar.
+function toast(message, type, ms) {
+  const wrap = $('toasts');
+  const el = document.createElement('div');
+  el.className = 'toast ' + (type || '');
+  const icon = type === 'ok' ? '✅' : type === 'err' ? '✕' : type === 'warn' ? '⚠️' : 'ℹ️';
+  el.innerHTML = `<div class="ico">${icon}</div><div>${esc(message)}</div>`;
+  wrap.appendChild(el);
+  setTimeout(() => { el.style.transition = 'opacity .25s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 260); }, ms || 5200);
+}
+
+/* ---------- modals ---------- */
+function openModal(id) {
+  const m = $(id);
+  if (!m) return;
+  m.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  const f = m.querySelector('button:not([disabled]), input, select, textarea');
+  if (f) setTimeout(() => f.focus(), 60);
+}
+function closeModal(id) {
+  const m = $(id);
+  if (!m) return;
+  m.classList.remove('open');
+  if (!document.querySelector('.modal.open')) document.body.style.overflow = '';
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const open = document.querySelector('.modal.open');
+  if (open) closeModal(open.id);
+});
+document.querySelectorAll('.modal').forEach((m) => {
+  m.addEventListener('click', (e) => { if (e.target === m) closeModal(m.id); });
+});
+
+/* ---------- dates & times (sab IST) ---------- */
 function istToday() {
   return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
-function selectedDate() {
-  return document.getElementById('registerDate').value || istToday();
+function selectedDate() { return $('registerDate').value || istToday(); }
+function formatTime(ms) {
+  return new Date(ms).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+}
+function formatDateHeading(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  return d.toLocaleDateString('en-IN', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
 }
 function setRegisterToday() {
-  const el = document.getElementById('registerDate');
-  el.value = istToday();
+  $('registerDate').value = istToday();
+  loadEverything();
+}
+function onDateChange() {
   loadSessions();
   loadAttendance();
-}
-function initRegisterDate() {
-  const el = document.getElementById('registerDate');
-  el.value = istToday();
-  el.max = istToday(); // future dates have no register
-  el.addEventListener('change', () => { loadSessions(); loadAttendance(); });
+  loadPresentAbsent();
+  loadReview();
 }
 
-// ---- Persist selections + active session in localStorage ----
+/* ---------- auth ---------- */
+function getTeacherPassword() { return sessionStorage.getItem('teacher_password') || ''; }
+function getTeacherToken() { return sessionStorage.getItem('teacher_token') || ''; }
+
+// Dono cheezein ek jagah clear hoti hain, taaki kahin ek reh na jaye.
+function clearTeacherAuth() {
+  sessionStorage.removeItem('teacher_token');
+  sessionStorage.removeItem('teacher_password');
+}
+
+// Naya token + purana password fallback: jo available ho wo bhej do (dono bhi).
+function teacherAuthHeaders(extra) {
+  const headers = Object.assign({}, extra || {});
+  const token = getTeacherToken();
+  const password = getTeacherPassword();
+  if (token) headers['X-Teacher-Token'] = token;
+  if (password) headers['X-Teacher-Password'] = password;
+  return headers;
+}
+
+async function signIn() {
+  const pass = $('teacherPassword').value;
+  const msg = $('loginMsg');
+  const btn = $('signInBtn');
+  if (!pass) { msg.innerHTML = alertErr('Password daalein.'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Checking…';
+  try {
+    const res = await fetch('/api/teacher/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pass }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 429) {
+      clearTeacherAuth();
+      msg.innerHTML = alertErr(data.error || 'Galat password.');
+      return;
+    }
+    if (!res.ok || !data.ok || !data.token) {
+      msg.innerHTML = alertErr(data.error || 'Server se jawab nahi aaya. Dobara try karein.');
+      return;
+    }
+    sessionStorage.setItem('teacher_token', data.token);
+    sessionStorage.setItem('teacher_password', pass); // purane flows / fallback ke liye
+    $('teacherPassword').value = '';
+    msg.innerHTML = '';
+    const mins = Math.round((data.expires_in_seconds || 0) / 60);
+    toast(mins ? `Sign in ho gaya — session ${mins} minute ke liye valid hai.` : 'Sign in ho gaya.', 'ok', 6000);
+    showDashboard();
+  } catch (err) {
+    msg.innerHTML = alertErr('Network error. Internet check karke dobara try karein.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign in';
+  }
+}
+function signOut() {
+  clearTeacherAuth();
+  stopLivePoll();
+  $('dashView').classList.add('hide');
+  $('loginView').classList.remove('hide');
+  toast('Sign out ho gaya.', 'ok', 2500);
+}
+function showLogin(message) {
+  stopLivePoll();
+  $('dashView').classList.add('hide');
+  $('loginView').classList.remove('hide');
+  $('loginMsg').innerHTML = message ? alertErr(message) : '';
+}
+function showDashboard() {
+  $('loginView').classList.add('hide');
+  $('dashView').classList.remove('hide');
+  startDashboard();
+}
+
+// Har teacher request ek hi jagah se jaati hai: token + password header, aur
+// 401 par turant login screen (session expire ka matlab dobara sign in).
+async function teacherFetch(url, options = {}) {
+  options.headers = teacherAuthHeaders(options.headers);
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch (err) {
+    const e = new Error('network');
+    throw e;
+  }
+  if (res.status === 401) {
+    clearTeacherAuth();
+    showLogin('Session expire ho gaya — dobara sign in karein.');
+    throw new Error('auth');
+  }
+  return res;
+}
+function isAuthError(err) { return err && (err.message === 'auth' || err.message === 'network'); }
+
+/* =====================================================================
+   Tab switching
+   ===================================================================== */
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'panel-' + name));
+  if (name === 'review') loadReview();
+  if (name === 'register') { loadAttendance(); loadPresentAbsent(); }
+  if (name === 'reports') updateReportLabel();
+  if (name === 'live') { loadSessions(); loadAttendance(); }
+  if (name === 'ops') loadOps();
+  // Live polling sirf tab tak chalti hai jab tak live tab khula ho.
+  if (name === 'live') startLivePoll(); else stopLivePoll();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+/* =====================================================================
+   State + persistence (page reload par sab wapas mil jaata hai)
+   ===================================================================== */
 const SELECTION_KEY = 'attendance_teacher_selection';
 const ACTIVE_SESSION_KEY = 'attendance_teacher_active_session';
+
+let expiryTimestamp = null;
+let timerInterval = null;
+let activeSessionId = null;
+let lastRecords = [];
+let lastDate = '';
+let lastSessionLabel = '';
+let lastAbsentList = [];
+let editingRecordId = null;
+let deletingRecordId = null;
+let sessionTotalMs = 7 * 60 * 1000;
+
+// Live polling ka apna state — countdown timer se poori tarah alag.
+const LIVE_POLL_MS = 5000;
+const LIVE_FEED_MAX = 60;
+let livePollTimer = null;
+let livePollSince = 0;
+let livePollSessionId = null;
+let livePollMarks = [];
+let livePollBusy = false;
 
 function saveSelection() {
   try {
     localStorage.setItem(SELECTION_KEY, JSON.stringify({
-      class_name: document.getElementById('className').value,
-      subject: document.getElementById('subjectSelect').value,
-      course_type: document.getElementById('courseTypeSelect').value,
-      system: document.getElementById('systemSelect').value,
-      require_location: document.getElementById('requireLocation').checked,
+      class_name: $('className').value,
+      subject: $('subjectSelect').value,
+      course_type: $('courseTypeSelect').value,
+      system: $('systemSelect').value,
+      require_location: $('requireLocation').checked,
+      expiry_minutes: $('expiryMinutes').value,
+      require_approval: $('requireApproval').checked,
+      send_pdf: $('autoSendPdf').checked,
     }));
   } catch (err) {}
 }
-
 function restoreSelection() {
   try {
     const saved = JSON.parse(localStorage.getItem(SELECTION_KEY) || 'null');
     if (!saved) return;
-    if (saved.class_name) document.getElementById('className').value = saved.class_name;
-    if (saved.subject) document.getElementById('subjectSelect').value = saved.subject;
-    if (saved.course_type) document.getElementById('courseTypeSelect').value = saved.course_type;
-    if (saved.system) document.getElementById('systemSelect').value = saved.system;
-    if (typeof saved.require_location === 'boolean') document.getElementById('requireLocation').checked = saved.require_location;
+    if (saved.class_name) $('className').value = saved.class_name;
+    if (saved.subject) $('subjectSelect').value = saved.subject;
+    if (saved.course_type) $('courseTypeSelect').value = saved.course_type;
+    if (saved.system) $('systemSelect').value = saved.system;
+    if (typeof saved.require_location === 'boolean') $('requireLocation').checked = saved.require_location;
+    if (saved.expiry_minutes) $('expiryMinutes').value = saved.expiry_minutes;
+    if (typeof saved.require_approval === 'boolean') $('requireApproval').checked = saved.require_approval;
+    if (typeof saved.send_pdf === 'boolean') $('autoSendPdf').checked = saved.send_pdf;
   } catch (err) {}
 }
-
-function saveActiveSession(data, class_name, subject, course_type, require_location, system) {
+function saveActiveSession(data) {
   try {
     localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify({
       code: data.code,
       session_id: data.session_id,
-      class_name, subject, course_type, require_location, system,
+      class_name: data.class_name,
+      subject: data.subject,
+      course_type: data.course_type,
+      system: data.system,
       expiry: expiryTimestamp,
     }));
   } catch (err) {}
 }
-
 function clearActiveSession() {
   try { localStorage.removeItem(ACTIVE_SESSION_KEY); } catch (err) {}
   activeSessionId = null;
+  stopLivePoll();
 }
 
-// Asks the server how long this code is really valid for, and how many
-// students have marked. The device clock is never trusted for this — a phone
-// that is a few minutes off would otherwise show an expired countdown for a
-// code the server still accepts (or the other way round).
+// Upar ki selection ko chip me dikhata hai, taaki galti turant pakdi ja sake.
+function updateReportLabel() {
+  const c = $('className').value || '—';
+  const s = $('subjectSelect').value || '—';
+  const t = $('courseTypeSelect').value || '—';
+  const sys = $('systemSelect').value || '—';
+  const label = `${c} · ${s} (${t}, ${sys})`;
+  $('liveComboChip').textContent = c === '—' ? '—' : label;
+  $('reportComboChip').textContent = c === '—' ? '—' : label;
+  const mailChip = $('mailComboChip');
+  if (mailChip) mailChip.textContent = c === '—' ? '—' : label;
+  $('reportBtn').textContent = sys === 'Semester'
+    ? 'Download Semester report (180 days)'
+    : sys === 'Annual'
+      ? 'Download Annual report (365 days)'
+      : 'Download report';
+}
+
+/* =====================================================================
+   Live session (code) view
+   ===================================================================== */
+const RING_CIRCUMFERENCE = 326.7; // 2πr, r = 52
+
+function updateTimer() {
+  if (!expiryTimestamp) return;
+  const remaining = Math.max(0, Math.round((expiryTimestamp - Date.now()) / 1000));
+  const m = Math.floor(remaining / 60);
+  const s = remaining % 60;
+  $('ringTime').textContent = remaining > 0 ? `${m}:${String(s).padStart(2, '0')}` : '0:00';
+
+  const ratio = sessionTotalMs > 0 ? Math.max(0, Math.min(1, (remaining * 1000) / sessionTotalMs)) : 0;
+  const bar = $('ringBar');
+  bar.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE * (1 - ratio)));
+  bar.style.stroke = ratio <= 0.2 ? 'var(--err)' : ratio <= 0.45 ? 'var(--warn)' : 'var(--gold)';
+
+  if (remaining <= 0) {
+    if (timerInterval) clearInterval(timerInterval);
+    timerInterval = null;
+    $('endSessionBtn').classList.add('hide');
+    $('codeStateChip').textContent = 'Expired';
+    $('codeStateChip').className = 'chip chip-err';
+    $('codeNotes').textContent = 'Code expire ho gaya. Naya code generate karein.';
+    clearActiveSession();
+  }
+}
+
+// Server se authoritative code / countdown / counts laata hai — phone ki clock
+// par bharosa nahi karta.
 async function refreshSessionStatus(sessionId) {
-  const id = sessionId || activeSessionId;
-  if (!id) return null;
-  const res = await teacherFetch('/api/teacher/session-status?session_id=' + encodeURIComponent(id));
-  if (!res || !res.ok) return null;
+  const res = await teacherFetch('/api/teacher/session-status?session_id=' + encodeURIComponent(sessionId));
+  if (!res.ok) return null;
   const data = await res.json();
-  if (!data.found) { clearActiveSession(); document.getElementById('codeSection').style.display = 'none'; return null; }
+  if (!data.found) {
+    clearActiveSession();
+    $('codeCard').classList.add('hide');
+    return null;
+  }
 
   activeSessionId = data.session_id;
-  document.getElementById('codeSection').style.display = 'block';
-  document.getElementById('codeDisplay').textContent = data.code;
-  document.getElementById('codeLocNote').textContent = data.require_location
-    ? '📍 Location check is ON for this session'
-    : '📍 Location check is OFF for this session';
-  document.getElementById('codeMarkedCount').textContent =
-    `${data.marked_count} student(s) have marked so far`;
-  document.getElementById('endSessionBtn').style.display = data.active ? 'inline-block' : 'none';
+  $('codeCard').classList.remove('hide');
+  $('codeDisplay').textContent = data.code;
+  $('codeCombo').textContent = `${data.class_name} — ${data.subject} (${data.course_type}, ${data.system})`;
+  $('codeStateChip').textContent = data.active ? 'Live' : 'Expired';
+  $('codeStateChip').className = 'chip ' + (data.active ? 'chip-ok' : 'chip-err');
 
-  // Convert the server's remaining seconds into a local countdown.
-  expiryTimestamp = Date.now() + data.seconds_left * 1000;
+  $('statMarked').textContent = data.marked_count || 0;
+  $('statPresent').textContent = data.confirmed_count || 0;
+  $('statPending').textContent = data.pending_count || 0;
+  $('statFlagged').textContent = data.flagged_count || 0;
+
+  const roster = data.roster_size || 0;
+  const present = (data.confirmed_count || 0) + (data.pending_count || 0);
+  const pct = roster ? Math.round((present / roster) * 100) : 0;
+  $('progressLabel').textContent = roster
+    ? `${present} / ${roster} present`
+    : `${present} present — roster upload karein`;
+  $('progressPct').textContent = pct + '%';
+  $('progressBar').style.width = Math.min(100, pct) + '%';
+
+  $('liveApprovalToggle').checked = data.require_approval === true;
+  $('approvalModeNote').textContent = data.require_approval
+    ? 'ON — har mark aapke approve karne ka intezaar kar raha hai'
+    : 'Off — marks turant count ho rahe hain';
+  $('approveAllBtn').classList.toggle('hide', !(data.require_approval && (data.pending_count || 0) > 0));
+
+  $('locSwitchNote').textContent = data.require_location
+    ? (data.strict_location ? 'Anti-proxy lock: server par hamesha ON' : 'Is session me ON hai')
+    : 'OFF — proxy ka risk hai!';
+
+  sessionTotalMs = Math.max(1000, (data.expires_at || 0) - (data.created_at || 0));
+  expiryTimestamp = Date.now() + (data.seconds_left || 0) * 1000;
+  $('endSessionBtn').classList.toggle('hide', !data.active);
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = setInterval(updateTimer, 1000);
   updateTimer();
+
+  // Countdown timer ko chhue bina: live feed sirf chalte session me poll karti hai.
+  if (data.active) startLivePoll(); else stopLivePoll();
   return data;
 }
 
+// Page reload par chal raha code wapas laata hai (server se verify karke).
 async function restoreActiveSession() {
   try {
     const saved = JSON.parse(localStorage.getItem(ACTIVE_SESSION_KEY) || 'null');
-    if (!saved || !saved.session_id) {
-      clearActiveSession();
-      return;
-    }
-    activeSessionId = saved.session_id;
+    if (!saved || !saved.session_id) { $('codeCard').classList.add('hide'); return; }
     const status = await refreshSessionStatus(saved.session_id);
-    if (!status || !status.active) {
-      await loadSessions();
-      await loadAttendance();
-      return;
-    }
-    await loadSessions(saved.session_id);
-    await loadAttendance();
-  } catch (err) {}
+    if (!status) { clearActiveSession(); $('codeCard').classList.add('hide'); }
+  } catch (err) {
+    $('codeCard').classList.add('hide');
+  }
 }
 
-// ---- Teacher password handling ----
-function getTeacherPassword() {
-  let pw = sessionStorage.getItem('teacher_password');
-  if (!pw) {
-    pw = prompt('Enter the teacher password:') || '';
-    sessionStorage.setItem('teacher_password', pw);
-  }
-  return pw;
+/* =====================================================================
+   Generate / end a code
+   ===================================================================== */
+function getCombo() {
+  return {
+    class_name: $('className').value.trim(),
+    subject: $('subjectSelect').value.trim(),
+    course_type: $('courseTypeSelect').value.trim(),
+    system: $('systemSelect').value.trim(),
+  };
 }
-async function teacherFetch(url, options = {}) {
-  options.headers = Object.assign({}, options.headers, { 'X-Teacher-Password': getTeacherPassword() });
-  const res = await fetch(url, options);
-  if (res.status === 401) {
-    sessionStorage.removeItem('teacher_password');
-    alert('Incorrect teacher password. Please try again.');
-  }
-  return res;
+function comboMissing(c) {
+  if (!c.class_name) return 'Class chunein (upar wale card me).';
+  if (!c.system) return 'System (Annual / Semester) chunein.';
+  if (!c.subject) return 'Subject chunein.';
+  if (!c.course_type) return 'Course type chunein.';
+  return null;
 }
 
 function openGenerateConfirm() {
-  const class_name = document.getElementById('className').value.trim();
-  const subject = document.getElementById('subjectSelect').value.trim();
-  const course_type = document.getElementById('courseTypeSelect').value.trim();
-  const system = document.getElementById('systemSelect').value.trim();
-  if (!class_name || !system || !subject || !course_type) { alert('Select class, system (Annual/Semester), subject and course type first'); return; }
-
-  const require_location = document.getElementById('requireLocation').checked;
-  const send_pdf = document.getElementById('autoSendPdf').checked;
-
-  document.getElementById('generateSummary').innerHTML = `
-    <div class="flex justify-between"><span class="text-muted">Class</span><span class="font-medium text-ink">${class_name}</span></div>
-    <div class="flex justify-between"><span class="text-muted">System</span><span class="font-medium text-ink">${system}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Subject</span><span class="font-medium text-ink">${subject}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Course Type</span><span class="font-medium text-ink">${course_type}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Location Check</span><span class="font-medium text-ink">${require_location ? 'ON' : 'OFF'}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Auto-Email PDF</span><span class="font-medium text-ink">${send_pdf ? 'ON' : 'OFF'}</span></div>
-  `;
-  document.getElementById('generateModal').classList.remove('hidden');
+  const c = getCombo();
+  const problem = comboMissing(c);
+  if (problem) { toast(problem, 'err'); return; }
+  const rows = [
+    ['Class', c.class_name],
+    ['System', c.system],
+    ['Subject', c.subject],
+    ['Course type', c.course_type],
+    ['Code window', $('expiryMinutes').value + ' minute'],
+    ['Location check', $('requireLocation').checked ? 'ON (verified)' : 'OFF — risky'],
+    ['Approval mode', $('requireApproval').checked ? 'ON (aapko approve karna hoga)' : 'OFF'],
+    ['PDF email', $('autoSendPdf').checked ? 'ON' : 'OFF'],
+  ];
+  $('generateSummary').innerHTML = rows.map(([k, v]) => `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>`).join('');
+  openModal('generateModal');
 }
 
-function closeGenerateConfirm() {
-  document.getElementById('generateModal').classList.add('hidden');
-}
-
+let generating = false;
 async function confirmGenerate() {
-  closeGenerateConfirm();
+  if (generating) return;
+  const c = getCombo();
+  const btn = $('confirmGenerateBtn');
+  const msg = $('generateMsg');
+  generating = true;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Generating…';
+  try {
+    const res = await teacherFetch('/api/teacher/generate-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        class_name: c.class_name,
+        subject: c.subject,
+        course_type: c.course_type,
+        system: c.system,
+        require_location: $('requireLocation').checked,
+        require_approval: $('requireApproval').checked,
+        send_pdf: $('autoSendPdf').checked,
+        expiry_minutes: Number($('expiryMinutes').value),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) { toast(data.error || 'Code generate nahi hua.', 'err'); return; }
 
-  const class_name = document.getElementById('className').value.trim();
-  const subject = document.getElementById('subjectSelect').value.trim();
-  const course_type = document.getElementById('courseTypeSelect').value.trim();
-  const system = document.getElementById('systemSelect').value.trim();
-  const require_location = document.getElementById('requireLocation').checked;
-  const send_pdf = document.getElementById('autoSendPdf').checked;
-
-  const res = await teacherFetch('/api/teacher/generate-code', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ class_name, subject, course_type, system, require_location, send_pdf })
-  });
-  const data = await res.json().catch(() => ({ error: 'Something went wrong. Try again.' }));
-  if (data.error) { alert(data.error); return; }
-
-  activeSessionId = data.session_id;
-  saveActiveSession(data, class_name, subject, course_type, require_location, system);
-  saveSelection();
-  // Pull the authoritative code / countdown / marked count from the server
-  // instead of trusting this device's clock.
-  await refreshSessionStatus(data.session_id);
-  await loadSessions(data.session_id);
+    closeModal('generateModal');
+    saveSelection();
+    await refreshSessionStatus(data.session_id);
+    saveActiveSession({ code: data.code, session_id: data.session_id, class_name: data.class_name, subject: data.subject, course_type: data.course_type, system: data.system });
+    await loadSessions(data.session_id);
+    $('requireLocation').checked = data.require_location !== false;
+    msg.innerHTML = alertOk(`Code ${data.code} ban gaya — ${Math.round((data.expires_in_seconds || 0) / 60)} minute ke liye.`);
+    toast('Code: ' + data.code, 'ok');
+  } catch (err) {
+    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
+  } finally {
+    generating = false;
+    btn.disabled = false;
+    btn.textContent = 'Generate code';
+  }
 }
 
+function copyCode() {
+  const code = $('codeDisplay').textContent.trim();
+  if (!code || code === '-----') return;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(code)
+      .then(() => toast('Code copy ho gaya: ' + code, 'ok'))
+      .catch(() => toast('Copy nahi hua. Code: ' + code, 'warn'));
+  } else {
+    toast('Code: ' + code, 'info');
+  }
+}
+
+function openEndSessionConfirm() {
+  if (!activeSessionId) { toast('Koi live code nahi hai.', 'warn'); return; }
+  openModal('endSessionModal');
+}
+
+async function confirmEndSession() {
+  const sessionId = activeSessionId;
+  const btn = $('confirmEndBtn');
+  if (!sessionId) return;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Ending…';
+  try {
+    const res = await teacherFetch('/api/teacher/end-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    closeModal('endSessionModal');
+    if (!res.ok || !data.success) { toast(data.error || 'Session end nahi hui.', 'err'); return; }
+
+    $('endSessionBtn').classList.add('hide');
+    $('codeStateChip').textContent = 'Ended';
+    $('codeStateChip').className = 'chip chip-err';
+    $('codeNotes').textContent = 'Aapne ye code band kar diya. Naya code generate kar sakte hain.';
+    clearActiveSession();
+    toast('Code band — ' + (data.marked_count || 0) + ' students ne mark kiya.', 'ok');
+    await loadSessions();
+    await loadAttendance();
+    await loadReview();
+  } catch (err) {
+    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'End code';
+  }
+}
+
+/* =====================================================================
+   Approval mode + anti-proxy actions
+   ===================================================================== */
+async function toggleApprovalMode() {
+  const wanted = $('liveApprovalToggle').checked;
+  if (!activeSessionId) { toast('Pehle code generate karein.', 'warn'); return; }
+  try {
+    const res = await teacherFetch('/api/teacher/session/set-approval', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: activeSessionId, require_approval: wanted }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      $('liveApprovalToggle').checked = !wanted;
+      toast(data.error || 'Approval mode change nahi hua.', 'err');
+      return;
+    }
+    toast(wanted
+      ? 'Approval mode ON — naye marks aapke approve karne par count honge.'
+      : 'Approval mode OFF — marks turant count ho rahe hain.', 'ok', 6000);
+    await refreshSessionStatus(activeSessionId);
+    await loadReview();
+    if (wanted) switchTab('review');
+  } catch (err) {
+    if (!isAuthError(err)) {
+      $('liveApprovalToggle').checked = !wanted;
+      toast('Network error. Dobara try karein.', 'err');
+    }
+  }
+}
+
+async function decideEntry(recordId, action) {
+  try {
+    const res = await teacherFetch('/api/teacher/attendance/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record_id: recordId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) { toast(data.error || 'Action fail hua.', 'err'); return false; }
+    toast(action === 'approve'
+      ? 'Approve ho gaya — student present count hoga.'
+      : 'Reject kar diya — entry hat gayi (student dobara try kar sakta hai).', 'ok');
+    return true;
+  } catch (err) {
+    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
+    return false;
+  }
+}
+
+async function approveEntry(id) {
+  if (await decideEntry(id, 'approve')) {
+    if (activeSessionId) await refreshSessionStatus(activeSessionId);
+    await loadReview();
+    await loadAttendance();
+    await loadPresentAbsent();
+  }
+}
+async function rejectEntry(id) {
+  if (await decideEntry(id, 'reject')) {
+    if (activeSessionId) await refreshSessionStatus(activeSessionId);
+    await loadReview();
+    await loadAttendance();
+    await loadPresentAbsent();
+  }
+}
+
+async function approveAllPending() {
+  if (!activeSessionId) {
+    toast('Approve-all session ke hisaab se chalta hai — pehle live code khol lein.', 'warn');
+    return;
+  }
+  try {
+    const res = await teacherFetch('/api/teacher/attendance/approve-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: activeSessionId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) { toast(data.error || 'Approve all fail hua.', 'err'); return; }
+    toast((data.approved || 0) + ' entries approve ho gayi.', 'ok');
+    await refreshSessionStatus(activeSessionId);
+    await loadReview();
+    await loadAttendance();
+    await loadPresentAbsent();
+  } catch (err) {
+    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
+  }
+}
+
+/* =====================================================================
+   Register: sessions + attendance list
+   ===================================================================== */
 async function loadSessions(selectId) {
-  const class_name = document.getElementById('className').value.trim();
-  const subject = document.getElementById('subjectSelect').value.trim();
-  const course_type = document.getElementById('courseTypeSelect').value.trim();
-  const system = document.getElementById('systemSelect').value.trim();
+  const c = getCombo();
   const params = new URLSearchParams();
-  if (class_name) params.set('class_name', class_name);
-  if (subject) params.set('subject', subject);
-  if (course_type) params.set('course_type', course_type);
-  if (system) params.set('system', system);
+  if (c.class_name) params.set('class_name', c.class_name);
+  if (c.subject) params.set('subject', c.subject);
+  if (c.course_type) params.set('course_type', c.course_type);
+  if (c.system) params.set('system', c.system);
   params.set('date', selectedDate());
 
   try {
     const res = await teacherFetch('/api/teacher/sessions?' + params.toString());
     if (!res.ok) return;
     const data = await res.json();
-    const sel = document.getElementById('sessionSelect');
+    const sel = $('sessionSelect');
     const previous = selectId || sel.value;
 
     sel.innerHTML = '<option value="">All sessions that day</option>';
     (data.sessions || []).forEach((s) => {
       const opt = document.createElement('option');
       opt.value = s.session_id;
-      const time = formatTime(s.created_at);
-      opt.textContent = `${s.class_name} — ${s.subject} (${s.course_type || '-'}, ${s.system || 'Annual'}) — ${time} — ${s.marked_count || 0} marked`;
+      opt.textContent = `${s.class_name} — ${s.subject} (${s.course_type || '-'}, ${s.system || 'Annual'}) — ${formatTime(s.created_at)} — ${s.marked_count || 0} marked`;
       sel.appendChild(opt);
     });
     if (previous) sel.value = previous;
-  } catch (err) {}
-}
-
-function updateTimer() {
-  const remaining = Math.max(0, Math.round((expiryTimestamp - Date.now())/1000));
-  const min = Math.floor(remaining/60);
-  const sec = remaining % 60;
-  document.getElementById('timer').textContent = remaining > 0
-    ? `Expires in ${min}:${sec.toString().padStart(2,'0')}`
-    : 'Code expired — generate a new one';
-  if (remaining <= 0) {
-    clearInterval(timerInterval);
-    document.getElementById('endSessionBtn').style.display = 'none';
-    clearActiveSession();
-  }
-}
-
-
-// ---- End the code early ----
-function openEndSessionConfirm() {
-  if (!activeSessionId) return;
-  document.getElementById('endSessionModal').classList.remove('hidden');
-}
-function closeEndSessionConfirm() {
-  document.getElementById('endSessionModal').classList.add('hidden');
-}
-async function confirmEndSession() {
-  closeEndSessionConfirm();
-  const sessionId = activeSessionId;
-  if (!sessionId) return;
-  try {
-    const res = await teacherFetch('/api/teacher/end-session', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ session_id: sessionId })
-    });
-    const data = await res.json();
-    if (!data.success) { alert(data.error || 'Could not end the session.'); return; }
-    document.getElementById('endSessionBtn').style.display = 'none';
-    document.getElementById('timer').textContent = 'Code ended by you — students can no longer mark with it.';
-    document.getElementById('codeMarkedCount').textContent = `${data.marked_count} student(s) marked in this session.`;
-    clearActiveSession();
-    await loadSessions();
-    await loadAttendance();
   } catch (err) {
-    alert('Network error. Try again.');
+    if (!isAuthError(err)) toast('Sessions load nahi hue.', 'err');
   }
 }
 
-// All times are shown in IST regardless of the device's own timezone.
-function formatTime(ms) {
-  return new Date(ms).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+function statusChip(r) {
+  if (r.status === 'pending') return '<span class="chip chip-warn">Pending</span>';
+  if (r.source === 'teacher-manual') return '<span class="chip chip-info">Manual</span>';
+  return '<span class="chip chip-ok">Present</span>';
 }
-// dateStr is already an IST calendar date (YYYY-MM-DD) from the server, so
-// format it as-is in UTC to avoid any device-timezone shift.
-function formatDateHeading(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00Z');
-  return d.toLocaleDateString('en-IN', { timeZone: 'UTC', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+const FLAG_LABELS = {
+  shared_coordinates: 'same GPS point as another phone',
+  accuracy_zero: '0 m accuracy (mock GPS?)',
+  accuracy_poor: 'weak GPS accuracy',
+  accuracy_missing: 'no accuracy reported',
+  device_used_for_other_roll: 'same phone used for another roll number',
+};
+function flagText(flags) {
+  return (flags || []).map((f) => FLAG_LABELS[f] || f).join(' · ');
+}
+function hasFlags(r) { return Array.isArray(r.flags) && r.flags.length > 0; }
+
+function recordCard(r, idx) {
+  const flagged = hasFlags(r);
+  const dist = r.distance_m != null ? Math.round(r.distance_m) + ' m' : '—';
+  return `
+    <div class="rec ${r.status === 'pending' ? 'pending' : ''} ${flagged ? 'flagged' : ''}">
+      <div class="top">
+        <div>
+          <div class="nm">${idx + 1}. ${esc(r.student_name) || '-'} <span class="muted fs-xs">#${esc(r.roll_no)}</span></div>
+          <div class="meta">${esc(r.major_subject) || '-'} · ${esc(r.course_type) || '-'} · ${esc(formatTime(r.marked_at))} · ${dist}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+          ${statusChip(r)}${flagged ? '<span class="chip chip-warn">⚠ Flag</span>' : ''}
+        </div>
+      </div>
+      ${flagged ? `<div class="meta text-warn">⚠ ${esc(flagText(r.flags))}</div>` : ''}
+      <div class="acts">
+        ${r.status === 'pending'
+          ? `<button type="button" class="btn btn-sm btn-ok" onclick="approveEntry('${r._id}')">Approve</button>
+             <button type="button" class="btn btn-sm btn-danger" onclick="rejectEntry('${r._id}')">Reject</button>`
+          : ''}
+        <button type="button" class="btn btn-sm" onclick="openEditModal('${r._id}')">Edit</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="openDeleteModal('${r._id}')">Delete</button>
+      </div>
+    </div>`;
 }
 
+function tableRow(r, i) {
+  const flagged = hasFlags(r);
+  return `<tr>
+    <td>${i + 1}</td>
+    <td>${esc(r.student_name) || '-'}</td>
+    <td>${esc(r.roll_no)}</td>
+    <td>${esc(r.major_subject) || '-'}</td>
+    <td>${esc(r.course_type) || '-'}</td>
+    <td class="nowrap">${esc(formatTime(r.marked_at))}</td>
+    <td class="nowrap">${statusChip(r)}${flagged ? ` <span class="chip chip-warn" title="${esc(flagText(r.flags))}">⚠</span>` : ''}</td>
+    <td class="nowrap">
+      ${r.status === 'pending' ? `<button type="button" class="btn btn-sm btn-ok" onclick="approveEntry('${r._id}')">Approve</button> ` : ''}
+      <button type="button" class="btn btn-sm" onclick="openEditModal('${r._id}')">Edit</button>
+      <button type="button" class="btn btn-sm btn-ghost" onclick="openDeleteModal('${r._id}')">Del</button>
+    </td>
+  </tr>`;
+}
+
+async function loadAttendance() {
+  const c = getCombo();
+  const sessionSel = $('sessionSelect');
+  const session_id = sessionSel.value;
+  lastSessionLabel = session_id && sessionSel.selectedIndex >= 0
+    ? sessionSel.options[sessionSel.selectedIndex].textContent
+    : 'All sessions that day';
+
+  const params = new URLSearchParams({ date: selectedDate() });
+  if (c.class_name) params.set('class_name', c.class_name);
+  if (c.subject) params.set('subject', c.subject);
+  if (c.course_type) params.set('course_type', c.course_type);
+  if (c.system) params.set('system', c.system);
+  if (session_id) params.set('session_id', session_id);
+
+  try {
+    const res = await teacherFetch('/api/teacher/attendance?' + params.toString());
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast(data.error || 'List load nahi hui.', 'err'); return; }
+
+    lastRecords = data.records || [];
+    lastDate = data.date;
+    $('registerDateLabel').textContent = formatDateHeading(data.date);
+
+    document.querySelector('#attendanceTable tbody').innerHTML = lastRecords.map(tableRow).join('');
+    $('attendanceCards').innerHTML = lastRecords.map(recordCard).join('');
+    const empty = lastRecords.length ? '' : 'Is din ke liye koi entry nahi mili.';
+    $('attendanceEmptyDesktop').textContent = empty;
+    $('attendanceEmptyMobile').textContent = empty;
+
+    $('liveFeed').innerHTML = lastRecords.length
+      ? lastRecords.slice(-10).reverse().map(recordCard).join('')
+      : '<div class="muted fs-sm">Abhi koi mark nahi hua.</div>';
+    $('liveUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+
+    const pending = lastRecords.filter((r) => r.status === 'pending').length;
+    $('regPending').textContent = pending;
+    $('regPresent').textContent = lastRecords.length - pending;
+  } catch (err) {
+    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
+  }
+}
+
+/* =====================================================================
+   Edit / delete a single entry
+   ===================================================================== */
+function findRecord(recordId) {
+  return lastRecords.find((r) => String(r._id) === String(recordId));
+}
+
+function openEditModal(recordId) {
+  const r = findRecord(recordId);
+  if (!r) return;
+  editingRecordId = recordId;
+  $('editRollNo').value = r.roll_no || '';
+  $('editName').value = r.student_name || '';
+  $('editSubject').value = r.subject || '';
+  $('editModalErr').classList.add('hide');
+  openModal('editModal');
+}
+
+async function saveEdit() {
+  const errEl = $('editModalErr');
+  const btn = $('saveEditBtn');
+  const roll_no = $('editRollNo').value.trim();
+  const student_name = $('editName').value.trim();
+  const subject = $('editSubject').value.trim();
+
+  if (!/^[0-9]+$/.test(roll_no)) {
+    errEl.innerHTML = alertErr('Roll number me sirf digits hone chahiye.');
+    errEl.classList.remove('hide');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Saving…';
+  try {
+    const res = await teacherFetch('/api/teacher/attendance/update', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record_id: editingRecordId, roll_no, student_name, subject }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      errEl.innerHTML = alertErr(data.error || 'Save nahi hua.');
+      errEl.classList.remove('hide');
+      return;
+    }
+    closeModal('editModal');
+    toast('Entry update ho gayi.', 'ok');
+    await loadAttendance();
+    await loadPresentAbsent();
+  } catch (err) {
+    if (!isAuthError(err)) {
+      errEl.innerHTML = alertErr('Network error. Dobara try karein.');
+      errEl.classList.remove('hide');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save changes';
+  }
+}
+
+function openDeleteModal(recordId) {
+  const r = findRecord(recordId);
+  if (!r) return;
+  deletingRecordId = recordId;
+  $('deleteModalText').textContent =
+    `${r.student_name || 'Roll No ' + r.roll_no} (Roll No ${r.roll_no}) ki ye entry permanently delete ho jayegi.`;
+  openModal('deleteModal');
+}
+
+async function confirmDelete() {
+  const btn = $('confirmDeleteBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Deleting…';
+  try {
+    const res = await teacherFetch('/api/teacher/attendance/delete', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record_id: deletingRecordId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    closeModal('deleteModal');
+    if (!res.ok || !data.success) { toast(data.error || 'Delete nahi hua.', 'err'); return; }
+    toast('Entry delete ho gayi.', 'ok');
+    if (activeSessionId) await refreshSessionStatus(activeSessionId);
+    await loadAttendance();
+    await loadPresentAbsent();
+    await loadReview();
+  } catch (err) {
+    closeModal('deleteModal');
+    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Delete entry';
+  }
+}
+
+/* =====================================================================
+   Print + present/absent
+   ===================================================================== */
+function printList() {
+  if (!lastRecords.length) { toast('Pehle list load karein.', 'warn'); return; }
+  const c = getCombo();
+  const rows = lastRecords.map((r, i) =>
+    `<tr><td>${i + 1}</td><td>${esc(r.student_name) || '-'}</td><td>${esc(r.roll_no)}</td><td>${esc(r.major_subject) || '-'}</td><td>${esc(r.course_type) || '-'}</td><td>${esc(formatTime(r.marked_at))}</td><td>${r.status === 'pending' ? 'Pending' : (r.source === 'teacher-manual' ? 'Manual' : 'Present')}</td></tr>`
+  ).join('');
+
+  const win = window.open('', '_blank');
+  if (!win) { toast('Popup block ho gaya — popups allow karke dobara try karein.', 'err'); return; }
+  win.document.write(`<html><head><title>Attendance — ${esc(c.class_name)} ${esc(c.subject)} (${esc(c.course_type)}) — ${esc(lastDate)}</title>
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; padding: 26px; color: #1b2030; }
+    h1 { font-size: 19px; margin: 0 0 4px; }
+    .meta { color:#555; font-size: 13px; margin-bottom: 16px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { border:1px solid #999; padding:7px 8px; text-align:left; font-size:13px; }
+    th { background:#1f2a44; color:#fff; }
+    tbody tr:nth-child(even) { background:#f6f4ee; }
+  </style></head><body>
+  <h1>Attendance Register — ${esc(c.class_name)} — ${esc(c.subject)} (${esc(c.course_type)}${c.system ? ', ' + esc(c.system) : ''})</h1>
+  <div class="meta">${esc(formatDateHeading(lastDate))} &nbsp;|&nbsp; ${esc(lastSessionLabel)} &nbsp;|&nbsp; Total marked: ${lastRecords.length}</div>
+  <table><thead><tr><th>S.No</th><th>Name</th><th>Roll No</th><th>Major Subject</th><th>Type</th><th>Marked At</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>
+  </body></html>`);
+  win.document.close();
+  win.focus();
+  win.print();
+}
+
+function paRow(p) {
+  return `<div class="rec"><div class="top"><div class="nm">${esc(p.student_name) || 'Roll ' + esc(p.roll_no)}</div><div class="muted fs-xs">#${esc(p.roll_no)}</div></div></div>`;
+}
+
+async function loadPresentAbsent() {
+  const c = getCombo();
+  const summary = $('paSummary');
+  if (!c.class_name) { summary.textContent = 'Class chunein (upar wale card me).'; return; }
+  const session_id = $('sessionSelect').value;
+
+  summary.textContent = 'Loading…';
+  const params = new URLSearchParams({ class_name: c.class_name, date: selectedDate() });
+  if (c.subject) params.set('subject', c.subject);
+  if (c.course_type) params.set('course_type', c.course_type);
+  if (c.system) params.set('system', c.system);
+  if (session_id) params.set('session_id', session_id);
+
+  try {
+    const res = await teacherFetch('/api/teacher/session-report?' + params.toString());
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { summary.textContent = data.error || 'Load nahi hua.'; return; }
+
+    lastAbsentList = data.absent || [];
+    $('paPresentHeading').textContent = `PRESENT (${data.present_count})`;
+    $('paPendingHeading').textContent = `PENDING APPROVAL (${data.pending_count || 0})`;
+    $('paAbsentHeading').textContent = `ABSENT (${data.absent_count})`;
+
+    $('paPresent').innerHTML = (data.present || []).length
+      ? data.present.map(paRow).join('')
+      : '<div class="muted fs-sm">Abhi kisi ne mark nahi kiya.</div>';
+    $('paPending').innerHTML = (data.pending || []).length
+      ? data.pending.map(paRow).join('')
+      : '<div class="muted fs-sm">Koi pending entry nahi.</div>';
+    $('paAbsent').innerHTML = (data.absent || []).length
+      ? data.absent.map(paRow).join('')
+      : '<div class="muted fs-sm">Roster me se koi missing nahi.</div>';
+
+    $('regPresent').textContent = data.present_count || 0;
+    $('regPending').textContent = data.pending_count || 0;
+    $('regRoster').textContent = data.roster_size || 0;
+    $('regAbsent').textContent = data.absent_count || 0;
+
+    summary.innerHTML = `<span class="text-ink">${data.present_count}</span> present · ` +
+      `<span class="text-warn">${data.pending_count || 0}</span> pending · ` +
+      `<span class="text-err">${data.absent_count}</span> absent · roster ${data.roster_size}` +
+      (data.roster_size ? '' : ' <span class="text-warn">— absentees dekhne ke liye roster upload karein.</span>');
+  } catch (err) {
+    if (!isAuthError(err)) summary.textContent = 'Network error. Dobara try karein.';
+  }
+}
+
+function copyAbsentList() {
+  if (!lastAbsentList.length) { toast('Pehle Present / Absent list load karein.', 'warn'); return; }
+  const text = lastAbsentList.map((s) => `${s.roll_no}\t${s.student_name || ''}`).join('\n');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text)
+      .then(() => toast(lastAbsentList.length + ' absentee copy ho gaye.', 'ok'))
+      .catch(() => toast('Copy nahi hua.', 'warn'));
+  } else {
+    toast('Is browser me copy support nahi hai.', 'warn');
+  }
+}
+
+/* =====================================================================
+   Roster + manual mark + device unlock
+   ===================================================================== */
 async function uploadRoster() {
-  const roster_text = document.getElementById('rosterText').value;
-  const msgDiv = document.getElementById('uploadMsg');
-  if (!roster_text.trim()) { alert('Paste the student list first.'); return; }
+  const roster_text = $('rosterText').value;
+  const msg = $('uploadMsg');
+  const btn = $('uploadBtn');
+  if (!roster_text.trim()) { toast('Pehle student list paste karein.', 'warn'); return; }
 
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Saving…';
   try {
     const res = await teacherFetch('/api/teacher/upload-roster', {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ roster_text })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roster_text }),
     });
-    const data = await res.json();
-    if (data.success) {
-      msgDiv.innerHTML = `<div class="mt-2 rounded-lg border border-ok/40 bg-ok/10 text-ok text-sm px-3.5 py-2.5">✅ Saved ${data.added} student(s). ${data.skipped ? data.skipped + ' line(s) skipped (missing roll no or name).' : ''}</div>`;
-    } else {
-      msgDiv.innerHTML = `<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ ${data.error}</div>`;
-    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) { msg.innerHTML = alertErr(data.error || 'Upload fail hua.'); return; }
+    msg.innerHTML = alertOk(`Saved ${data.added} student(s).` + (data.skipped ? ` ${data.skipped} line skip hui (roll no ya naam missing).` : ''));
+    toast(data.added + ' students save ho gaye.', 'ok');
+    $('rosterText').value = '';
+    await loadRoster();
   } catch (err) {
-    msgDiv.innerHTML = '<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ Network error. Try again.</div>';
+    if (!isAuthError(err)) msg.innerHTML = alertErr('Network error. Dobara try karein.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save list';
+  }
+}
+
+async function loadRoster() {
+  const class_name = $('className').value.trim();
+  const msg = $('rosterMsg');
+  const tbody = document.querySelector('#rosterTable tbody');
+  const cards = $('rosterCards');
+  msg.textContent = 'Loading…';
+  tbody.innerHTML = '';
+  cards.innerHTML = '';
+
+  const params = new URLSearchParams();
+  if (class_name) params.set('class_name', class_name);
+
+  try {
+    const res = await teacherFetch('/api/teacher/roster?' + params.toString());
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { msg.innerHTML = alertErr(data.error || 'List load nahi hui.'); return; }
+
+    const students = data.students || [];
+    $('rosterCount').textContent = data.count + ' student(s)';
+    msg.textContent = data.count
+      ? `✅ ${data.count} student(s) saved${class_name ? ' for ' + class_name : ''}.`
+      : 'Abhi koi student save nahi hai.';
+
+    tbody.innerHTML = students.map((s, i) =>
+      `<tr><td>${i + 1}</td><td>${esc(s.name) || '-'}</td><td>${esc(s.roll_no)}</td><td>${esc(s.class_name) || '-'}</td><td>${esc(s.major_subject) || '-'}</td></tr>`
+    ).join('');
+
+    cards.innerHTML = students.length
+      ? students.map((s, i) => `<div class="rec"><div class="top"><div><div class="nm">${i + 1}. ${esc(s.name) || '-'}</div><div class="meta">#${esc(s.roll_no)} · ${esc(s.class_name) || '-'} · ${esc(s.major_subject) || '-'}</div></div></div></div>`).join('')
+      : '<div class="muted fs-sm">Koi student nahi mila.</div>';
+  } catch (err) {
+    if (!isAuthError(err)) msg.innerHTML = alertErr('Network error. Dobara try karein.');
   }
 }
 
 async function unlockDevice() {
-  const roll_no = document.getElementById('unlockRollNo').value.trim();
-  const msgDiv = document.getElementById('unlockMsg');
-  if (!roll_no) { alert('Enter the roll number to unlock.'); return; }
-
+  const roll_no = $('unlockRollNo').value.trim();
+  const msg = $('unlockMsg');
+  if (!roll_no) { toast('Roll number daalein.', 'warn'); return; }
   try {
     const res = await teacherFetch('/api/teacher/device-lock', {
       method: 'DELETE',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ roll_no })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roll_no }),
     });
-    const data = await res.json();
-    if (data.success) {
-      msgDiv.innerHTML = data.removed
-        ? `<div class="mt-2 rounded-lg border border-ok/40 bg-ok/10 text-ok text-sm px-3.5 py-2.5">✅ Unlocked. Roll No ${roll_no} can now mark attendance from a new device.</div>`
-        : `<div class="mt-2 rounded-lg border border-golddim/50 bg-golddim/10 text-[#e8c468] text-sm px-3.5 py-2.5">No device lock was found for Roll No ${roll_no}.</div>`;
-      document.getElementById('unlockRollNo').value = '';
-    } else {
-      msgDiv.innerHTML = `<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ ${data.error}</div>`;
-    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) { msg.innerHTML = alertErr(data.error || 'Unlock nahi hua.'); return; }
+    msg.innerHTML = data.removed
+      ? alertOk(`Unlock ho gaya — Roll No ${roll_no} ab naye phone se mark kar sakta hai.`)
+      : alertWarn(`Roll No ${roll_no} ke liye koi device lock nahi mila.`);
+    $('unlockRollNo').value = '';
   } catch (err) {
-    msgDiv.innerHTML = '<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ Network error. Try again.</div>';
+    if (!isAuthError(err)) msg.innerHTML = alertErr('Network error. Dobara try karein.');
   }
 }
 
-async function downloadOverallReport() {
-  const class_name = document.getElementById('className').value.trim();
-  const subject = document.getElementById('subjectSelect').value.trim();
-  const course_type = document.getElementById('courseTypeSelect').value.trim();
-  const system = document.getElementById('systemSelect').value.trim();
-  const msgDiv = document.getElementById('reportMsg');
-  if (!class_name || !system || !subject || !course_type) {
-    alert('Select class, system (Annual/Semester), subject and course type first (top card) — the report is generated for that combination.');
-    return;
-  }
-  msgDiv.innerHTML = '<div class="mt-2 text-sm text-muted">Generating PDF...</div>';
+// GPS fix na milne wale genuine student ke liye (teacher ke naam se, tagged).
+async function manualMark() {
+  const c = getCombo();
+  const roll_no = $('manualRollNo').value.trim();
+  const name = $('manualName').value.trim();
+  const msg = $('manualMsg');
+  const btn = $('manualBtn');
+
+  const problem = comboMissing(c);
+  if (problem) { toast(problem, 'err'); return; }
+  if (!/^[0-9]+$/.test(roll_no)) { toast('Roll number sirf digits me likhein.', 'err'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Marking…';
   try {
-    const params = new URLSearchParams({ class_name, subject, course_type, system });
+    const res = await teacherFetch('/api/teacher/attendance/manual-mark', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roll_no,
+        name,
+        class_name: c.class_name,
+        subject: c.subject,
+        course_type: c.course_type,
+        system: c.system,
+        date: selectedDate(),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) { msg.innerHTML = alertErr(data.error || 'Manual mark nahi hua.'); return; }
+    msg.innerHTML = alertOk(data.message || 'Manual attendance mark ho gayi.');
+    toast('Manual attendance mark ho gayi.', 'ok');
+    $('manualRollNo').value = '';
+    $('manualName').value = '';
+    await loadAttendance();
+    await loadPresentAbsent();
+  } catch (err) {
+    if (!isAuthError(err)) msg.innerHTML = alertErr('Network error. Dobara try karein.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Mark present (manual)';
+  }
+}
+
+/* =====================================================================
+   Report download
+   ===================================================================== */
+async function downloadOverallReport() {
+  const c = getCombo();
+  const msg = $('reportMsg');
+  const btn = $('reportBtn');
+  const problem = comboMissing(c);
+  if (problem) { toast(problem, 'err'); return; }
+
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Generating PDF…';
+  msg.innerHTML = '';
+  try {
+    const params = new URLSearchParams({ class_name: c.class_name, subject: c.subject, course_type: c.course_type, system: c.system });
     const res = await teacherFetch('/api/teacher/reports/overall-download?' + params.toString());
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      msgDiv.innerHTML = `<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ ${data.error || 'Could not generate report.'}</div>`;
+      msg.innerHTML = alertErr(data.error || 'Report generate nahi hui.');
       return;
     }
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${system === 'Semester' ? 180 : 365}day-report-${class_name}-${subject}-${course_type}-${system}.pdf`.replace(/\s+/g, '_');
+    a.download = `${c.system === 'Semester' ? 180 : 365}day-report-${c.class_name}-${c.subject}-${c.course_type}-${c.system}.pdf`.replace(/\s+/g, '_');
     document.body.appendChild(a);
     a.click();
     a.remove();
     window.URL.revokeObjectURL(url);
-    msgDiv.innerHTML = '';
+    msg.innerHTML = alertOk('PDF download ho gayi.');
   } catch (err) {
-    msgDiv.innerHTML = '<div class="mt-2 rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ Network error. Try again.</div>';
+    if (!isAuthError(err)) msg.innerHTML = alertErr('Network error. Dobara try karein.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+    updateReportLabel();
   }
 }
 
-
-// ---- Present / absent list ----
-function paRow(p) {
-  const meta = [p.major_subject, p.course_type].filter(Boolean).join(' · ');
-  return `<div class="flex items-baseline gap-2"><span class="text-muted w-24 shrink-0">${esc(p.roll_no)}</span>` +
-         `<span>${esc(p.student_name) || '-'}</span>` +
-         `${meta ? `<span class="text-xs text-muted">${esc(meta)}</span>` : ''}</div>`;
-}
-
-async function loadPresentAbsent() {
-  const class_name = document.getElementById('className').value.trim();
-  const subject = document.getElementById('subjectSelect').value.trim();
-  const course_type = document.getElementById('courseTypeSelect').value.trim();
-  const system = document.getElementById('systemSelect').value.trim();
-  const session_id = document.getElementById('sessionSelect').value;
-  const summary = document.getElementById('paSummary');
-  if (!class_name) { alert('Select the class (top card) first.'); return; }
-
-  summary.innerHTML = '<span class="text-muted">Loading...</span>';
-  const params = new URLSearchParams({ class_name, date: selectedDate() });
-  if (subject) params.set('subject', subject);
-  if (course_type) params.set('course_type', course_type);
-  if (system) params.set('system', system);
-  if (session_id) params.set('session_id', session_id);
+/* =====================================================================
+   Review tab (pending / flagged / failed locations)
+   ===================================================================== */
+async function loadReview() {
+  const params = new URLSearchParams({ date: selectedDate() });
+  const class_name = $('className').value.trim();
+  if (class_name) params.set('class_name', class_name);
 
   try {
-    const res = await teacherFetch('/api/teacher/session-report?' + params.toString());
-    const data = await res.json();
+    const res = await teacherFetch('/api/teacher/review?' + params.toString());
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast(data.error || 'Review list load nahi hui.', 'err'); return; }
+
+    $('reviewDateLabel').textContent = formatDateHeading(data.date);
+    $('pendingCountChip').textContent = data.pending_count;
+    $('flaggedCountChip').textContent = data.flagged_count;
+    $('failCountChip').textContent = (data.location_failures || []).length;
+
+    const total = (data.pending_count || 0) + (data.flagged_count || 0);
+    const badge = $('reviewCount');
+    badge.textContent = total;
+    badge.classList.toggle('hide', total === 0);
+
+    $('reviewPending').innerHTML = (data.pending || []).length
+      ? data.pending.map((r, i) => `
+        <div class="rec pending">
+          <div class="top">
+            <div>
+              <div class="nm">${i + 1}. ${esc(r.student_name) || '-'} <span class="muted fs-xs">#${esc(r.roll_no)}</span></div>
+              <div class="meta">${esc(r.subject)} (${esc(r.course_type)}) · ${esc(formatTime(r.marked_at))} · ${r.distance_m != null ? Math.round(r.distance_m) + ' m' : '—'}</div>
+            </div>
+            <span class="chip chip-warn">Pending</span>
+          </div>
+          <div class="acts">
+            <button type="button" class="btn btn-sm btn-ok" onclick="approveEntry('${r._id}')">Approve</button>
+            <button type="button" class="btn btn-sm btn-danger" onclick="rejectEntry('${r._id}')">Reject</button>
+          </div>
+        </div>`).join('')
+      : '<div class="muted fs-sm">Koi pending entry nahi.</div>';
+
+    $('reviewFlagged').innerHTML = (data.flagged || []).length
+      ? data.flagged.map((r, i) => `
+        <div class="rec flagged">
+          <div class="top">
+            <div>
+              <div class="nm">${i + 1}. ${esc(r.student_name) || '-'} <span class="muted fs-xs">#${esc(r.roll_no)}</span></div>
+              <div class="meta">${esc(r.subject)} · ${esc(formatTime(r.marked_at))} · accuracy ${r.accuracy != null ? Math.round(r.accuracy) + ' m' : '—'}${r.distance_m != null ? ' · ' + Math.round(r.distance_m) + ' m from class' : ''}</div>
+            </div>
+            ${statusChip(r)}
+          </div>
+          <div class="meta text-warn">⚠ ${esc(flagText(r.flags))}</div>
+        </div>`).join('')
+      : '<div class="muted fs-sm">Koi suspicious entry nahi mili. 👍</div>';
+
+    $('reviewFailures').innerHTML = (data.location_failures || []).length
+      ? data.location_failures.map((f) => `
+        <div class="rec">
+          <div class="top">
+            <div>
+              <div class="nm">${esc(f.student_name) || 'Unknown device'} ${f.roll_no ? '<span class="muted fs-xs">#' + esc(f.roll_no) + '</span>' : ''}</div>
+              <div class="meta">Location verify nahi hui — class ke bahar the, ya GPS off tha</div>
+            </div>
+            <span class="chip chip-err">${f.count}×</span>
+          </div>
+        </div>`).join('')
+      : '<div class="muted fs-sm">Aaj kisi device ki location fail nahi hui.</div>';
+  } catch (err) {
+    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
+  }
+}
+
+/* =====================================================================
+   Live feed polling — server se har 5 second me naya data
+   (countdown timer se alag: ye apna interval rakhta hai aur kabhi
+    timerInterval / expiryTimestamp ko touch nahi karta)
+   ===================================================================== */
+function liveEl(id) { return document.getElementById(id); }
+function setText(id, value) {
+  const el = liveEl(id);
+  if (el) el.textContent = value;
+  return el;
+}
+function isLiveTabActive() {
+  const panel = liveEl('panel-live');
+  return !!(panel && panel.classList.contains('active'));
+}
+function setLivePollState(text, cls) {
+  const chip = liveEl('livePollState');
+  if (!chip) return;
+  chip.textContent = text;
+  chip.className = cls || 'chip';
+}
+function resetLiveFeed(message) {
+  livePollSince = 0;
+  livePollMarks = [];
+  const feed = liveEl('liveNewMarks');
+  if (feed) feed.innerHTML = `<div class="muted fs-sm">${esc(message || 'Polling start hote hi naye marks yahan aayenge.')}</div>`;
+  const pending = liveEl('livePendingList');
+  if (pending) pending.innerHTML = '<div class="muted fs-sm">Abhi koi pending entry nahi.</div>';
+  setText('livePendingChip', '0');
+}
+
+// Polling sirf tab chalti hai jab live tab khula ho + session live ho.
+function startLivePoll() {
+  if (!activeSessionId) { setLivePollState('Idle', 'chip'); return; }
+  if (document.hidden || !isLiveTabActive()) return;
+  if (livePollTimer) return;
+  livePollTimer = setInterval(pollLiveSessionSafe, LIVE_POLL_MS);
+  setLivePollState('Live', 'chip chip-ok');
+  pollLiveSessionSafe(); // pehla update turant — 5 second ka intezaar nahi
+}
+function stopLivePoll() {
+  if (livePollTimer) clearInterval(livePollTimer);
+  livePollTimer = null;
+}
+function stopLivePollAnd(text, cls) {
+  stopLivePoll();
+  setLivePollState(text || 'Paused', cls || 'chip');
+}
+// Interval se seedha async function chalane par rejection unhandled reh jaati hai —
+// isliye ek sync wrapper, jo kabhi throw nahi karta.
+function pollLiveSessionSafe() {
+  try {
+    const p = pollLiveSession();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch (err) { /* polling kabhi page crash nahi kar sakti */ }
+}
+
+async function pollLiveSession() {
+  if (!activeSessionId) { stopLivePollAnd('Idle', 'chip'); return; }
+  if (document.hidden || !isLiveTabActive()) { stopLivePoll(); return; }
+  if (livePollBusy) return; // dheere network par requests overlap na hon
+  livePollBusy = true;
+  try {
+    if (livePollSessionId !== activeSessionId) {
+      livePollSessionId = activeSessionId;
+      resetLiveFeed();
+    }
+    const since = livePollSince || 0;
+    const params = new URLSearchParams({
+      session_id: String(activeSessionId),
+      since_ms: String(since),
+      limit: '60',
+    });
+    const res = await teacherFetch('/api/teacher/session-live?' + params.toString());
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      summary.innerHTML = `<span class="text-err">${esc(data.error || 'Could not load the list.')}</span>`;
+      setText('livePollUpdated', '—');
+      const msg = liveEl('livePollMsg');
+      if (msg) msg.innerHTML = alertErr(data.error || 'Live data nahi mila.');
+      setLivePollState('Error', 'chip chip-err');
+      return;
+    }
+    if (!data.found) {
+      stopLivePollAnd('Not found', 'chip chip-err');
+      const msg = liveEl('livePollMsg');
+      if (msg) msg.innerHTML = alertWarn('Ye session server par nahi mila — naya code generate karein.');
       return;
     }
 
-    lastAbsentList = data.absent || [];
-    setPaHeading('paPresent', `PRESENT (${data.present_count})`);
-    setPaHeading('paAbsent', `ABSENT (${data.absent_count})`);
-    document.getElementById('paPresent').innerHTML = data.present.length
-      ? data.present.map(paRow).join('')
-      : '<div class="text-muted">Nobody has marked yet.</div>';
-    document.getElementById('paAbsent').innerHTML = data.absent.length
-      ? data.absent.map(paRow).join('')
-      : '<div class="text-muted">Nobody is missing from the saved list.</div>';
+    livePollSessionId = data.session_id || activeSessionId;
+    const newestSeen = livePollMarks.reduce((m, x) => Math.max(m, Number(x.marked_at) || 0), 0);
+    // Server ka time authoritative hai — phone ki clock par bharosa nahi.
+    livePollSince = Number(data.server_now) || newestSeen || Date.now();
+    renderLivePoll(data, since > 0);
 
-    summary.innerHTML =
-      `<span class="text-ink">${data.present_count}</span> present · ` +
-      `<span class="text-ink">${data.absent_count}</span> absent · ` +
-      `saved list size <span class="text-ink">${data.roster_size}</span> · ` +
-      `${esc(data.class_name)}${data.subject ? ' — ' + esc(data.subject) : ''}` +
-      `${data.course_type ? ' (' + esc(data.course_type) + ')' : ''} · ${formatDateHeading(data.date)}` +
-      (data.roster_size ? '' : ' <span class="text-golddim">— upload the student list above to see absentees.</span>');
+    if (!data.active) {
+      stopLivePollAnd('Ended', 'chip chip-err');
+      const msg = liveEl('livePollMsg');
+      if (msg) msg.innerHTML = alertWarn('Session band ho gaya — polling ruk gayi. Ye data aakhri update hai.');
+    } else {
+      setLivePollState('Live', 'chip chip-ok');
+    }
   } catch (err) {
-    summary.innerHTML = '<span class="text-err">Network error. Try again.</span>';
+    if (isAuthError(err) && err.message === 'auth') { stopLivePoll(); return; } // login screen khul chuki hai
+    setLivePollState('Retry…', 'chip chip-warn'); // network hiccup — agla tick dobara try karega
+  } finally {
+    livePollBusy = false;
   }
 }
 
-function setPaHeading(divId, text) {
-  const container = document.getElementById(divId).parentElement;
-  const h3 = container ? container.querySelector('h3') : null;
-  if (h3) h3.textContent = text;
-}
+// Tab background me jaate hi band, wapas aate hi turant chalu.
+document.addEventListener('visibilitychange', () => {
+  try {
+    if (document.hidden) { stopLivePoll(); return; }
+    if (activeSessionId) startLivePoll();
+  } catch (err) { /* ignore */ }
+});
 
-function copyAbsentList() {
-  if (!lastAbsentList.length) { alert('Nothing to copy — load the Present / Absent list first.'); return; }
-  const text = lastAbsentList.map((s) => `${s.roll_no}\t${s.student_name || ''}`).join('\n');
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text)
-      .then(() => alert(`${lastAbsentList.length} absentee(s) copied.`))
-      .catch(() => alert(text));
-  } else {
-    alert(text);
-  }
-}
-
-async function loadAttendance() {
-  const class_name = document.getElementById('className').value.trim();
-  const subject = document.getElementById('subjectSelect').value.trim();
-  const course_type = document.getElementById('courseTypeSelect').value.trim();
-  const system = document.getElementById('systemSelect').value.trim();
-  const sessionSel = document.getElementById('sessionSelect');
-  const session_id = sessionSel.value;
-  lastSessionLabel = session_id
-    ? sessionSel.options[sessionSel.selectedIndex].textContent
-    : 'All sessions that day';
-
-  const params = new URLSearchParams();
-  if (class_name) params.set('class_name', class_name);
-  if (subject) params.set('subject', subject);
-  if (course_type) params.set('course_type', course_type);
-  if (system) params.set('system', system);
-  if (session_id) params.set('session_id', session_id);
-  params.set('date', selectedDate());
-
-  const res = await teacherFetch('/api/teacher/attendance?' + params.toString());
-  if (!res.ok) {
-    // e.g. the selected day is too old, or the wrong teacher password
-    const errData = await res.json().catch(() => ({}));
-    document.getElementById('attendanceCount').textContent = 'Total marked: 0';
-    document.getElementById('attendanceDate').textContent = errData.error || 'Could not load this day';
-    lastRecords = [];
-    renderTable();
+// Timeline: pure CSS divs — height count ke proportional, label neeche.
+function renderLiveTimeline(timeline) {
+  const wrap = liveEl('liveTimeline');
+  const empty = liveEl('liveTimelineEmpty');
+  if (!wrap) return;
+  const rows = Array.isArray(timeline) ? timeline : [];
+  const max = rows.reduce((m, r) => Math.max(m, Number(r.count) || 0), 0);
+  if (!rows.length) {
+    wrap.innerHTML = '';
+    if (empty) empty.textContent = 'Timeline ke liye abhi data nahi hai.';
     return;
   }
-  const data = await res.json();
-
-  lastRecords = data.records || [];
-  lastDate = data.date;
-
-  document.getElementById('attendanceCount').textContent = `Total marked: ${data.count}`;
-  document.getElementById('attendanceDate').textContent = formatDateHeading(data.date);
-
-  renderTable();
+  if (empty) empty.textContent = '';
+  wrap.innerHTML = rows.map((r) => {
+    const count = Number(r.count) || 0;
+    const h = max > 0 ? Math.max(4, Math.round((count / max) * 76)) : 4;
+    const on = count > 0;
+    const color = on
+      ? 'linear-gradient(180deg, var(--gold), var(--gold-deep))'
+      : 'var(--surface-3)';
+    return `<div style="flex:1 1 0; min-width:30px; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; height:100%;">
+      <div style="font-size:0.62rem; line-height:1; margin-bottom:3px; color:${on ? 'var(--gold)' : 'var(--muted-2)'};">${count || ''}</div>
+      <div title="${esc(r.label)} — ${count} mark" style="width:100%; max-width:36px; height:${h}px; border-radius:5px 5px 2px 2px; background:${color};"></div>
+      <div class="muted nowrap" style="margin-top:5px; font-size:0.6rem;">${esc(r.label)}</div>
+    </div>`;
+  }).join('');
 }
 
-// ---- Saved roster view ----
-async function loadRoster() {
-  const class_name = document.getElementById('className').value.trim();
-  const msgDiv = document.getElementById('rosterMsg');
-  const tbody = document.querySelector('#rosterTable tbody');
-  const params = new URLSearchParams();
-  if (class_name) params.set('class_name', class_name);
-  msgDiv.innerHTML = '<div class="text-sm text-muted">Loading...</div>';
-  tbody.innerHTML = '';
+function liveMarkRow(m, isNew) {
+  const flags = Array.isArray(m.flags) ? m.flags : [];
+  const dist = m.distance_m != null ? Math.round(Number(m.distance_m)) + ' m' : '—';
+  const acc = m.accuracy != null ? Math.round(Number(m.accuracy)) + ' m' : '—';
+  const bits = [
+    esc(m.marked_at_hhmm || ''),
+    dist + ' from class',
+    'accuracy ' + acc,
+    'device ' + (esc(m.device_short) || '—'),
+  ];
+  return `
+    <div class="rec ${m.status === 'pending' ? 'pending' : ''} ${flags.length ? 'flagged' : ''}">
+      <div class="top">
+        <div>
+          <div class="nm">${esc(m.student_name) || '-'} <span class="muted fs-xs">#${esc(m.roll_no)}</span></div>
+          <div class="meta">${bits.join(' · ')}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+          ${isNew ? '<span class="chip chip-info">New</span>' : ''}
+          ${m.status === 'pending' ? '<span class="chip chip-warn">Pending</span>' : '<span class="chip chip-ok">Present</span>'}
+        </div>
+      </div>
+      ${flags.length ? `<div class="meta text-warn">⚠ ${esc(flagText(flags))}</div>` : ''}
+    </div>`;
+}
+
+function livePendingRow(p) {
+  const flags = Array.isArray(p.flags) ? p.flags : [];
+  const dist = p.distance_m != null ? Math.round(Number(p.distance_m)) + ' m' : '—';
+  const id = String(p.record_id); // record_id seedha onclick me — koi naya id="..." generate nahi hota
+  return `
+    <div class="rec pending">
+      <div class="top">
+        <div>
+          <div class="nm">${esc(p.student_name) || '-'} <span class="muted fs-xs">#${esc(p.roll_no)}</span></div>
+          <div class="meta">${esc(p.marked_at_hhmm || '')} · ${dist} from class</div>
+        </div>
+        <span class="chip chip-warn">Pending</span>
+      </div>
+      ${flags.length ? `<div class="meta text-warn">⚠ ${esc(flagText(flags))}</div>` : ''}
+      <div class="acts">
+        <button type="button" class="btn btn-sm btn-ok" onclick="liveApproveEntry('${id}')">Approve</button>
+        <button type="button" class="btn btn-sm btn-danger" onclick="liveRejectEntry('${id}')">Reject</button>
+      </div>
+    </div>`;
+}
+
+// 4 tiles + progress (confirmed / roster) + timeline + naye marks + pending list.
+function renderLivePoll(data, onlyNewer) {
+  setText('liveStatPresent', data.confirmed_count || 0);
+  setText('liveStatPending', data.pending_count || 0);
+  setText('liveStatFlagged', data.flagged_count || 0);
+  setText('liveStatRoster', data.roster_size || 0);
+
+  const roster = Number(data.roster_size) || 0;
+  const confirmed = Number(data.confirmed_count) || 0;
+  const serverPct = Number(data.attendance_pct);
+  const pct = Number.isFinite(serverPct)
+    ? serverPct
+    : (roster ? Math.round((confirmed / roster) * 1000) / 10 : 0);
+  setText('liveProgressLabel', roster
+    ? `${confirmed} / ${roster} confirmed`
+    : `${confirmed} confirmed — roster upload karein`);
+  setText('liveProgressPct', pct + '%');
+  const bar = liveEl('liveProgressBar');
+  if (bar) bar.style.width = Math.min(100, roster ? (confirmed / roster) * 100 : 0) + '%';
+
+  renderLiveTimeline(data.timeline);
+
+  // Server newest-first deta hai; purane marks buffer me neeche rehte hain.
+  const incoming = Array.isArray(data.marks) ? data.marks : [];
+  if (incoming.length) {
+    const seen = {};
+    incoming.forEach((m) => { seen[String(m.record_id)] = true; });
+    livePollMarks = incoming.concat(livePollMarks.filter((m) => !seen[String(m.record_id)]));
+    if (livePollMarks.length > LIVE_FEED_MAX) livePollMarks = livePollMarks.slice(0, LIVE_FEED_MAX);
+  }
+  // Pehla poll pura list deta hai — tab "New" chip sab par lagana galat hoga.
+  const freshIds = onlyNewer ? incoming.map((m) => String(m.record_id)) : [];
+  const feed = liveEl('liveNewMarks');
+  if (feed) {
+    feed.innerHTML = livePollMarks.length
+      ? livePollMarks.map((m) => liveMarkRow(m, freshIds.indexOf(String(m.record_id)) !== -1)).join('')
+      : '<div class="muted fs-sm">Abhi koi mark nahi hua — students ko code bhejein.</div>';
+  }
+
+  const pending = Array.isArray(data.pending) ? data.pending : [];
+  setText('livePendingChip', pending.length);
+  const pendingWrap = liveEl('livePendingList');
+  if (pendingWrap) {
+    pendingWrap.innerHTML = pending.length
+      ? pending.map(livePendingRow).join('')
+      : '<div class="muted fs-sm">Koi pending entry nahi — sab clear hai. 👍</div>';
+  }
+
+  setText('livePollUpdated', 'Updated ' + new Date().toLocaleTimeString('en-IN', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }));
+}
+
+// Live feed ke Approve / Reject — wahi purane approveEntry / rejectEntry chalte hain.
+async function liveApproveEntry(recordId) {
   try {
-    const res = await teacherFetch('/api/teacher/roster?' + params.toString());
-    const data = await res.json();
+    await approveEntry(recordId);
+    await pollLiveSession();
+  } catch (err) { /* approveEntry khud toast dikha deta hai */ }
+}
+async function liveRejectEntry(recordId) {
+  try {
+    await rejectEntry(recordId);
+    await pollLiveSession();
+  } catch (err) { /* rejectEntry khud toast dikha deta hai */ }
+}
+
+// Full screen: card par live-mode class + (jahan support ho) browser fullscreen.
+function toggleLiveFullscreen() {
+  const card = liveEl('livePollCard');
+  const btn = liveEl('liveFullBtn');
+  if (card) card.classList.toggle('live-mode');
+  const on = !!(card && card.classList.contains('live-mode'));
+  try {
+    if (on && document.documentElement.requestFullscreen) {
+      const p = document.documentElement.requestFullscreen();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } else if (!on && document.fullscreenElement && document.exitFullscreen) {
+      const p = document.exitFullscreen();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    }
+  } catch (err) { /* fullscreen optional hai — live-mode class se bhi kaam chalta hai */ }
+  if (btn) btn.textContent = on ? '⛶ Full screen band karein' : '⛶ Full screen';
+  if (on) toast('Live mode ON — focus sirf live feed par.', 'info', 3000);
+}
+
+/* =====================================================================
+   Data & Alerts tab — email routing / data policy / audit log
+   ===================================================================== */
+// Server ke action codes ko insaan ki bhasha me — jo code naya aaye use bhi
+// readable bana dete hain (fallback), taaki list kabhi khaali/ugly na lage.
+const AUDIT_LABELS = {
+  'teacher.login': '🔓 Teacher sign in',
+  'teacher.login.failed': '⛔ Galat password try',
+  'attendance.delete': '🗑 Attendance entry delete',
+  'attendance.update': '✏️ Attendance entry update',
+  'attendance.approve': '✅ Mark approve',
+  'attendance.reject': '⛔ Mark reject',
+  'attendance.approve_all': '✅ Saare pending approve',
+  'attendance.manual_mark': '🖐 Manual mark',
+  'session.create': '🔑 Naya code generate',
+  'session.end': '🔒 Code band',
+  'session.set_approval': '🔁 Approval mode change',
+  'session.rename': '✏️ Session edit',
+  'roster.upload': '👥 Roster upload',
+  'device.unlock': '📱 Device unlock',
+  'email_settings.create': '📧 Email mapping save',
+  'email_settings.delete': '📧 Email mapping delete',
+  'reports.email': '📤 Report email',
+  'report.email': '📤 Report email',
+};
+function auditLabel(action) {
+  const a = String(action || '');
+  if (AUDIT_LABELS[a]) return AUDIT_LABELS[a];
+  const pretty = a.replace(/[._-]+/g, ' ').trim();
+  return pretty ? pretty.charAt(0).toUpperCase() + pretty.slice(1) : '—';
+}
+// updated_at / at kabhi ms number hota hai, kabhi ISO string — dono chalta hai.
+function formatStamp(value) {
+  if (value == null || value === '') return '—';
+  const ms = typeof value === 'number' ? value : Date.parse(value);
+  if (!ms || Number.isNaN(ms)) return String(value);
+  return formatTime(ms);
+}
+
+function loadOps() {
+  loadEmailSettings();
+  loadDataPolicy();
+  loadAudit();
+}
+
+let lastEmailSettings = [];
+
+async function loadEmailSettings() {
+  const msg = $('opsEmailMsg');
+  const tbody = document.querySelector('#opsEmailTable tbody');
+  const cards = $('opsEmailCards');
+  const empty = $('opsEmailEmpty');
+  try {
+    const res = await teacherFetch('/api/teacher/email-settings');
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      msgDiv.innerHTML = `<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ ${esc(data.error || 'Could not load the list.')}</div>`;
+      if (msg) msg.innerHTML = alertErr(data.error || 'Email routing load nahi hui.');
       return;
     }
-    msgDiv.innerHTML = `<div class="text-sm ${data.count ? 'text-ok' : 'text-golddim'}">${data.count ? '✅ ' : ''}${data.count} student(s) saved${class_name ? ' for ' + esc(class_name) : ' in total'}.</div>`;
-    (data.students || []).forEach((s, i) => {
-      const tr = document.createElement('tr');
-      tr.className = 'hover:bg-surface2/50 transition';
-      tr.innerHTML = `<td class="py-2.5 pr-2 text-muted">${i + 1}</td>` +
-        `<td class="py-2.5 pr-2 text-ink">${esc(s.name) || '-'}</td>` +
-        `<td class="py-2.5 pr-2 text-ink">${esc(s.roll_no)}</td>` +
-        `<td class="py-2.5 pr-0 text-ink">${esc(s.major_subject) || '-'}</td>`;
-      tbody.appendChild(tr);
-    });
+    setText('opsEmailDefault', data.default_email || '—');
+    lastEmailSettings = Array.isArray(data.settings) ? data.settings : [];
+    setText('opsEmailCount', lastEmailSettings.length + ' rule(s)');
+
+    const emailCell = (s) => (Array.isArray(s.emails) ? s.emails : [])
+      .map((e) => esc(e)).join('<br>') || '—';
+
+    if (tbody) {
+      tbody.innerHTML = lastEmailSettings.map((s) => `<tr>
+        <td>${esc(s.subject) || '-'}</td>
+        <td>${esc(s.course_type) || '<span class="muted">sab</span>'}</td>
+        <td>${esc(s.class_name) || '<span class="muted">sab</span>'}</td>
+        <td class="fs-sm">${emailCell(s)}</td>
+        <td class="nowrap fs-sm">${esc(formatStamp(s.updated_at))}</td>
+        <td class="nowrap"><button type="button" class="btn btn-sm btn-ghost" onclick="deleteEmailSetting('${esc(s.id)}')">Delete</button></td>
+      </tr>`).join('');
+    }
+    if (cards) {
+      cards.innerHTML = lastEmailSettings.length
+        ? lastEmailSettings.map((s) => `
+          <div class="rec">
+            <div class="top">
+              <div>
+                <div class="nm">${esc(s.subject) || '-'}</div>
+                <div class="meta">${esc(s.course_type) || 'sab'} · ${esc(s.class_name) || 'sab'} · updated ${esc(formatStamp(s.updated_at))}</div>
+                <div class="meta">${emailCell(s)}</div>
+              </div>
+            </div>
+            <div class="acts">
+              <button type="button" class="btn btn-sm btn-ghost" onclick="deleteEmailSetting('${esc(s.id)}')">Delete</button>
+            </div>
+          </div>`).join('')
+        : '<div class="muted fs-sm">Koi mapping nahi — sab reports default email par jayengi.</div>';
+    }
+    if (empty) empty.textContent = lastEmailSettings.length ? '' : 'Koi subject-wise mapping save nahi hai.';
   } catch (err) {
-    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-2.5">✕ Network error. Try again.</div>';
+    if (!isAuthError(err) && msg) msg.innerHTML = alertErr('Network error. Dobara try karein.');
   }
 }
 
-function renderTable() {
-  const tbody = document.querySelector('#attendanceTable tbody');
-  tbody.innerHTML = '';
-  lastRecords.forEach((r, i) => {
-    const recordId = r.id ?? r.record_id ?? r._id ?? i;
-    const tr = document.createElement('tr');
-    tr.className = 'hover:bg-surface2/50 transition';
-    tr.innerHTML = `
-      <td class="py-2.5 pr-2 text-muted">${i + 1}</td>
-      <td class="py-2.5 pr-2 text-ink">${esc(r.student_name) || '-'}</td>
-      <td class="py-2.5 pr-2 text-ink">${esc(r.roll_no)}</td>
-      <td class="py-2.5 pr-2 text-ink">${esc(r.major_subject) || '-'}</td>
-      <td class="py-2.5 pr-2 text-muted">${esc(r.course_type) || '-'}</td>
-      <td class="py-2.5 pr-2 text-muted whitespace-nowrap">${formatTime(r.marked_at)}</td>
-      <td class="py-2.5 pr-0 text-right whitespace-nowrap">
-        <button class="text-xs font-medium text-gold hover:text-gold/80 transition mr-3" onclick="openEditModal('${recordId}')">Edit</button>
-        <button class="text-xs font-medium text-err hover:text-err/80 transition" onclick="openDeleteModal('${recordId}')">Delete</button>
-      </td>`;
-    tbody.appendChild(tr);
+async function saveEmailSetting() {
+  const msg = $('opsEmailMsg');
+  const btn = $('opsEmailAddBtn');
+  const subject = $('opsEmailSubject') ? $('opsEmailSubject').value.trim() : '';
+  const course_type = $('opsEmailCourseType') ? $('opsEmailCourseType').value.trim() : '';
+  const class_name = $('opsEmailClassName') ? $('opsEmailClassName').value.trim() : '';
+  const raw = $('opsEmailEmails') ? $('opsEmailEmails').value.trim() : '';
+
+  if (!subject) { if (msg) msg.innerHTML = alertErr('Subject likhein — kis subject ka report route karna hai.'); return; }
+  if (!raw) { if (msg) msg.innerHTML = alertErr('Kam se kam ek email daalein (comma se alag karke).'); return; }
+
+  const emails = raw.split(',').map((e) => e.trim()).filter(Boolean);
+  const bad = emails.filter((e) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
+  if (bad.length) { if (msg) msg.innerHTML = alertErr('Ye email address sahi nahi lag raha: ' + bad.join(', ')); return; }
+  if (emails.length > 10) { if (msg) msg.innerHTML = alertErr('Ek mapping me 10 se zyada email mat daalein.'); return; }
+
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Saving…'; }
+  try {
+    const res = await teacherFetch('/api/teacher/email-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject, course_type, class_name, emails }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      if (msg) msg.innerHTML = alertErr(data.error || 'Mapping save nahi hui.');
+      toast(data.error || 'Mapping save nahi hui.', 'err');
+      return;
+    }
+    const count = data.setting && Array.isArray(data.setting.emails) ? data.setting.emails.length : emails.length;
+    if (msg) msg.innerHTML = alertOk(`Mapping save ho gayi — ${subject} ke report ${count} email par jayenge.`);
+    toast('Email mapping save ho gayi.', 'ok');
+    ['opsEmailSubject', 'opsEmailCourseType', 'opsEmailClassName', 'opsEmailEmails'].forEach((id) => {
+      if ($(id)) $(id).value = '';
+    });
+    await loadEmailSettings();
+  } catch (err) {
+    if (!isAuthError(err)) {
+      if (msg) msg.innerHTML = alertErr('Network error. Dobara try karein.');
+      toast('Network error. Dobara try karein.', 'err');
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Save mapping'; }
+  }
+}
+
+let opsDeletingEmailId = null;
+
+// Delete bhi baaki destructive actions ki tarah confirm modal se hota hai.
+function deleteEmailSetting(id) {
+  if (!id) return;
+  opsDeletingEmailId = String(id);
+  const rule = lastEmailSettings.find((s) => String(s.id) === String(id));
+  const text = $('opsDeleteText');
+  if (text) {
+    text.textContent = rule
+      ? `${rule.subject}${rule.course_type ? ' · ' + rule.course_type : ''}${rule.class_name ? ' · ' + rule.class_name : ''} ki email mapping hat jayegi. Uske report wapas default email par jaane lagenge.`
+      : 'Ye email mapping hat jayegi — us subject ke report wapas default email par jaane lagenge.';
+  }
+  openModal('opsDeleteModal');
+}
+
+async function confirmDeleteEmailSetting() {
+  const id = opsDeletingEmailId;
+  const btn = $('opsDeleteConfirmBtn');
+  if (!id) { closeModal('opsDeleteModal'); return; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Deleting…'; }
+  try {
+    const res = await teacherFetch('/api/teacher/email-settings', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    const data = await res.json().catch(() => ({}));
+    closeModal('opsDeleteModal');
+    if (!res.ok || !data.ok) { toast(data.error || 'Mapping delete nahi hui.', 'err'); return; }
+    toast('Email mapping hata di gayi — report wapas default email par jayegi.', 'ok');
+    await loadEmailSettings();
+  } catch (err) {
+    closeModal('opsDeleteModal');
+    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
+  } finally {
+    opsDeletingEmailId = null;
+    if (btn) { btn.disabled = false; btn.textContent = 'Delete mapping'; }
+  }
+}
+
+async function loadDataPolicy() {
+  try {
+    const res = await teacherFetch('/api/teacher/data-policy');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast(data.error || 'Data policy load nahi hui.', 'err'); return; }
+
+    const days = Number(data.attendance_retention_days) || 0;
+    const sdays = Number(data.student_retention_days) || 0;
+    const adays = Number(data.audit_retention_days) || 0;
+    setText('opsRetAttendance', days ? days + ' din' : '—');
+    setText('opsRetStudent', sdays ? sdays + ' din' : '—');
+    setText('opsRetAudit', adays ? adays + ' din' : '—');
+    setText('opsRetOldest', data.oldest_attendance_date || '—');
+
+    const purge = $('opsPolicyPurge');
+    if (purge) {
+      purge.textContent = `Agla purge: attendance ${days || '—'} din, student identity ${sdays || '—'} din, audit log ${adays || '—'} din ke baad khud hat jaata hai`
+        + (data.oldest_attendance_date ? ` — sabse purani attendance entry ${data.oldest_attendance_date}.` : '.');
+    }
+
+    const counts = data.counts || {};
+    setText('opsCountAttendance', counts.attendance || 0);
+    setText('opsCountStudents', counts.students || 0);
+    setText('opsCountDevices', counts.device_locks || 0);
+    setText('opsCountSessions', counts.sessions || 0);
+    setText('opsCountEmails', counts.email_settings || 0);
+
+    // Field naam server ke version par depend karta hai — dono shapes handle karte hain.
+    const storage = data.storage || {};
+    const usedMb = Number(storage.db_size_mb != null ? storage.db_size_mb : storage.used_mb) || 0;
+    const quotaMb = Number(storage.quota_mb) || 0;
+    const pct = quotaMb > 0 ? Math.round((usedMb / quotaMb) * 1000) / 10 : 0;
+
+    setText('opsStorageLabel', quotaMb
+      ? `Storage ${usedMb} MB / ${quotaMb} MB`
+      : `Storage ${usedMb} MB`);
+    setText('opsStoragePct', pct + '%');
+    const bar = $('opsStorageBar');
+    if (bar) {
+      bar.style.width = Math.min(100, pct) + '%';
+      bar.style.background = pct > 70 ? 'linear-gradient(90deg, var(--warn), var(--err))' : '';
+    }
+    setText('opsStorageHint', storage.projected_full_date
+      ? `Aise hi chalta raha to ${storage.projected_full_date} tak database bhar jayega`
+        + (storage.days_left_estimate != null ? ` (~${storage.days_left_estimate} din baaki).` : '.')
+      : 'Fill hone ka projection abhi available nahi hai.');
+
+    const warn = $('opsStorageWarn');
+    if (warn) {
+      warn.innerHTML = pct > 70
+        ? alertWarn(`Storage ${pct}% bhar gaya hai (${usedMb} MB / ${quotaMb} MB). Purana data khud purge hone ka intezaar karein — retention window kam karne se jaldi khali hoga.`)
+        : '';
+    }
+    setText('opsStorageStats',
+      `Average document ${storage.avg_doc_bytes != null ? storage.avg_doc_bytes + ' bytes' : '—'} · `
+      + `${storage.docs_per_day_estimate != null ? storage.docs_per_day_estimate : '—'} documents/din`);
+
+    const notes = $('opsPolicyNotes');
+    if (notes) {
+      const list = Array.isArray(data.notes) ? data.notes : [];
+      notes.innerHTML = list.map((n) => `<div class="muted fs-sm">• ${esc(n)}</div>`).join('');
+    }
+  } catch (err) {
+    if (!isAuthError(err)) toast('Data policy load nahi hui.', 'err');
+  }
+}
+
+async function loadAudit() {
+  const body = $('opsAuditBody');
+  const empty = $('opsAuditEmpty');
+  const limit = $('opsAuditLimit') ? $('opsAuditLimit').value : '50';
+  if (body) body.innerHTML = '<tr><td colspan="5" class="muted fs-sm">Loading…</td></tr>';
+  if (empty) empty.textContent = '';
+  try {
+    const res = await teacherFetch('/api/teacher/audit?limit=' + encodeURIComponent(limit));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (body) body.innerHTML = '';
+      if (empty) empty.innerHTML = alertErr(data.error || 'Audit log load nahi hua.');
+      return;
+    }
+    // Newest first — server ke order par bharosa na karke khud sort karte hain.
+    const entries = (Array.isArray(data.entries) ? data.entries : [])
+      .slice()
+      .sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
+
+    if (body) {
+      body.innerHTML = entries.map((e) => `<tr>
+        <td class="nowrap fs-sm">${esc(e.at_hhmm || formatStamp(e.at))}</td>
+        <td class="nowrap">${esc(auditLabel(e.action))}</td>
+        <td class="nowrap mono fs-xs">${esc(e.actor) || '—'}</td>
+        <td class="nowrap fs-sm">${esc(e.target) || '—'}</td>
+        <td class="fs-sm">${esc(e.details) || '—'}</td>
+      </tr>`).join('');
+    }
+    setText('opsAuditCount', entries.length + ' entries');
+    if (empty) empty.textContent = entries.length ? '' : 'Abhi koi activity record nahi hai.';
+  } catch (err) {
+    if (body) body.innerHTML = '';
+    if (!isAuthError(err) && empty) empty.innerHTML = alertErr('Network error. Dobara try karein.');
+  }
+}
+
+/* =====================================================================
+   Reports: email (session / overall / student) + CSV export
+   ===================================================================== */
+// Button ko busy dikhana — file me yahi pattern hai (spinner + disable).
+async function withBusyButton(btn, busyText, task) {
+  if (!btn) return task();
+  const original = btn.textContent.trim();
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> ' + esc(busyText);
+  try {
+    return await task();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+// mode: session | overall | student. Server khud decide karta hai ki mail kis
+// email par jaayegi (subject-wise routing), aur wo message wapas bhejta hai.
+async function sendEmailReport(mode, body, msgElId) {
+  const msg = $(msgElId || 'mailReportMsg');
+  const mirror = msgElId === 'livePollMsg' ? $('mailReportMsg') : $('livePollMsg');
+  try {
+    const res = await teacherFetch('/api/teacher/email-reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({ mode }, body || {})),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      const error = data.error || 'Report email nahi ho payi.';
+      if (msg) msg.innerHTML = alertErr(error);
+      toast(error, 'err');
+      return false;
+    }
+    const to = Array.isArray(data.recipients) ? data.recipients.join(', ') : '';
+    const message = data.message || (to ? 'Report emailed to ' + to : 'Report email ho gayi.');
+    const html = alertOk(message + (data.attachments ? ` (${data.attachments} attachment)` : ''));
+    if (msg) msg.innerHTML = html;
+    if (mirror) mirror.innerHTML = html;
+    toast(message, 'ok', 7000);
+    return true;
+  } catch (err) {
+    if (!isAuthError(err)) {
+      if (msg) msg.innerHTML = alertErr('Network error. Dobara try karein.');
+      toast('Network error. Dobara try karein.', 'err');
+    }
+    return false;
+  }
+}
+
+async function emailSessionReport(fromLive) {
+  const btn = fromLive ? $('liveEmailBtn') : $('mailSessionBtn');
+  const msgId = fromLive ? 'livePollMsg' : 'mailReportMsg';
+  const sessionId = activeSessionId || ($('sessionSelect') ? $('sessionSelect').value : '');
+  if (!sessionId) {
+    const msg = $(msgId);
+    if (msg) msg.innerHTML = alertWarn('Koi live session nahi hai — pehle code generate karein.');
+    toast('Pehle code generate karein — session PDF usi session ka banta hai.', 'warn');
+    return;
+  }
+  await withBusyButton(btn, 'Emailing…', () => sendEmailReport('session', { session_id: sessionId }, msgId));
+}
+
+async function emailOverallReport() {
+  const c = getCombo();
+  const problem = comboMissing(c);
+  if (problem) { toast(problem, 'err'); return; }
+  await withBusyButton($('mailOverallBtn'), 'Emailing…', () => sendEmailReport('overall', {
+    class_name: c.class_name,
+    subject: c.subject,
+    course_type: c.course_type,
+    system: c.system,
+  }, 'mailReportMsg'));
+}
+
+async function emailStudentReport() {
+  const c = getCombo();
+  const msg = $('mailReportMsg');
+  const roll_no = $('mailRollNo') ? $('mailRollNo').value.trim() : '';
+  const problem = comboMissing(c);
+  if (problem) { toast(problem, 'err'); return; }
+  if (!/^[0-9]+$/.test(roll_no)) {
+    if (msg) msg.innerHTML = alertErr('Roll number sirf digits me likhein (e.g. 45678).');
+    return;
+  }
+  await withBusyButton($('mailStudentBtn'), 'Emailing…', () => sendEmailReport('student', {
+    class_name: c.class_name,
+    subject: c.subject,
+    course_type: c.course_type,
+    system: c.system,
+    roll_no,
+  }, 'mailReportMsg'));
+}
+
+// Server CSV file (Content-Disposition: attachment) bhejta hai — token header ke
+// saath laane ke liye blob banakar khud download trigger karte hain.
+async function downloadCsv(btnId) {
+  const fromLive = btnId === 'liveCsvBtn';
+  const btn = fromLive ? $('liveCsvBtn') : $('mailCsvBtn');
+  const msg = fromLive ? $('livePollMsg') : $('mailCsvMsg');
+  const c = getCombo();
+  const date = selectedDate();
+
+  await withBusyButton(btn, 'Preparing CSV…', async () => {
+    try {
+      const params = new URLSearchParams({ date });
+      if (c.class_name) params.set('class_name', c.class_name);
+      if (c.subject) params.set('subject', c.subject);
+      if (c.course_type) params.set('course_type', c.course_type);
+      if (c.system) params.set('system', c.system);
+
+      const res = await teacherFetch('/api/teacher/export.csv?' + params.toString());
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const error = data.error || 'CSV download nahi hua.';
+        if (msg) msg.innerHTML = alertErr(error);
+        toast(error, 'err');
+        return;
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `attendance-${date}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      if (msg) msg.innerHTML = alertOk(`attendance-${date}.csv download ho gaya — Excel me khol lein.`);
+      toast('CSV download ho gaya.', 'ok');
+    } catch (err) {
+      if (!isAuthError(err)) {
+        if (msg) msg.innerHTML = alertErr('Network error. Dobara try karein.');
+        toast('Network error. Dobara try karein.', 'err');
+      }
+    }
   });
 }
 
-function findRecord(recordId) {
-  return lastRecords.find((r, i) => String(r.id ?? r.record_id ?? r._id ?? i) === String(recordId));
+/* =====================================================================
+   Startup
+   ===================================================================== */
+function initRegisterDate() {
+  const el = $('registerDate');
+  el.value = istToday();
+  el.max = istToday(); // future date ka register hota hi nahi
 }
 
-// ---- Edit entry ----
-function openEditModal(recordId) {
-  const r = findRecord(recordId);
-  if (!r) return;
-  editingRecordId = recordId;
-  document.getElementById('editRollNo').value = r.roll_no || '';
-  document.getElementById('editName').value = r.student_name || '';
-  document.getElementById('editSubject').value = r.subject || '';
-  document.getElementById('editModalErr').classList.add('hidden');
-  document.getElementById('editModal').classList.remove('hidden');
-}
-function closeEditModal() {
-  document.getElementById('editModal').classList.add('hidden');
-  editingRecordId = null;
-}
-async function saveEdit() {
-  const errEl = document.getElementById('editModalErr');
-  const roll_no = document.getElementById('editRollNo').value.trim();
-  const student_name = document.getElementById('editName').value.trim();
-  const subject = document.getElementById('editSubject').value.trim();
-
-  if (!/^[0-9]+$/.test(roll_no)) {
-    errEl.textContent = 'Roll number must contain digits only.';
-    errEl.classList.remove('hidden');
-    return;
-  }
-
+// Server se anti-proxy settings laakar UI me dikhata hai (jo server enforce
+// karta hai, wahi dikhna chahiye).
+async function loadHealthChips() {
   try {
-    const res = await teacherFetch('/api/teacher/attendance/update', {
-      method: 'PATCH',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ record_id: editingRecordId, roll_no, student_name, subject })
-    });
-    const data = await res.json();
-    if (!data.success) {
-      errEl.textContent = data.error || 'Could not save changes.';
-      errEl.classList.remove('hidden');
-      return;
+    const res = await fetch('/api/health');
+    const h = await res.json();
+    const ap = h.anti_proxy || {};
+    $('strictChip').textContent = ap.strict_location ? '🛡 Strict location ON' : '⚠ Location relax mode';
+    $('strictChip').className = 'chip ' + (ap.strict_location ? 'chip-ok' : 'chip-warn');
+    $('radiusChip2').textContent = `Radius ${ap.radius_meters || '—'} m · accuracy ≤ ${ap.max_accuracy_meters || '—'} m`;
+    if (ap.strict_location) {
+      $('requireLocation').checked = true;
+      $('requireLocation').disabled = true; // server par locked hai
     }
-    closeEditModal();
-    await loadAttendance();
-  } catch (err) {
-    errEl.textContent = 'Network error. Try again.';
-    errEl.classList.remove('hidden');
-  }
+  } catch (err) { /* health check optional hai */ }
 }
 
-// ---- Delete entry ----
-function openDeleteModal(recordId) {
-  const r = findRecord(recordId);
-  if (!r) return;
-  deletingRecordId = recordId;
-  document.getElementById('deleteModalText').textContent =
-    `Remove ${r.student_name || 'Roll No ' + r.roll_no}'s entry (Roll No ${r.roll_no}) from this list? This cannot be undone.`;
-  document.getElementById('deleteModal').classList.remove('hidden');
-}
-function closeDeleteModal() {
-  document.getElementById('deleteModal').classList.add('hidden');
-  deletingRecordId = null;
-}
-async function confirmDelete() {
-  try {
-    const res = await teacherFetch('/api/teacher/attendance/delete', {
-      method: 'DELETE',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ record_id: deletingRecordId })
-    });
-    const data = await res.json();
-    closeDeleteModal();
-    if (data.success) {
-      await loadAttendance();
-    } else {
-      alert(data.error || 'Could not delete entry.');
-    }
-  } catch (err) {
-    closeDeleteModal();
-    alert('Network error. Try again.');
-  }
+function loadEverything() {
+  updateReportLabel();
+  loadSessions();
+  loadAttendance();
+  loadPresentAbsent();
+  loadReview();
+  if (activeSessionId) refreshSessionStatus(activeSessionId);
 }
 
-function printList() {
-  if (!lastRecords.length) { alert('Refresh the attendance list first.'); return; }
-  const className = document.getElementById('className').value.trim() || '-';
-  const subject = document.getElementById('subjectSelect').value.trim() || '-';
-  const courseType = document.getElementById('courseTypeSelect').value.trim() || '-';
-  const system = document.getElementById('systemSelect').value.trim();
-  const rows = lastRecords.map((r, i) =>
-    `<tr><td>${i + 1}</td><td>${esc(r.student_name) || '-'}</td><td>${esc(r.roll_no)}</td><td>${esc(r.major_subject) || '-'}</td><td>${esc(r.course_type) || '-'}</td><td>${formatTime(r.marked_at)}</td></tr>`
-  ).join('');
-  const win = window.open('', '_blank');
-  if (!win) { alert('Popup blocked — allow popups for this site and try again.'); return; }
-  win.document.write(`
-    <html><head><title>Attendance - ${className} - ${subject} (${courseType}${system ? ', ' + system : ''}) - ${formatDateHeading(lastDate)}</title>
-    <style>
-      body { font-family: 'Georgia', serif; padding: 30px; color: #232733; }
-      h1 { font-size: 20px; margin-bottom: 4px; }
-      .meta { color:#555; margin-bottom: 20px; font-family: Arial, sans-serif; font-size: 13px; }
-      table { width:100%; border-collapse: collapse; font-family: Arial, sans-serif; }
-      th, td { border:1px solid #999; padding:8px; text-align:left; font-size:14px; }
-      th { background:#1f2a44; color:#fff; }
-      tbody tr:nth-child(even) { background:#f6f4ee; }
-    </style>
-    </head><body>
-      <h1>Attendance Register — ${className} — ${subject} (${courseType}${system ? ', ' + system : ''})</h1>
-      <div class="meta">${formatDateHeading(lastDate)} &nbsp;|&nbsp; Session: ${lastSessionLabel || 'All sessions today'} &nbsp;|&nbsp; Total present: ${lastRecords.length}</div>
-      <table><thead><tr><th>S.No</th><th>Name</th><th>Roll No</th><th>Major Subject</th><th>Type</th><th>Marked At</th></tr></thead>
-      <tbody>${rows}</tbody></table>
-    </body></html>
-  `);
-  win.document.close();
-  win.focus();
-  win.print();
-}
-
-document.getElementById('className').addEventListener('change', () => { saveSelection(); loadSessions(); });
-document.getElementById('subjectSelect').addEventListener('change', () => { saveSelection(); loadSessions(); });
-document.getElementById('courseTypeSelect').addEventListener('change', () => { saveSelection(); loadSessions(); });
-document.getElementById('systemSelect').addEventListener('change', () => { saveSelection(); loadSessions(); updateReportLabel(); });
-
-function updateReportLabel() {
-  const s = document.getElementById('systemSelect').value;
-  document.getElementById('reportBtn').textContent =
-    s === 'Annual' ? 'Download Annual Report (365 days)'
-    : s === 'Semester' ? 'Download Semester Report (180 days)'
-    : 'Download Report';
-}
-document.getElementById('requireLocation').addEventListener('change', saveSelection);
-
-// ---- Startup ----
-initRegisterDate();
-restoreSelection();
-updateReportLabel();
-// Restore the active code (server-checked), then load the day's data.
-(async () => {
-  await restoreActiveSession();
+async function startDashboard() {
+  restoreSelection();
+  updateReportLabel();
+  await loadHealthChips();
   await loadSessions();
+  await restoreActiveSession();
   await loadAttendance();
-})();
+  await loadPresentAbsent();
+  await loadReview();
+  startAutoRefresh();
+}
 
-// Refresh the "N students have marked" counter every 15 seconds while a code
-// is on screen, so the teacher sees the count grow without touching anything.
-setInterval(() => {
-  if (activeSessionId && expiryTimestamp && expiryTimestamp > Date.now()) {
-    refreshSessionStatus(activeSessionId);
-  }
-}, 15000);
+let autoRefreshTimer = null;
+function startAutoRefresh() {
+  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+  // Live code ke sath counts khud update hote rehte hain — teacher ko kuch
+  // dabana nahi padta. (Server hi count deta hai, phone ka time nahi.)
+  autoRefreshTimer = setInterval(async () => {
+    if (!activeSessionId) return;
+    try {
+      await refreshSessionStatus(activeSessionId);
+      if ($('panel-live').classList.contains('active')) await loadAttendance();
+    } catch (err) { /* agla tick dobara try karega */ }
+  }, 15000);
+}
+
+// Page load: password pehle se saved ho to seedha dashboard khol do.
+(async function boot() {
+  initRegisterDate();
+  document.querySelectorAll('select, input').forEach((el) => {
+    if (['className', 'systemSelect', 'subjectSelect', 'courseTypeSelect'].includes(el.id)) {
+      el.addEventListener('change', () => { saveSelection(); updateReportLabel(); loadSessions(); });
+    }
+    if (['registerDate'].includes(el.id)) return;
+  });
+  ['requireLocation', 'expiryMinutes', 'requireApproval', 'autoSendPdf'].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener('change', saveSelection);
+  });
+
+  const saved = getTeacherPassword();
+  if (!saved) { showLogin(''); return; }
+  try {
+    const res = await fetch('/api/teacher/sessions?date=' + istToday(), { headers: { 'X-Teacher-Password': saved } });
+    if (res.ok) { showDashboard(); return; }
+    sessionStorage.removeItem('teacher_password');
+  } catch (err) { /* offline — login screen hi dikha do */ }
+  showLogin('');
+})();
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

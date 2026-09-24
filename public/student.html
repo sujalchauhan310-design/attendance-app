@@ -2,82 +2,59 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Student — Mark Attendance</title>
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0d111c">
+<meta name="theme-color" content="#0a0e18">
+<meta name="description" content="College attendance — mark attendance from inside the classroom with verified location.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lora:wght@500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  tailwind.config = {
-    theme: {
-      extend: {
-        colors: {
-          base: '#0d111c',
-          surface: '#161b29',
-          surface2: '#1e2436',
-          line: '#2b3348',
-          ink: '#ece9de',
-          muted: '#8b93a7',
-          gold: '#cda43f',
-          golddim: '#8a6d1a',
-          ok: '#34d399',
-          err: '#f87171',
-        },
-        fontFamily: {
-          serif: ['Lora', 'Georgia', 'serif'],
-          sans: ['Inter', 'system-ui', 'sans-serif'],
-        },
-      },
-    },
-  };
-</script>
-<style>
-  body { background: #0d111c; }
-  input, select { color-scheme: dark; }
-  ::selection { background: #cda43f; color: #0d111c; }
-</style>
+<link rel="stylesheet" href="app.css">
 </head>
-<body class="bg-base text-ink font-sans min-h-screen">
-<div class="max-w-md mx-auto px-4 py-8 pb-16">
+<body>
+<div class="app">
 
-  <!-- Masthead -->
-  <div class="mb-6">
-    <div class="text-xs tracking-wide text-gold/80 font-medium mb-1">Student Portal</div>
-    <h1 class="font-serif text-2xl font-semibold text-ink">Mark Attendance</h1>
-    <p class="text-sm text-muted mt-1">Fill in your details below to record today's attendance.</p>
-  </div>
+  <header class="page-head">
+    <div class="kicker">Student Portal</div>
+    <h1>Mark Attendance</h1>
+    <p class="muted">Attendance sirf classroom ke andar se mark hoti hai — location server par verify hoti hai.</p>
+  </header>
 
-  <!-- Form card -->
-  <div class="bg-surface border border-line rounded-xl p-5 space-y-4 shadow-lg shadow-black/20">
+  <div id="topAlert"></div>
 
-    <div class="bg-gold/10 border-2 border-gold rounded-lg p-3.5">
-      <label class="block text-base font-semibold text-gold mb-1.5">Code from teacher</label>
-      <input id="code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="off"
-        placeholder="5-digit code"
-        class="w-full bg-surface2 border-2 border-gold/60 rounded-lg px-4 py-3.5 text-2xl font-bold text-center text-gold placeholder-muted/60 tracking-[0.3em] focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold transition" />
-      <p id="codeErr" class="hidden text-xs text-err mt-1">Code can only contain digits (0–9).</p>
+  <!-- ================= STEP 1 — code + details ================= -->
+  <section class="card accent mt-2">
+    <div class="field">
+      <label class="label" for="code">Code from teacher</label>
+      <input id="code" class="code-input" type="text" inputmode="numeric" pattern="[0-9]*"
+        maxlength="5" autocomplete="off" placeholder="00000" aria-describedby="codeHint">
+      <p class="hint" id="codeHint">Teacher ke board par likha 5-digit code. Ye sirf kuch minute chalta hai.</p>
+      <p id="codeErr" class="field-error hide">Code me sirf digits (0–9) chalte hain.</p>
     </div>
 
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Roll Number</label>
-      <input id="rollNo" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
-        placeholder="e.g. 45678"
-        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
-      <p id="rollNoErr" class="hidden text-xs text-err mt-1">Roll number can only contain digits (0–9).</p>
+    <div class="field">
+      <label class="label" for="rollNo">Roll Number</label>
+      <input id="rollNo" class="input" type="text" inputmode="numeric" pattern="[0-9]*"
+        autocomplete="off" placeholder="e.g. 45678">
+      <p id="rollNoErr" class="field-error hide">Roll number me sirf digits (0–9) chalte hain.</p>
+      <p class="hint" id="rollHint">Roll number daalte hi naam/class roster se apne aap bhar jayega.</p>
     </div>
 
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Your Name</label>
-      <input id="studentName" type="text" placeholder="e.g. Priya Sharma"
-        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
+    <div class="field">
+      <label class="label" for="studentName">Your Name <span class="opt">(sirf pehli baar)</span></label>
+      <input id="studentName" class="input" type="text" autocomplete="name" placeholder="e.g. Priya Sharma">
     </div>
 
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Class</label>
-      <select id="className" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+    <div class="field">
+      <label class="label" for="studentEmail">Email <span class="opt">(optional)</span></label>
+      <input id="studentEmail" class="input" type="email" inputmode="email" autocomplete="email" placeholder="e.g. priya@gmail.com">
+      <p class="hint">Aapka attendance report isi email par jayega. Email na daalein to report teacher ke default email par chali jayegi — attendance par koi asar nahi padta.</p>
+    </div>
+
+    <div class="field mb-0">
+      <label class="label" for="className">Class</label>
+      <select id="className" class="select">
         <option value="">Select your class</option>
         <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
         <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
@@ -85,24 +62,26 @@
         <option>MA 1st</option><option>MA 2nd</option>
       </select>
     </div>
+  </section>
 
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">System <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
-      <div class="grid grid-cols-2 gap-2" id="systemGroup">
-        <label class="cursor-pointer">
-          <input type="radio" name="system" value="Annual" class="peer sr-only">
-          <span class="block text-center rounded-lg border border-line bg-surface2 px-3.5 py-2.5 text-sm font-medium text-muted transition peer-checked:border-gold peer-checked:bg-gold/10 peer-checked:text-gold peer-focus-visible:ring-2 peer-focus-visible:ring-gold/60">Annual</span>
-        </label>
-        <label class="cursor-pointer">
-          <input type="radio" name="system" value="Semester" class="peer sr-only">
-          <span class="block text-center rounded-lg border border-line bg-surface2 px-3.5 py-2.5 text-sm font-medium text-muted transition peer-checked:border-gold peer-checked:bg-gold/10 peer-checked:text-gold peer-focus-visible:ring-2 peer-focus-visible:ring-gold/60">Semester</span>
-        </label>
+  <!-- ================= STEP 2 — subject details ================= -->
+  <section class="card">
+    <div class="card-title">
+      <h3>Class details</h3>
+      <span class="chip" id="detailsHintChip">Teacher ke code se match karein</span>
+    </div>
+
+    <div class="field">
+      <label class="label">System</label>
+      <div class="seg" id="systemGroup" role="radiogroup" aria-label="System">
+        <label class="seg-opt"><input type="radio" name="system" value="Annual"><span>Annual</span></label>
+        <label class="seg-opt"><input type="radio" name="system" value="Semester"><span>Semester</span></label>
       </div>
     </div>
 
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Subject <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
-      <select id="subject" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+    <div class="field">
+      <label class="label" for="subject">Subject</label>
+      <select id="subject" class="select">
         <option value="">Select subject</option>
         <option>Political Science</option><option>History</option><option>Public Administration</option>
         <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
@@ -112,9 +91,9 @@
       </select>
     </div>
 
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Course Type <span class="text-xs font-normal text-muted">(must match your teacher's code)</span></label>
-      <select id="courseType" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+    <div class="field">
+      <label class="label" for="courseType">Course Type</label>
+      <select id="courseType" class="select">
         <option value="">Select course type</option>
         <option value="DSC">DSC — Discipline Specific Core</option>
         <option value="SEC">SEC — Skill Enhancement Course</option>
@@ -125,9 +104,9 @@
       </select>
     </div>
 
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Major Subject <span class="text-xs font-normal text-muted">(optional)</span></label>
-      <select id="majorSubject" class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+    <div class="field mb-0">
+      <label class="label" for="majorSubject">Major Subject <span class="opt">(optional)</span></label>
+      <select id="majorSubject" class="select">
         <option value="">Select major subject</option>
         <option>Political Science</option><option>History</option><option>Public Administration</option>
         <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
@@ -136,112 +115,151 @@
         <option>Computer Science</option><option>Physical Education</option><option>Other</option>
       </select>
     </div>
+  </section>
 
-    <!-- Location status -->
-    <div id="locBox" class="rounded-lg border border-line bg-surface2/60 px-3.5 py-3">
-      <div class="text-sm text-muted" id="locStatus">📍 Location: not fetched yet</div>
-      <button type="button" id="retryLocBtn" onclick="fetchLocation()" style="display:none;"
-        class="mt-2 text-sm font-medium text-gold hover:text-gold/80 transition">🔄 Retry Location</button>
+  <!-- ================= STEP 3 — location ================= -->
+  <section class="card">
+    <div class="card-title">
+      <h3>Location check</h3>
+      <span class="chip chip-gold" id="radiusChip">📍 Radius 150 m</span>
+    </div>
+    <p class="card-sub">Aap class ke andar hain ya nahi — ye server khud verify karta hai. GPS ON rakhein.</p>
 
-      <!-- Permanently denied help panel -->
-      <div id="locHelp" class="hidden mt-3 pt-3 border-t border-line">
-        <p class="text-sm text-ink font-medium mb-2">Location is blocked for this site. Turn it on:</p>
-        <div class="flex gap-2 mb-3">
-          <button type="button" onclick="showLocTab('ios')" id="tabIosBtn"
-            class="flex-1 text-xs font-medium py-1.5 rounded-md border border-line text-muted hover:text-ink transition">iPhone (Safari)</button>
-          <button type="button" onclick="showLocTab('android')" id="tabAndroidBtn"
-            class="flex-1 text-xs font-medium py-1.5 rounded-md border border-line text-muted hover:text-ink transition">Android (Chrome)</button>
-        </div>
-        <ol id="locStepsIos" class="hidden list-decimal list-inside text-sm text-muted space-y-1">
-          <li>Open the <b class="text-ink">Settings</b> app on your iPhone</li>
-          <li>Scroll down and tap <b class="text-ink">Privacy &amp; Security</b></li>
-          <li>Tap <b class="text-ink">Location Services</b> — make sure it's turned ON</li>
-          <li>Scroll down, tap <b class="text-ink">Safari Websites</b></li>
-          <li>Set it to <b class="text-ink">"While Using the App"</b></li>
-          <li>Come back here and tap "Retry Location"</li>
-          <li class="list-none -ml-1 mt-1 text-xs">Still failing? Try turning off <b class="text-ink">iCloud Private Relay</b> (Settings → your name → iCloud → Private Relay) or switch between WiFi and mobile data, then retry.</li>
-        </ol>
-        <ol id="locStepsAndroid" class="hidden list-decimal list-inside text-sm text-muted space-y-1">
-          <li>Tap the <b class="text-ink">🔒 lock / ⓘ info icon</b> next to the address bar</li>
-          <li>Tap <b class="text-ink">Permissions</b> → <b class="text-ink">Location</b></li>
-          <li>Select <b class="text-ink">Allow</b></li>
-          <li>If that option isn't there: open <b class="text-ink">Chrome menu (⋮)</b> → <b class="text-ink">Settings</b> → <b class="text-ink">Site settings</b> → <b class="text-ink">Location</b> → find this site → <b class="text-ink">Allow</b></li>
-          <li>Also check <b class="text-ink">Phone Settings → Apps → Chrome → Permissions → Location</b> is Allowed</li>
-          <li>Come back here and tap "Retry Location"</li>
-        </ol>
+    <div class="presence busy" id="presence">
+      <div class="ring" id="presenceIcon">…</div>
+      <div>
+        <div class="txt" id="presenceText">Location check ho rahi hai…</div>
+        <div class="sub" id="presenceSub">Weak network par isme thoda time lag sakta hai.</div>
       </div>
     </div>
 
-    <button id="submitBtn" onclick="openConfirm()"
-      class="w-full bg-gold hover:bg-gold/90 text-base font-semibold text-[#171208] rounded-lg py-3 mt-2 transition disabled:opacity-50 disabled:cursor-not-allowed">
-      Mark Attendance
-    </button>
-  </div>
-
-  <div id="message" class="mt-4"></div>
-  <div id="queueStatus" class="mt-4"></div>
-  <div id="failedBox" class="mt-4"></div>
-
-  <!-- Check my attendance -->
-  <div class="bg-surface border border-line rounded-xl p-5 space-y-4 shadow-lg shadow-black/20 mt-5">
-    <div>
-      <div class="text-xs tracking-wide text-gold/80 font-medium mb-1">My Attendance</div>
-      <h2 class="font-serif text-lg font-semibold text-ink">Check my percentage</h2>
-      <p class="text-sm text-muted mt-1">Enter your roll number. For your privacy this only works from the phone you have marked attendance with.</p>
+    <div class="btn-row mt-2">
+      <button type="button" class="btn btn-sm" id="retryLocBtn" onclick="fetchLocation({ force: true })">Get location again</button>
+      <button type="button" class="btn btn-sm btn-ghost" id="locHelpBtn" onclick="toggleLocHelp()">Location problem?</button>
     </div>
 
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">Roll Number</label>
-      <input id="myRollNo" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
-        placeholder="e.g. 45678"
-        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink placeholder-muted/60 focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition" />
-      <p id="myRollNoErr" class="hidden text-xs text-err mt-1">Roll number can only contain digits (0–9).</p>
+    <div id="locHelp" class="hide mt-2">
+      <div class="seg mb-2">
+        <button type="button" class="btn btn-sm" id="tabIosBtn" onclick="showLocTab('ios')">iPhone</button>
+        <button type="button" class="btn btn-sm" id="tabAndroidBtn" onclick="showLocTab('android')">Android</button>
+      </div>
+      <ol id="locStepsIos" class="muted fs-sm hide" style="padding-left:18px;">
+        <li>Settings → Safari → Location → <b>Allow</b></li>
+        <li>Settings → Privacy &amp; Security → Location Services → <b>ON</b></li>
+        <li>Yahan wapas aakar “Get location again” dabayein</li>
+      </ol>
+      <ol id="locStepsAndroid" class="muted fs-sm hide" style="padding-left:18px;">
+        <li>Address bar ke lock icon → Permissions → Location → <b>Allow</b></li>
+        <li>Phone Settings → Apps → Browser → Permissions → Location → <b>Allow</b></li>
+        <li>GPS ON karke wapas aayein aur “Get location again” dabayein</li>
+      </ol>
+    </div>
+  </section>
+
+  <button id="submitBtn" type="button" class="btn btn-primary btn-block mt-2" onclick="openConfirm()">
+    Mark Attendance
+  </button>
+
+  <div id="queueStatus" class="mt-2"></div>
+  <div id="failedBox" class="mt-2"></div>
+
+  <!-- ================= My attendance ================= -->
+  <section class="card mt-3">
+    <div class="card-title">
+      <h3>Check my percentage</h3>
+      <span class="chip chip-info">🔒 Sirf aapke phone se</span>
+    </div>
+    <p class="card-sub">Roll number daalein. Privacy ke liye ye sirf usi phone par chalta hai jisse aapne attendance mark ki ho.</p>
+
+    <div class="field">
+      <label class="label" for="myRollNo">Roll Number</label>
+      <input id="myRollNo" class="input" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="e.g. 45678">
+      <p id="myRollNoErr" class="field-error hide">Roll number me sirf digits (0–9) chalte hain.</p>
     </div>
 
-    <div>
-      <label class="block text-sm font-medium text-ink mb-1.5">System</label>
-      <select id="mySystem"
-        class="w-full bg-surface2 border border-line rounded-lg px-3.5 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-gold/60 focus:border-gold/60 transition">
+    <div class="field">
+      <label class="label" for="mySystem">System</label>
+      <select id="mySystem" class="select">
         <option value="Semester">Semester (last 180 days)</option>
         <option value="Annual">Annual (last 365 days)</option>
       </select>
     </div>
 
-    <button id="myAttBtn" onclick="checkMyAttendance()"
-      class="w-full bg-surface2 hover:bg-line border border-line text-ink font-medium rounded-lg py-3 transition disabled:opacity-50">
-      Check Attendance
-    </button>
+    <button id="myAttBtn" type="button" class="btn btn-block" onclick="checkMyAttendance()">Check attendance</button>
 
-    <div id="myAttMsg"></div>
-    <div id="myAttResult" class="space-y-2"></div>
-  </div>
+    <div id="myAttMsg" class="mt-2"></div>
+    <div id="myAttResult" class="mt-2 stack" style="gap:10px;"></div>
+  </section>
+
+  <p class="muted fs-xs center mt-3">Sab kuch server par verify hota hai — device time, GPS aur code, teeno.</p>
 </div>
 
-<!-- Confirm modal -->
-<div id="confirmModal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-  <div class="bg-surface border border-line rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 shadow-2xl">
-    <h2 class="font-serif text-lg font-semibold text-ink mb-1">Confirm your details</h2>
-    <p class="text-sm text-muted mb-4">Please check before submitting. If something is wrong, tell your teacher — they can correct it from the register.</p>
-    <div class="space-y-2 text-sm bg-surface2 border border-line rounded-lg p-3.5" id="confirmSummary"></div>
-    <div class="flex gap-3 mt-5">
-      <button onclick="closeConfirm()" class="flex-1 py-2.5 rounded-lg border border-line text-ink font-medium hover:bg-surface2 transition">Cancel</button>
-      <button onclick="confirmSubmit()" class="flex-1 py-2.5 rounded-lg bg-gold text-[#171208] font-semibold hover:bg-gold/90 transition">Yes, Submit</button>
+<!-- ================= Confirm modal ================= -->
+<div class="modal" id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+  <div class="sheet">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head">
+      <div>
+        <h2 id="confirmTitle">Confirm your details</h2>
+        <p class="muted fs-sm mt-1">Check kar lein — galat roll/subject teacher ko batana padega.</p>
+      </div>
+      <button type="button" class="sheet-close" onclick="closeConfirm()" aria-label="Close">✕</button>
+    </div>
+
+    <div class="kv" id="confirmSummary"></div>
+    <div id="confirmLoc" class="mt-2"></div>
+    <div id="confirmErr" class="hide mt-2"></div>
+
+    <div class="sheet-foot">
+      <button type="button" class="btn btn-ghost" onclick="closeConfirm()">Cancel</button>
+      <button type="button" class="btn btn-primary" id="confirmBtn" onclick="confirmSubmit()">Yes, mark me present</button>
     </div>
   </div>
 </div>
 
-<script>
-// ---- Register the service worker so the page shell still loads offline ----
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
-}
+<!-- ================= Result modal ================= -->
+<div class="modal" id="resultModal" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
+  <div class="sheet">
+    <div class="sheet-grab"></div>
+    <div class="tick" id="resultIcon">✓</div>
+    <h2 class="center" id="resultTitle">Attendance marked</h2>
+    <p class="muted center fs-sm mt-1" id="resultMsg"></p>
+    <div class="kv mt-3" id="resultDetails"></div>
+    <div class="sheet-foot">
+      <button type="button" class="btn btn-primary btn-block" onclick="closeResult()">Done</button>
+    </div>
+  </div>
+</div>
 
+<div class="toast-wrap" id="toasts" aria-live="polite"></div>
+
+<script>
+/* =====================================================================
+   Student page logic
+   ===================================================================== */
+const $ = (id) => document.getElementById(id);
+
+// Everything the user can type is escaped before it touches innerHTML.
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-// localStorage can throw (Safari private mode, storage blocked) — never let
-// that break the whole page.
+/* ---------- toasts (replaces the old bare-div messages) ---------- */
+function toast(message, type, ms) {
+  const wrap = $('toasts');
+  const el = document.createElement('div');
+  el.className = 'toast ' + (type || '');
+  const icon = type === 'ok' ? '✅' : type === 'err' ? '✕' : type === 'warn' ? '⚠️' : 'ℹ️';
+  el.innerHTML = `<div class="ico">${icon}</div><div>${esc(message)}</div>`;
+  wrap.appendChild(el);
+  setTimeout(() => {
+    el.style.transition = 'opacity .25s';
+    el.style.opacity = '0';
+    setTimeout(() => el.remove(), 260);
+  }, ms || 5200);
+}
+
+/* ---------- device id (a phone is bound to one roll number) ---------- */
 let memoryDeviceId = null;
 function getDeviceId() {
   let id = null;
@@ -255,202 +273,466 @@ function getDeviceId() {
   return id;
 }
 const device_id = getDeviceId();
-let coords = null;
 
-// ---- Digits-only inputs (Roll Number & Code) ----
+/* ---------- modals: ESC + backdrop close + auto focus ---------- */
+function openModal(id) {
+  const m = $(id);
+  if (!m) return;
+  m.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  const focusable = m.querySelector('button:not([disabled]), input, select, textarea');
+  if (focusable) setTimeout(() => focusable.focus(), 60);
+}
+function closeModal(id) {
+  const m = $(id);
+  if (!m) return;
+  m.classList.remove('open');
+  if (!document.querySelector('.modal.open')) document.body.style.overflow = '';
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const open = document.querySelector('.modal.open');
+  if (open) closeModal(open.id);
+});
+document.querySelectorAll('.modal').forEach((m) => {
+  m.addEventListener('click', (e) => { if (e.target === m) closeModal(m.id); });
+});
+
+/* ---------- digits-only inputs ---------- */
 function enforceDigitsOnly(inputEl, errEl) {
+  if (!inputEl) return;
   inputEl.addEventListener('input', () => {
     const cleaned = inputEl.value.replace(/[^0-9]/g, '');
     if (cleaned !== inputEl.value) {
       inputEl.value = cleaned;
-      errEl.classList.remove('hidden');
-      setTimeout(() => errEl.classList.add('hidden'), 2000);
-    } else {
-      errEl.classList.add('hidden');
+      if (errEl) {
+        errEl.classList.remove('hide');
+        setTimeout(() => errEl.classList.add('hide'), 2200);
+      }
+    } else if (errEl) {
+      errEl.classList.add('hide');
     }
   });
 }
-enforceDigitsOnly(document.getElementById('rollNo'), document.getElementById('rollNoErr'));
-enforceDigitsOnly(document.getElementById('code'), document.getElementById('codeErr'));
-enforceDigitsOnly(document.getElementById('myRollNo'), document.getElementById('myRollNoErr'));
+enforceDigitsOnly($('code'), $('codeErr'));
+enforceDigitsOnly($('rollNo'), $('rollNoErr'));
+enforceDigitsOnly($('myRollNo'), $('myRollNoErr'));
 
-// Keep the "check my attendance" roll number in step with the form's roll
-// number, so a student who just filled the form does not have to type it twice.
-document.getElementById('rollNo').addEventListener('input', () => {
-  const v = document.getElementById('rollNo').value;
-  if (!document.getElementById('myRollNo').value) document.getElementById('myRollNo').value = v;
-});
-
-// ---- Location handling ----
+/* ---------- platform help (iOS vs Android steps) ---------- */
 function detectPlatform() {
   const ua = navigator.userAgent || '';
   if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
-  if (/Android/i.test(ua)) return 'android';
-  return 'android'; // sensible default for a college's mostly-Android userbase
+  return 'android';
 }
 function showLocTab(which) {
-  document.getElementById('locStepsIos').classList.toggle('hidden', which !== 'ios');
-  document.getElementById('locStepsAndroid').classList.toggle('hidden', which !== 'android');
-  document.getElementById('tabIosBtn').className = 'flex-1 text-xs font-medium py-1.5 rounded-md border transition ' +
-    (which === 'ios' ? 'border-gold text-gold' : 'border-line text-muted hover:text-ink');
-  document.getElementById('tabAndroidBtn').className = 'flex-1 text-xs font-medium py-1.5 rounded-md border transition ' +
-    (which === 'android' ? 'border-gold text-gold' : 'border-line text-muted hover:text-ink');
+  $('locStepsIos').classList.toggle('hide', which !== 'ios');
+  $('locStepsAndroid').classList.toggle('hide', which !== 'android');
+  $('tabIosBtn').classList.toggle('btn-primary', which === 'ios');
+  $('tabAndroidBtn').classList.toggle('btn-primary', which === 'android');
+}
+function toggleLocHelp() {
+  const box = $('locHelp');
+  const willShow = box.classList.contains('hide');
+  box.classList.toggle('hide', !willShow);
+  if (willShow) showLocTab(detectPlatform());
 }
 
-// On a weak signal, GPS (enableHighAccuracy) can take forever or time out.
-// Network-based location (enableHighAccuracy: false) uses cell towers/WiFi
-// instead of satellites — it's less precise but comes back much faster and
-// works even with a poor connection. A generous timeout and a retry button
-// cover the rest.
-function fetchLocation(timeoutMs) {
-  const statusEl = document.getElementById('locStatus');
-  const retryBtn = document.getElementById('retryLocBtn');
-  const helpBox = document.getElementById('locHelp');
-  retryBtn.style.display = 'none';
-  helpBox.classList.add('hidden');
-  const timeout = (typeof timeoutMs === 'number') ? timeoutMs : 30000;
+/* ---------- presence indicator ---------- */
+function setPresence(state, text, sub) {
+  // state: busy | ok | bad | warn
+  const box = $('presence');
+  box.className = 'presence ' + state;
+  $('presenceIcon').textContent = state === 'ok' ? '✓' : state === 'bad' ? '✕' : state === 'warn' ? '!' : '…';
+  $('presenceText').textContent = text;
+  $('presenceSub').innerHTML = sub || '';
+}
 
+/* ---------- GPS ----------
+   enableHighAccuracy + maximumAge:0 = sirf taaza aur precise fix liya jaata
+   hai. Purani (cached) location se attendance mark karna proxy ka darwaza tha.
+   Weak signal ke liye ek network-based fix bhi try kiya jaata hai. */
+let coords = null;   // { lat, lng, accuracy }
+let locBusy = false;
+
+function getPosition(options, timeoutMs) {
   return new Promise((resolve) => {
-    if (!navigator.geolocation) {
-      statusEl.textContent = '📍 Location not supported on this browser';
-      retryBtn.style.display = 'inline-block';
-      resolve(null);
-      return;
-    }
-    statusEl.textContent = '📍 Fetching location... (this can take a bit on a weak connection)';
+    if (!navigator.geolocation) { resolve({ ok: false, reason: 'unsupported' }); return; }
+    let done = false;
+    const timer = setTimeout(() => {
+      if (!done) { done = true; resolve({ ok: false, reason: 'timeout' }); }
+    }, timeoutMs + 900);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        statusEl.textContent = '📍 Location captured ✓';
-        resolve(coords);
+        if (done) return;
+        done = true; clearTimeout(timer);
+        // `fix_at` (pos.timestamp) server ko batata hai ki ye reading abhi ki
+        // hai — purana/cached fix bhej kar attendance banane ka rasta band
+        // (server 45 sec se purana fix reject karta hai).
+        resolve({
+          ok: true,
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy, // meters — server isko bhi check karta hai
+          fix_at: pos.timestamp || Date.now(),
+        });
       },
       (err) => {
-        retryBtn.style.display = 'inline-block';
-        if (err.code === 1 /* PERMISSION_DENIED */) {
-          statusEl.textContent = '📍 Location access is blocked for this site.';
-          helpBox.classList.remove('hidden');
-          showLocTab(detectPlatform());
-        } else {
-          statusEl.textContent = '📍 Could not get location (' + (err.message || 'timed out') + '). Tap retry, or move somewhere with better signal.';
-        }
-        resolve(null);
+        if (done) return;
+        done = true; clearTimeout(timer);
+        resolve({ ok: false, reason: err.code === 1 ? 'denied' : 'error' });
       },
-      { enableHighAccuracy: false, timeout: timeout, maximumAge: 60000 }
+      options
     );
   });
 }
 
+async function fetchLocation(opts) {
+  opts = opts || {};
+  if (locBusy) return coords;
+  locBusy = true;
+
+  if (opts.force) coords = null;
+  $('retryLocBtn').disabled = true;
+  setPresence('busy', 'Location check ho rahi hai…', 'GPS fix ka intezaar…');
+
+  // Attempt 1: precise GPS · 2: faster network based fix · 3: precise GPS again
+  const tries = [
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
+    { enableHighAccuracy: false, timeout: 12000, maximumAge: 0 },
+    { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 },
+  ];
+
+  let fix = { ok: false };
+  for (const options of tries) {
+    fix = await getPosition(options, options.timeout);
+    if (fix.ok) break;
+    if (fix.reason === 'denied' || fix.reason === 'unsupported') break; // retrying won't help
+  }
+
+  locBusy = false;
+  $('retryLocBtn').disabled = false;
+
+  if (!fix.ok) {
+    coords = null;
+    const denied = fix.reason === 'denied';
+    setPresence(
+      'bad',
+      denied ? 'Location permission band hai' : 'Location nahi mil paayi',
+      denied
+        ? 'Browser settings me location allow karein, phir “Get location again”.'
+        : 'Window/darwaze ke paas jayein ya bahar nikle, phir “Get location again”.'
+    );
+    if (denied) toggleLocHelp();
+    return null;
+  }
+
+  coords = { lat: fix.lat, lng: fix.lng, accuracy: Math.round(fix.accuracy), fix_at: fix.fix_at || Date.now() };
+  setPresence(
+    'warn',
+    'Location mil gayi — class ke andar hone ka check submit par hoga',
+    `GPS accuracy ≈ ${coords.accuracy} m · server submit par verify karega.`
+  );
+  return coords;
+}
+
+// Pehli load par khud hi ek fix lene ki koshish (student ko extra tap na karna pade).
 fetchLocation();
 
-document.getElementById('rollNo').addEventListener('input', () => {
-  const nameField = document.getElementById('studentName');
-  const classField = document.getElementById('className');
-  const majorField = document.getElementById('majorSubject');
-  nameField.readOnly = false;
-  nameField.classList.remove('opacity-70', 'cursor-not-allowed');
-  classField.disabled = false;
-  classField.classList.remove('opacity-70', 'cursor-not-allowed');
-  majorField.disabled = false;
-  majorField.classList.remove('opacity-70', 'cursor-not-allowed');
+/* ---------- roll number → roster auto-fill + lock ---------- */
+$('rollNo').addEventListener('input', () => {
+  // Naya roll number type karte waqt fields dobara editable ho jaate hain.
+  const nameField = $('studentName'), classField = $('className'), majorField = $('majorSubject');
+  nameField.readOnly = false; nameField.style.opacity = '';
+  classField.disabled = false; classField.style.opacity = '';
+  majorField.disabled = false; majorField.style.opacity = '';
+  $('rollHint').textContent = 'Roll number daalte hi naam/class roster se apne aap bhar jayega.';
 });
 
-document.getElementById('rollNo').addEventListener('blur', async () => {
-  const roll_no = document.getElementById('rollNo').value.trim();
-  const nameField = document.getElementById('studentName');
-  const classField = document.getElementById('className');
-  const majorField = document.getElementById('majorSubject');
+$('rollNo').addEventListener('blur', async () => {
+  const roll_no = $('rollNo').value.trim();
   if (!roll_no) return;
   try {
     const res = await fetch('/api/student/lookup-name?roll_no=' + encodeURIComponent(roll_no));
     const data = await res.json();
 
     if (data.name) {
-      // Roster match — name is locked, can't be edited (server ignores any
-      // client-sent name for a known roll number anyway; this just makes
-      // that visible so students don't wonder why their edit didn't stick).
+      const nameField = $('studentName');
       nameField.value = data.name;
       nameField.readOnly = true;
-      nameField.classList.add('opacity-70', 'cursor-not-allowed');
-      nameField.title = 'Name is locked to your roll number. Ask your teacher if this needs to change.';
-    } else {
-      nameField.readOnly = false;
-      nameField.classList.remove('opacity-70', 'cursor-not-allowed');
-      nameField.title = '';
+      nameField.style.opacity = '0.75';
+      $('rollHint').textContent = '✓ Naam roster se lock hai. Badalna ho to teacher se kahein.';
     }
-
     if (data.class_name) {
-      classField.value = data.class_name;
-      classField.disabled = true;
-      classField.classList.add('opacity-70', 'cursor-not-allowed');
-      classField.title = 'Class is locked to your roll number. Ask your teacher if this needs to change.';
-    } else {
-      classField.disabled = false;
-      classField.classList.remove('opacity-70', 'cursor-not-allowed');
-      classField.title = '';
+      const f = $('className');
+      f.value = data.class_name;
+      f.disabled = true;
+      f.style.opacity = '0.75';
     }
-
     if (data.major_subject) {
-      majorField.value = data.major_subject;
-      majorField.disabled = true;
-      majorField.classList.add('opacity-70', 'cursor-not-allowed');
-      majorField.title = 'Major subject is locked to your roll number. Ask your teacher if this needs to change.';
-    } else {
-      majorField.disabled = false;
-      majorField.classList.remove('opacity-70', 'cursor-not-allowed');
-      majorField.title = '';
+      const f = $('majorSubject');
+      f.value = data.major_subject;
+      f.disabled = true;
+      f.style.opacity = '0.75';
     }
-  } catch (err) {}
+  } catch (err) { /* offline — form manually bhara ja sakta hai */ }
 });
 
-// ---------------------------------------------------------------------
-// Reliability layer: retry on flaky connections, and queue offline so a
-// dropped connection never means lost attendance.
-// ---------------------------------------------------------------------
-const QUEUE_KEY = 'attendance_offline_queue';
+// "Check my percentage" ka roll number form se sync rehta hai.
+$('rollNo').addEventListener('input', () => {
+  if (!$('myRollNo').value) $('myRollNo').value = $('rollNo').value;
+});
 
-function getQueue() {
-  try { return JSON.parse(localStorage.getItem(QUEUE_KEY)) || []; } catch (e) { return []; }
-}
-function saveQueue(q) {
-  try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch (e) {}
-  updateQueueStatus();
-}
-function updateQueueStatus() {
-  const q = getQueue();
-  const el = document.getElementById('queueStatus');
-  el.innerHTML = q.length
-    ? `<div class="rounded-lg border border-golddim/50 bg-golddim/10 text-[#e8c468] text-sm px-3.5 py-3">⏳ ${q.length} attendance ${q.length === 1 ? 'entry' : 'entries'} waiting to send — will submit automatically once you're back online.</div>`
-    : '';
+/* ---------- payload + validation ---------- */
+function gatherPayload() {
+  return {
+    roll_no: $('rollNo').value.trim(),
+    name: $('studentName').value.trim(),
+    class_name: $('className').value.trim(),
+    system: (document.querySelector('input[name="system"]:checked') || {}).value || '',
+    subject: $('subject').value.trim(),
+    course_type: $('courseType').value.trim(),
+    major_subject: $('majorSubject').value.trim(),
+    code: $('code').value.trim(),
+  };
 }
 
-// One attempt: sends the request, retrying a couple of times on pure
-// network failure (no response at all — e.g. connection drops mid-request).
-// A response that came back — success or a real error like "already marked"
-// — is never retried, since retrying won't change that outcome.
+function validatePayload(p) {
+  if (!/^[0-9]{5}$/.test(p.code)) return 'Code exactly 5 digit ka hona chahiye.';
+  if (!/^[0-9]+$/.test(p.roll_no)) return 'Roll number me sirf digits hone chahiye.';
+  if (!p.name) return 'Apna naam likhein (pehli baar zaroori hai).';
+  if (!p.class_name) return 'Apni class chunein.';
+  if (!p.system) return 'Annual ya Semester chunein.';
+  if (!p.subject) return 'Subject chunein.';
+  if (!p.course_type) return 'Course type chunein.';
+  return null;
+}
+
+/* ---------- confirm modal ---------- */
+function openConfirm() {
+  const p = gatherPayload();
+  const problem = validatePayload(p);
+  if (problem) {
+    toast(problem, 'err');
+    $('topAlert').innerHTML = `<div class="alert alert-err"><span class="ico">✕</span><div>${esc(problem)}</div></div>`;
+    return;
+  }
+  $('topAlert').innerHTML = '';
+
+  $('confirmSummary').innerHTML = [
+    ['Roll Number', p.roll_no],
+    ['Name', p.name],
+    ['Class', p.class_name],
+    ['System', p.system],
+    ['Subject', p.subject],
+    ['Course Type', p.course_type],
+    ['Major Subject', p.major_subject || '—'],
+    ['Code', p.code],
+  ].map(([k, v]) => `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>`).join('');
+
+  $('confirmErr').classList.add('hide');
+  $('confirmLoc').innerHTML = coords
+    ? `<div class="presence warn"><div class="ring">!</div><div><div class="txt">GPS fix ready</div><div class="sub">Accuracy ≈ ${esc(coords.accuracy)} m · submit par server class ke andar hone ki check karega</div></div></div>`
+    : `<div class="presence bad"><div class="ring">✕</div><div><div class="txt">Location abhi nahi mili</div><div class="sub">Submit dabane par hum ek baar phir koshish karenge.</div></div></div>`;
+
+  openModal('confirmModal');
+}
+function closeConfirm() { closeModal('confirmModal'); }
+
+/* ---------- one-time location token (server geofence proof) ----------
+   Server pehle location verify karta hai, tab hi ek single-use token deta hai.
+   Attendance usi token ke saath save hoti hai — isliye DevTools me coords
+   badal kar, ya request copy karke, kisi bahar wale ke liye mark karna possible
+   nahi rehta. */
+async function requestLocationToken(p, fix) {
+  try {
+    const res = await fetch('/api/student/location-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_id,
+        code: p.code,
+        class_name: p.class_name,
+        subject: p.subject,
+        course_type: p.course_type,
+        system: p.system,
+        lat: fix.lat,
+        lng: fix.lng,
+        accuracy: fix.accuracy,
+        // Server in dono ko verify karta hai: fix taaza hona chahiye, aur
+        // phone ki taraf se koi "automation" hint nahi hona chahiye.
+        fix_timestamp: fix.fix_at || Date.now(),
+        client_flags: clientHintFlags(),
+      }),
+    });
+    const data = await res.json().catch(() => ({ error: 'Server se jawab samajh nahi aaya.' }));
+    return { ok: res.ok && data.success === true, data };
+  } catch (err) {
+    return { ok: false, data: { offline: true, error: 'internet' } };
+  }
+}
+
+// Ek attempt: request bhejta hai, aur sirf pure network failure par dobara try
+// karta hai (real error jaise "already marked" dobara bhejne se badalta nahi).
 async function attemptSubmit(payload, retries) {
   for (let i = 0; i <= retries; i++) {
     try {
       const res = await fetch('/api/student/mark-attendance', {
         method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(payload)
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({ error: 'Server se jawab samajh nahi aaya.' }));
       return { reached: true, data };
     } catch (err) {
-      if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1))); // backoff: 1s, 2s...
+      if (i < retries) await new Promise((r) => setTimeout(r, 1000 * (i + 1))); // backoff
     }
   }
   return { reached: false };
 }
 
-// Tries to flush anything sitting in the offline queue. Called on load,
-// whenever the browser regains connectivity, and on a slow background timer
-// as a safety net.
-// Rejections (expired code, wrong class, duplicate…) are NOT silently dropped:
-// they are collected and shown to the student, because an entry that looks
-// "saved" but was actually refused would leave them thinking they are present.
+let submitting = false;
+async function confirmSubmit() {
+  if (submitting) return; // double-tap guard
+  const p = gatherPayload();
+  const btn = $('confirmBtn');
+  const errEl = $('confirmErr');
+  const errBox = (msg) => {
+    errEl.innerHTML = `<div class="alert alert-err"><span class="ico">✕</span><div>${esc(msg)}</div></div>`;
+    errEl.classList.remove('hide');
+  };
+
+  submitting = true;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Checking location…';
+  errEl.classList.add('hide');
+
+  try {
+    // 1. Fresh GPS fix (agar pehle nahi mila tha).
+    if (!coords) {
+      btn.innerHTML = '<span class="spinner"></span> Getting location…';
+      await fetchLocation({});
+    }
+    if (!coords) {
+      throw new Error('Location nahi mil paayi. GPS ON karke “Get location again” dabayein, phir submit karein.');
+    }
+
+    // 2. Server-verified one-time token.
+    btn.innerHTML = '<span class="spinner"></span> Verifying you are in class…';
+    const tok = await requestLocationToken(p, coords);
+    if (!tok.ok) {
+      if (tok.data.offline) throw new Error('offline');
+      if (tok.data.reason === 'outside_radius') {
+        setPresence('bad', 'Aap class ke andar nahi hain',
+          `Server ne ~${esc(tok.data.distance_m || '?')} m door bataya (allowed ${esc(tok.data.radius_m || 150)} m). Class me jaakar dobara try karein.`);
+      } else if (['accuracy_too_low', 'no_accuracy', 'no_location'].includes(tok.data.reason)) {
+        setPresence('bad', 'GPS fix kaafi accurate nahi hai', 'Window/darwaze ke paas jaakar “Get location again” dabayein.');
+      }
+      throw new Error(tok.data.error || 'Location verify nahi ho payi.');
+    }
+
+    // 3. Mark attendance using that token.
+    btn.innerHTML = '<span class="spinner"></span> Marking attendance…';
+    let payload = Object.assign({}, p, { device_id, location_token: tok.data.token });
+    let result = await attemptSubmit(payload, 2);
+
+    // Token limited time ke liye hota hai — sirf ek baar, naye token ke saath retry.
+    if (result.reached && !result.data.success && (result.data.reason === 'bad_token' || result.data.reason === 'no_token')) {
+      const fresh = await requestLocationToken(p, coords);
+      if (fresh.ok) {
+        payload = Object.assign({}, p, { device_id, location_token: fresh.data.token });
+        result = await attemptSubmit(payload, 1);
+      }
+    }
+
+    // 4. Server tak pahuncha hi nahi → phone par queue kar do.
+    if (!result.reached) {
+      queueOffline(p, coords);
+      return;
+    }
+
+    if (result.data.success) {
+      closeConfirm();
+      if (result.data.pending) {
+        showResult('warn', 'Location verified — approval pending',
+          'Aap class ke andar the. Teacher ke approve karne par ye count hogi.',
+          [['Roll Number', p.roll_no], ['Name', p.name], ['Subject', p.subject], ['Course Type', p.course_type]]);
+        toast('Location verified — teacher approval ka intezaar', 'warn');
+      } else {
+        showResult('ok', 'Attendance marked!', 'Aapki attendance record ho gayi hai.',
+          [['Roll Number', p.roll_no], ['Name', p.name], ['Class', p.class_name],
+           ['Subject', p.subject], ['Course Type', p.course_type],
+           ['Distance from class', result.data.distance_m != null ? result.data.distance_m + ' m' : '—']]);
+        toast('Attendance mark ho gayi ✓', 'ok');
+      }
+      return;
+    }
+
+    if (result.data.offline) throw new Error('offline');
+    throw new Error(result.data.error || 'Attendance mark nahi ho payi.');
+  } catch (err) {
+    if (String(err.message) === 'offline') {
+      queueOffline(gatherPayload(), coords);
+      return;
+    }
+    errBox(err.message || 'Kuch galat ho gaya. Dobara try karein.');
+    toast(err.message || 'Attendance mark nahi ho payi.', 'err');
+  } finally {
+    submitting = false;
+    btn.disabled = false;
+    btn.textContent = 'Yes, mark me present';
+  }
+}
+
+// Offline: entry phone par rakh do (token nahi — wo single-use aur chhota hai).
+function queueOffline(p, fix) {
+  const q = getQueue();
+  q.push(Object.assign({}, p, {
+    device_id,
+    lat: fix ? fix.lat : null,
+    lng: fix ? fix.lng : null,
+    accuracy: fix ? fix.accuracy : null,
+  }));
+  saveQueue(q);
+  closeConfirm();
+  showResult('warn', 'Internet nahi hai',
+    'Aapki entry is phone par save ho gayi hai. Online aate hi apne aap submit ho jayegi.',
+    [['Roll Number', p.roll_no], ['Subject', p.subject], ['Course Type', p.course_type]]);
+}
+
+/* ---------- result modal ---------- */
+function showResult(kind, title, msg, rows) {
+  const icon = $('resultIcon');
+  icon.className = 'tick' + (kind === 'ok' ? '' : ' warn');
+  icon.textContent = kind === 'ok' ? '✓' : '⏳';
+  $('resultTitle').textContent = title;
+  $('resultMsg').textContent = msg;
+  $('resultDetails').innerHTML = (rows || []).map(([k, v]) => `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>`).join('');
+  openModal('resultModal');
+}
+function closeResult() { closeModal('resultModal'); }
+
+/* =====================================================================
+   Offline queue — a dropped connection must never mean lost attendance.
+   Queue me entry ke saath us waqt ka GPS fix bhi save hota hai, kyunki
+   location token kaam karte waqt hi ban sakta hai (server verify karta hai).
+   ===================================================================== */
+const QUEUE_KEY = 'attendance_offline_queue';
 const FAILED_KEY = 'attendance_failed_queue';
+
+function getQueue() {
+  try { return JSON.parse(localStorage.getItem(QUEUE_KEY)) || []; } catch (e) { return []; }
+}
+function saveQueue(q) {
+  try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q.slice(-10))); } catch (e) {}
+  updateQueueStatus();
+}
+function updateQueueStatus() {
+  const q = getQueue();
+  const el = $('queueStatus');
+  el.innerHTML = q.length
+    ? `<div class="alert alert-warn"><span class="ico">⏳</span><div><strong>${q.length} attendance ${q.length === 1 ? 'entry' : 'entries'} waiting to send.</strong> Internet aate hi apne aap submit ho jayegi — kuch karne ki zaroorat nahi.</div></div>`
+    : '';
+}
 
 function getFailed() {
   try { return JSON.parse(localStorage.getItem(FAILED_KEY)) || []; } catch (e) { return []; }
@@ -459,200 +741,163 @@ function saveFailed(list) {
   try { localStorage.setItem(FAILED_KEY, JSON.stringify(list.slice(-10))); } catch (e) {}
   showFailed();
 }
-function clearFailed() {
-  saveFailed([]);
-}
+function clearFailed() { saveFailed([]); }
 function showFailed() {
-  const el = document.getElementById('failedBox');
-  if (!el) return;
+  const el = $('failedBox');
   const list = getFailed();
+  if (!el) return;
   if (!list.length) { el.innerHTML = ''; return; }
-  const items = list.map((f) =>
-    `<li>${esc(f.subject) || 'Class'}${f.course_type ? ' (' + esc(f.course_type) + ')' : ''} — ${esc(f.error)}</li>`
-  ).join('');
+  const items = list.map((f) => `<li>${esc(f.subject) || 'Class'}${f.course_type ? ' (' + esc(f.course_type) + ')' : ''} — ${esc(f.error)}</li>`).join('');
   el.innerHTML = `
-    <div class="rounded-lg border border-err/50 bg-err/10 text-err text-sm px-3.5 py-3">
-      <div class="font-medium mb-1">✕ ${list.length} saved entr${list.length === 1 ? 'y' : 'ies'} could not be recorded</div>
-      <ul class="list-disc list-inside space-y-0.5">${items}</ul>
-      <div class="text-xs mt-2 text-err/80">These were NOT counted. Ask your teacher to mark you manually if you were present.</div>
-      <button type="button" onclick="clearFailed()" class="mt-2 text-xs font-medium underline">Clear this message</button>
+    <div class="alert alert-err">
+      <span class="ico">✕</span>
+      <div>
+        <strong>${list.length} saved entr${list.length === 1 ? 'y' : 'ies'} count nahi hui.</strong>
+        <ul style="margin:6px 0 0; padding-left:18px;">${items}</ul>
+        <div class="tiny mt-1" style="opacity:.85;">Agar aap class me the, teacher se manually mark karwayein.</div>
+        <button type="button" class="btn btn-sm btn-ghost mt-2" onclick="clearFailed()">Ye message hatao</button>
+      </div>
     </div>`;
 }
 
 let flushing = false;
 async function flushQueue() {
   if (flushing) return;
-  flushing = true;
   const q = getQueue();
+  if (!q.length) return;
+  flushing = true;
+
   const remaining = [];
   const failures = [];
-  for (const payload of q) {
-    const result = await attemptSubmit(payload, 1);
-    if (!result.reached) {
-      remaining.push(payload); // still offline — keep it queued
+
+  for (const item of q) {
+    if (item.lat == null || item.lng == null || item.accuracy == null) {
+      failures.push({ subject: item.subject, course_type: item.course_type, error: 'Us waqt location nahi mili thi — ab class me jaakar dobara submit karein.' });
       continue;
     }
-    if (result.data.success || (result.data.error && result.data.error.toLowerCase().includes('already marked'))) {
-      // Delivered (or turns out it was already recorded) — drop from queue either way
+    // Queue replay bhi wahi do-step flow use karta hai: token → mark.
+    const tok = await requestLocationToken(item, { lat: item.lat, lng: item.lng, accuracy: item.accuracy });
+    if (!tok.ok && tok.data.offline) { remaining.push(item); continue; } // abhi bhi offline
+    if (!tok.ok) {
+      failures.push({ subject: item.subject, course_type: item.course_type, error: tok.data.error || 'Location verify nahi hui (code expire ho gaya?).' });
       continue;
     }
-    console.warn('Queued attendance rejected:', result.data.error);
-    failures.push({
-      subject: payload.subject,
-      course_type: payload.course_type,
-      error: result.data.error || 'Rejected by the server.',
-    });
+    const res = await attemptSubmit(Object.assign({}, item, { location_token: tok.data.token }), 1);
+    if (!res.reached) { remaining.push(item); continue; }
+    if (res.data.success) continue;
+    if (res.data.error && res.data.error.toLowerCase().includes('already marked')) continue; // already counted
+    failures.push({ subject: item.subject, course_type: item.course_type, error: res.data.error || 'Server ne reject kiya.' });
   }
+
   if (failures.length) saveFailed(getFailed().concat(failures));
   saveQueue(remaining);
   flushing = false;
+  if (!remaining.length && !failures.length) toast('Waiting entries submit ho gayi ✓', 'ok');
 }
+
 window.addEventListener('online', flushQueue);
-setInterval(flushQueue, 20000); // safety-net retry every 20s in case the 'online' event doesn't fire
+setInterval(flushQueue, 25000); // safety net, agar 'online' event na aaye
+
+/* =====================================================================
+   My attendance (subject-wise %)
+   ===================================================================== */
+async function checkMyAttendance() {
+  const roll_no = $('myRollNo').value.trim();
+  const system = $('mySystem').value;
+  const msgDiv = $('myAttMsg');
+  const resDiv = $('myAttResult');
+  const btn = $('myAttBtn');
+  resDiv.innerHTML = '';
+
+  if (!/^[0-9]+$/.test(roll_no)) {
+    msgDiv.innerHTML = '<div class="alert alert-err"><span class="ico">✕</span><div>Roll number sirf digits me likhein.</div></div>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Checking…';
+  msgDiv.innerHTML = '';
+  try {
+    const params = new URLSearchParams({ roll_no, system, device_id });
+    const res = await fetch('/api/student/my-attendance?' + params.toString());
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      msgDiv.innerHTML = `<div class="alert alert-err"><span class="ico">✕</span><div>${esc(data.error || 'Attendance load nahi ho payi.')}</div></div>`;
+      return;
+    }
+    if (!data.subjects || !data.subjects.length) {
+      msgDiv.innerHTML = `<div class="alert alert-warn"><span class="ico">ℹ️</span><div>Last ${esc(data.window_days || 180)} din me is roll number ki koi attendance nahi mili.</div></div>`;
+      return;
+    }
+
+    const rows = data.subjects.map((s) => {
+      const pct = Number(s.pct) || 0;
+      const tone = pct >= 75 ? 'var(--ok)' : pct >= 60 ? 'var(--warn)' : 'var(--err)';
+      return `
+        <div class="rec">
+          <div class="top">
+            <div>
+              <div class="nm">${esc(s.subject)}</div>
+              <div class="meta">${esc(s.course_type)} · ${esc(s.class_name)} · ${s.attended} of ${s.held} classes</div>
+            </div>
+            <div class="bold" style="color:${tone}; font-size:1.05rem;">${pct}%</div>
+          </div>
+          <div class="progress mt-2"><i style="width:${Math.min(100, pct)}%; background:${tone};"></i></div>
+        </div>`;
+    }).join('');
+
+    const overallTone = data.overall_pct >= 75 ? 'text-ok' : 'text-err';
+    resDiv.innerHTML = `
+      <div class="card" style="box-shadow:none;">
+        <div class="row between">
+          <div>
+            <div class="bold">${esc(data.name) || 'Roll No ' + esc(data.roll_no)}</div>
+            <div class="muted fs-sm">${esc(data.class_name)} · ${esc(data.from_date)} → ${esc(data.to_date)}</div>
+          </div>
+          <div class="stat-value bold ${overallTone}" style="font-size:1.5rem;">${data.overall_pct}%</div>
+        </div>
+        <div class="progress mt-2"><i style="width:${Math.min(100, Number(data.overall_pct) || 0)}%;"></i></div>
+        <div class="muted fs-xs mt-1">Total ${data.total_attended} attended / ${data.total_held} held. 75% usually minimum hota hai.</div>
+      </div>
+      ${rows}`;
+
+    if (data.pending_count) {
+      msgDiv.innerHTML = `<div class="alert alert-warn"><span class="ico">⏳</span><div><strong>${data.pending_count} mark approval pending hai</strong> — teacher approve karega tab percentage me judega.</div></div>`;
+    } else {
+      msgDiv.innerHTML = '';
+    }
+  } catch (err) {
+    msgDiv.innerHTML = '<div class="alert alert-err"><span class="ico">✕</span><div>Internet nahi hai. Dobara try karein.</div></div>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Check attendance';
+  }
+}
+
+/* =====================================================================
+   Startup
+   ===================================================================== */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
 updateQueueStatus();
 showFailed();
 flushQueue();
 
-// ---- My attendance (subject-wise percentage) ----
-async function checkMyAttendance() {
-  const roll_no = document.getElementById('myRollNo').value.trim();
-  const system = document.getElementById('mySystem').value;
-  const msgDiv = document.getElementById('myAttMsg');
-  const resDiv = document.getElementById('myAttResult');
-  const btn = document.getElementById('myAttBtn');
-  resDiv.innerHTML = '';
-
-  if (!/^[0-9]+$/.test(roll_no)) {
-    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Enter your roll number (digits only).</div>';
-    return;
-  }
-
-  btn.disabled = true;
-  msgDiv.innerHTML = '<div class="text-sm text-muted">Checking...</div>';
-  try {
-    const params = new URLSearchParams({ roll_no, system, device_id });
-    const res = await fetch('/api/student/my-attendance?' + params.toString());
-    const data = await res.json();
-    if (!res.ok) {
-      msgDiv.innerHTML = `<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ ${esc(data.error || 'Could not load your attendance.')}</div>`;
-      return;
-    }
-    msgDiv.innerHTML = '';
-    if (!data.subjects || !data.subjects.length) {
-      resDiv.innerHTML = `<div class="rounded-lg border border-golddim/50 bg-golddim/10 text-[#e8c468] text-sm px-3.5 py-3">No attendance found for this roll number in the last ${data.window_days} days.</div>`;
-      return;
-    }
-
-    const rows = data.subjects.map((s) => `
-      <div class="flex items-center justify-between gap-3">
-        <div>
-          <div class="text-sm text-ink font-medium">${esc(s.subject)}</div>
-          <div class="text-xs text-muted">${esc(s.course_type)} · ${s.attended} of ${s.held} classes</div>
-        </div>
-        <div class="text-sm font-semibold ${s.pct >= 75 ? 'text-ok' : 'text-err'}">${s.pct}%</div>
-      </div>`).join('');
-
-    resDiv.innerHTML = `
-      <div class="rounded-lg border border-line bg-surface2 px-3.5 py-3 flex items-center justify-between">
-        <div>
-          <div class="text-sm text-ink font-medium">${esc(data.name) || 'Roll No ' + esc(data.roll_no)}</div>
-          <div class="text-xs text-muted">${esc(data.class_name)} · ${data.from_date} to ${data.to_date}</div>
-        </div>
-        <div class="text-lg font-serif font-semibold ${data.overall_pct >= 75 ? 'text-ok' : 'text-err'}">${data.overall_pct}%</div>
-      </div>
-      <div class="space-y-2 pt-1">${rows}</div>
-      <p class="text-xs text-muted">Percentage = classes attended ÷ classes held (${data.total_attended} of ${data.total_held}). 75% is usually the minimum required.</p>`;
-  } catch (err) {
-    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ No internet connection. Try again.</div>';
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-// ---- Pre-submit validation + confirm modal ----
-function gatherPayload() {
-  return {
-    roll_no: document.getElementById('rollNo').value.trim(),
-    name: document.getElementById('studentName').value.trim(),
-    class_name: document.getElementById('className').value.trim(),
-    system: (document.querySelector('input[name="system"]:checked') || {}).value || '',
-    subject: document.getElementById('subject').value.trim(),
-    course_type: document.getElementById('courseType').value.trim(),
-    major_subject: document.getElementById('majorSubject').value.trim(),
-    code: document.getElementById('code').value.trim(),
-  };
-}
-
-function openConfirm() {
-  const p = gatherPayload();
-  const msgDiv = document.getElementById('message');
-  msgDiv.innerHTML = '';
-
-  if (!/^[0-9]+$/.test(p.roll_no)) {
-    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Roll number must contain digits only.</div>';
-    return;
-  }
-  if (!p.class_name || !p.system || !p.subject || !p.course_type) {
-    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Please fill all required fields (including Annual / Semester).</div>';
-    return;
-  }
-  if (!/^[0-9]{5}$/.test(p.code)) {
-    msgDiv.innerHTML = '<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ Code must be exactly 5 digits.</div>';
-    return;
-  }
-
-  const summary = document.getElementById('confirmSummary');
-  summary.innerHTML = `
-    <div class="flex justify-between"><span class="text-muted">Roll No</span><span class="font-medium text-ink">${esc(p.roll_no)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Name</span><span class="font-medium text-ink">${esc(p.name) || '—'}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Class</span><span class="font-medium text-ink">${esc(p.class_name)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">System</span><span class="font-medium text-ink">${esc(p.system)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Subject</span><span class="font-medium text-ink">${esc(p.subject)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Course Type</span><span class="font-medium text-ink">${esc(p.course_type)}</span></div>
-    <div class="flex justify-between"><span class="text-muted">Code</span><span class="font-medium text-ink">${esc(p.code)}</span></div>
-  `;
-  document.getElementById('confirmModal').classList.remove('hidden');
-}
-function closeConfirm() {
-  document.getElementById('confirmModal').classList.add('hidden');
-}
-
-async function confirmSubmit() {
-  closeConfirm();
-  const p = gatherPayload();
-  const msgDiv = document.getElementById('message');
-  const btn = document.getElementById('submitBtn');
-
-  // No coords yet? Give location one quick last try (8s, not the full 30s).
-  // Whatever happens, the request is sent — the server decides what to do.
-  if (!coords) {
-    btn.disabled = true;
-    btn.textContent = 'Checking location...';
-    await fetchLocation(8000);
-  }
-
-  btn.disabled = true;
-  btn.textContent = 'Submitting...';
-
-  const payload = Object.assign({}, p, { device_id, lat: coords ? coords.lat : null, lng: coords ? coords.lng : null });
-  const result = await attemptSubmit(payload, 2); // try up to 3 times total before giving up on a live send
-
-  if (result.reached) {
-    if (result.data.success) {
-      msgDiv.innerHTML = `<div class="rounded-lg border border-ok/40 bg-ok/10 text-ok text-sm px-3.5 py-3">✅ ${result.data.message}</div>`;
-    } else {
-      msgDiv.innerHTML = `<div class="rounded-lg border border-err/40 bg-err/10 text-err text-sm px-3.5 py-3">✕ ${esc(result.data.error)}</div>`;
-    }
-  } else {
-    const q = getQueue();
-    q.push(payload);
-    saveQueue(q);
-    msgDiv.innerHTML = '<div class="rounded-lg border border-golddim/50 bg-golddim/10 text-[#e8c468] text-sm px-3.5 py-3">📴 No internet connection right now. Your attendance has been saved on this phone and will be submitted automatically the moment you\'re back online — no need to do anything else.</div>';
-  }
-
-  btn.disabled = false;
-  btn.textContent = 'Mark Attendance';
-}
+// Radius server se dikhaya jaata hai (jo actually enforce hota hai, wahi UI me bhi).
+fetch('/api/health').then((r) => r.json()).then((h) => {
+  const r = h && h.anti_proxy && h.anti_proxy.radius_meters;
+  if (r) $('radiusChip').textContent = `📍 Radius ${r} m`;
+}).catch(() => {});
 </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
