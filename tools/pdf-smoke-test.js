@@ -28,7 +28,9 @@ const COLLEGE = "Government Degree College, Rampur";
 const TEACHER = "Dr. R. K. Sharma";
 const END_DATE = "2026-09-25"; // reports ki aakhri IST date (deterministic output)
 const GENERATED_AT = Date.parse("2026-09-25T04:39:00.000Z"); // 10:09 IST
-const MIN_PDF_BYTES = 20000; // sanity gate: itni chhoti PDF ka matlab kuch draw nahi hua
+// Sanity floor: isse chhoti PDF ka matlab drawing skip ho gayi (byte-size
+// content par depend karta hai, isliye asli regression test page-count hai).
+const MIN_PDF_BYTES = 2500;
 
 // Deterministic pseudo-random (LCG) — har run me bilkul same data banta hai,
 // isliye byte-size/page-count compare karna aasan rehta hai.
@@ -146,8 +148,11 @@ function countPdfPages(buffer) {
 }
 
 // Ek artefact likhne + record karne ka ek hi rasta.
+// maxPages: layout/pagination regression pakadne ke liye upper bound
+// (bug tha: footer page-margin ke bahar draw hone se har page ke baad ek extra
+// khaali page ban jata tha — 30-row register 6 page ki ban jati thi).
 const results = [];
-function reportArtefact(filePath, buffer, kind, expectBig) {
+function reportArtefact(filePath, buffer, kind, maxPages) {
   fs.writeFileSync(filePath, buffer);
   const relative = path.relative(path.join(__dirname, ".."), filePath).replace(/\\/g, "/");
   results.push({
@@ -155,7 +160,7 @@ function reportArtefact(filePath, buffer, kind, expectBig) {
     bytes: buffer.length,
     pages: kind === "pdf" ? countPdfPages(buffer) : 0,
     isPdf: kind === "pdf",
-    expectBig: Boolean(expectBig),
+    maxPages: Number(maxPages) || null,
   });
   return buffer;
 }
@@ -202,13 +207,13 @@ async function main() {
   check(reports.formatIstTime(GENERATED_AT) === "10:09", `IST time should be 10:09, got ${reports.formatIstTime(GENERATED_AT)}`);
   check(reports.formatIstDate(GENERATED_AT) === "2026-09-25", `IST date wrong: ${reports.formatIstDate(GENERATED_AT)}`);
 
-  // ---- (a) session PDF: 30 marks (3 flagged + 2 pending) ----
+  // ---- (a) session PDF: 30 marks (3 flagged + 2 pending) ---- (bug se pehle 6 page)
   reportArtefact(path.join(TMP_DIR, "session-with-marks.pdf"),
-    await reports.buildSessionPdfBuffer(session, sessionRecords, opts), "pdf", true);
+    await reports.buildSessionPdfBuffer(session, sessionRecords, opts), "pdf", 3);
 
   // ---- (b) session PDF: 0 records (empty state: header + zero KPI + note box) ----
   reportArtefact(path.join(TMP_DIR, "session-empty.pdf"),
-    await reports.buildSessionPdfBuffer(session, [], opts), "pdf", false);
+    await reports.buildSessionPdfBuffer(session, [], opts), "pdf", 2);
 
   // ---- (c) overall GRID variant: 30 dates x 40 students ----
   const gridDates = lastNDates(30, END_DATE);
@@ -218,7 +223,7 @@ async function main() {
     await reports.buildOverallReportPdfBuffer({
       class_name: "BA 1st", subject: "Mathematics", course_type: "DSC", system: "Semester",
       dates: gridDates, classDays: gridHeld.filter(Boolean).length, collegeName: COLLEGE, generatedAt: GENERATED_AT,
-    }, gridRows, opts), "pdf", true);
+    }, gridRows, opts), "pdf", 4);
 
   // ---- (d) overall SUMMARY variant: 365 dates x 120 students (> 45 din => summary + % bars) ----
   const yearDates = lastNDates(365, END_DATE);
@@ -228,7 +233,7 @@ async function main() {
     await reports.buildOverallReportPdfBuffer({
       class_name: "BA 1st", subject: "Mathematics", course_type: "DSC", system: "Annual",
       dates: yearDates, classDays: yearHeld.filter(Boolean).length, collegeName: COLLEGE, generatedAt: GENERATED_AT,
-    }, yearRows, opts), "pdf", true);
+    }, yearRows, opts), "pdf", 8);
 
   // ---- (e) student report: 6 subjects, pehla subject < 75% (warning box test) ----
   const student = {
@@ -237,7 +242,7 @@ async function main() {
   };
   const subjectRows = buildStudentSubjects();
   reportArtefact(path.join(TMP_DIR, "student-report.pdf"),
-    await reports.buildStudentReportPdfBuffer({ class_name: "BA 1st", dates: gridDates }, student, subjectRows, opts), "pdf", true);
+    await reports.buildStudentReportPdfBuffer({ class_name: "BA 1st", dates: gridDates }, student, subjectRows, opts), "pdf", 2);
 
   // ---- (f) email HTML body: analytics + risk rows + worst-10 students ----
   const worstTen = gridRows.slice().sort((a, b) => a.pct - b.pct).slice(0, 10);
@@ -291,9 +296,15 @@ async function main() {
       failures++;
       console.log(`  FAIL: ${item.file} has 0 pages (PDF khali lagti hai).`);
     }
-    if (item.isPdf && item.expectBig && item.bytes < MIN_PDF_BYTES) {
+    // Bahut chhoti PDF = drawing skip ho gayi (sanity floor, 2.5 KB).
+    if (item.isPdf && item.bytes < MIN_PDF_BYTES) {
       failures++;
       console.log(`  FAIL: ${item.file} is only ${item.bytes} bytes (< ${MIN_PDF_BYTES}) — drawing skip ho gayi lagti hai.`);
+    }
+    // Pagination regression: expected se zyada pages = layout bug (extra khaali pages).
+    if (item.isPdf && item.maxPages && item.pages > item.maxPages) {
+      failures++;
+      console.log(`  FAIL: ${item.file} has ${item.pages} pages (expected <= ${item.maxPages}) — pagination bug.`);
     }
   }
   const pdfCount = results.filter((item) => item.isPdf).length;

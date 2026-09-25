@@ -445,6 +445,7 @@ $('rollNo').addEventListener('input', () => {
   nameField.readOnly = false; nameField.style.opacity = '';
   classField.disabled = false; classField.style.opacity = '';
   majorField.disabled = false; majorField.style.opacity = '';
+  if ($('studentEmail')) { $('studentEmail').readOnly = false; $('studentEmail').style.opacity = ''; }
   $('rollHint').textContent = 'Roll number daalte hi naam/class roster se apne aap bhar jayega.';
 });
 
@@ -474,6 +475,13 @@ $('rollNo').addEventListener('blur', async () => {
       f.disabled = true;
       f.style.opacity = '0.75';
     }
+    if (data.email && $('studentEmail')) {
+      // Email ek baar save hone ke baad locked rehta hai (naam/class ki tarah).
+      const f = $('studentEmail');
+      f.value = data.email;
+      f.readOnly = true;
+      f.style.opacity = '0.75';
+    }
   } catch (err) { /* offline — form manually bhara ja sakta hai */ }
 });
 
@@ -481,6 +489,18 @@ $('rollNo').addEventListener('blur', async () => {
 $('rollNo').addEventListener('input', () => {
   if (!$('myRollNo').value) $('myRollNo').value = $('rollNo').value;
 });
+
+/* ---------- advisory anti-proxy hints ----------
+   Ye flags sirf SERVER ko batate hain ki kuch gadbad ho sakti hai (server in
+   par bharosa nahi karta, sirf flag lagata hai). DevTools ya automation se
+   page chalane ka signal sabse pehla pakad: navigator.webdriver. */
+function clientHintFlags() {
+  const flags = [];
+  try {
+    if (navigator.webdriver === true) flags.push('webdriver');
+  } catch (e) { /* ignore */ }
+  return flags;
+}
 
 /* ---------- payload + validation ---------- */
 function gatherPayload() {
@@ -493,6 +513,10 @@ function gatherPayload() {
     course_type: $('courseType').value.trim(),
     major_subject: $('majorSubject').value.trim(),
     code: $('code').value.trim(),
+    // Optional: student ka email (report yahan jayega). Na ho to server
+    // DEFAULT email par report bhej deta hai.
+    email: $('studentEmail') ? $('studentEmail').value.trim() : '',
+    client_flags: clientHintFlags(),
   };
 }
 

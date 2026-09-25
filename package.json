@@ -4,7 +4,11 @@
   "description": "College attendance system with rotating code",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test:pdf": "node tools/pdf-smoke-test.js",
+    "test:boot": "node tools/boot-smoke-test.js",
+    "verify:pages": "node tools/verify-pages.js",
+    "verify": "node tools/verify-pages.js && node tools/pdf-smoke-test.js && node tools/boot-smoke-test.js"
   },
   "dependencies": {
     "express": "^4.19.2",
