@@ -51,6 +51,8 @@ Minimum env vars (Render → Environment tab):
 | `GEOFENCE_STRICT_CIRCLE` | distance + accuracy ≤ radius (poora uncertainty circle andar) | `true` |
 | `LOCATION_TOKEN_TTL_SEC` | One-time location token ki life | 150 |
 | `BLOCK_AUTOMATION` | DevTools/selenium/puppeteer/curl se mark **block** | `true` |
+| `LOCATION_ATTEMPTS_ALLOWED` | GPS proof na milne par student ko itni koshish (tab tak mark save nahi hota) | `5` |
+| `ATTENDANCE_RETENTION_DAYS` | Attendance data kitne din rakhein | `90` |
 | `AUTO_REVIEW_FLAGGED` | Flag wali entry pending (smart approval ka hissa) | `true` |
 | `SMART_APPROVAL_DEFAULT` | Naya session Smart approval me khule (verified = seedha present, fail/flag = pending) | `true` |
 | `ALLOW_TEACHER_LOCATION_OFF` | Teacher page se location check OFF karne ki permission (false = hamesha ON, server control) | `true` |
@@ -83,6 +85,14 @@ Minimum env vars (Render → Environment tab):
 Isliye normal din me 60 bacchon par tap nahi karna padta — sirf jinki genuinely dikkat hui unhi ko approve karna hota hai.
 **Cheating signals alag hain:** fake/mock location aur automation (devtools) ab bhi seedha **BLOCK** hote hain (pending nahi bante) — aur teacher ki list me reason ke saath dikhte hain.
 
+### 5 GPS koshish ka rule (teacher ki list bharne se bachne ke liye)
+- Student submit dabata hai, GPS nahi mila → **mark SAVE NAHI hota**, aur teacher ki list me **kuch nahi jata**.
+- Student ko saaf message: **"Location nahi mili — koshish 2/5"** + tips (GPS ON karein, window/darwaze ke paas jaakar 20–30 sec rukein, phir "Get location again").
+- Ye rule **server par** lagta hai (`LOCATION_ATTEMPTS_ALLOWED`, default 5) — client se bypass nahi ho sakta (direct API call bhi attempts se pehle reject hoti hai).
+- Attempts **per subject/session** ginte hain: Subject A me 3 fail hone se Subject B ki koshish khatam nahi hoti.
+- **Poori 5 koshish ke baad** hi entry teacher ke paas (pending / "Location/net fail hue students" list) jati hai.
+- **Auto-confirm:** baad me student sahi GPS se dobara try kare to usi pending entry ko server **apne aap PRESENT** kar deta hai + uske failure rows "resolved" — teacher ko approve karne ki zaroorat nahi.
+
 ### Weak net / purane phone (Android 12+) ke liye
 - GPS timeouts **8s + 6s + 12s** (pehle 20+12+25 = 57 second tak latak sakta tha).
 - Pehli koshish taaza fix, retries me **25 second tak ka cached fix** (server 45s tak maanta hai) → weak net par turant.
@@ -105,12 +115,18 @@ Poori class ko ek saath approve karne ki zaroorat nahi; "Approve all" confirm di
 
 | Data | Kitne din tak | Variable |
 |---|---|---|
-| Attendance marks | **400 din** (365-din report se lamba, warna annual report adhoori) | `ATTENDANCE_RETENTION_DAYS` |
+| Attendance marks | **90 din** | `ATTENDANCE_RETENTION_DAYS` |
 | Student ki identity (naam, class, major subject, **email**) | **365 din (12 mahine)** — **rolling** | `STUDENT_RETENTION_DAYS` |
 | Device ↔ roll binding | **365 din (12 mahine)** — rolling | `DEVICE_LOCK_RETENTION_DAYS` |
 | Teacher audit log | **730 din (2 saal)** | `AUDIT_RETENTION_DAYS` |
 | Code sessions (ActiveCode) | 90 din | (code me fix) |
 | Location tokens | 30 minute | (code me fix) |
+
+> ⚠️ **Retention badalne se pehle backup:** 90 din se purana data MongoDB ~60 second me delete kar deta hai (irreversible). Backup ke liye ek baar chala lein:
+> ```powershell
+> $env:MONGODB_URI="mongodb+srv://..."; node tools/backup-attendance.js
+> ```
+> Ye poori `attendances` collection ka CSV `backups/` folder me likh deta hai (Excel me khulti hai).
 
 **Rolling ka matlab:** jab bhi us roll number par activity hoti hai (attendance mark, name lookup, my-attendance, roster upload) uska 12-mahine ka timer **reset** ho jata hai. Isliye regular padhne wale students ka data kabhi delete nahi hota — sirf **12 mahine se bilkul inactive** records MongoDB khud hata deta hai (TTL index).
 
@@ -118,20 +134,19 @@ Purane documents jisme TTL field nahi hai, unhe startup par **backfill** kar diy
 
 ---
 
-## 4. MongoDB capacity — 500 students × 5 classes roz (365 din)
+## 4. MongoDB capacity — 500 students × 5 classes roz (90 din retention)
 
 | Hisaab | Value |
 |---|---|
 | Marks per din | 500 × 5 = **2,500** |
-| Marks per saal | **9,12,500** |
-| 1 record ka size (roll, naam, subject, course, session, lat/lng, accuracy, distance, flags, status, ip) | ~380–450 bytes |
-| 1 saal ka data | **~350–400 MB** |
-| Indexes (unique 6-field + TTL + spread indexes) | **~200–250 MB** |
-| **Total ~1 saal baad** | **~550–650 MB** |
+| Marks per 90 din | **~2,25,000** |
+| 1 record ka size | ~380–450 bytes |
+| Data (90 din) | **~90–100 MB** |
+| Indexes (unique + TTL + spread) | **~60–70 MB** |
+| **Total ~90 din me (steady state)** | **~150–170 MB** |
 
-- ❌ **Atlas M0 (FREE, 512 MB)** me ye 7–9 mahine me full ho jayega — full hone par **writes fail** hoti hain (yahi asli "data side crash" ban sakta hai).
-- ✅ **Atlas M2 (2 GB)** ya **M5 (5 GB)** par 400-din retention (= ~9–10 lakh docs) aaram se chalta hai.
-- 400-din steady state = ~1M docs ≈ **500–600 MB**, isliye M2 minimum rakhein.
+- ✅ **Atlas FREE M0 (512 MB) me ye aaram se fit ho jata hai** — M2/M5 par paisa kharch karne ki zaroorat nahi.
+- Purane 365/180-din wale report windows ab nahi hain: **Annual = 30 din, Semester = 90 din** (retention ke andar).
 - **Live numbers** kahan dekhein:
   - `GET /api/health?storage=1` → used MB, data MB, index MB, avg doc size, docs/day.
   - Teacher page → **⚙️ Data & Alerts → "Data policy & storage"** → used %, **days left estimate** aur **projected full date**.
@@ -168,7 +183,12 @@ Kaun-kaun se email jate hain:
 ## 6. Reports, PDF aur CSV
 
 - **Session PDF** (automatic + manual): college header band, session info strip, KPI tiles (marked/confirmed/pending/flagged/avg accuracy/devices), **10-minute marks ka bar chart**, student table (distance, accuracy, status, flags) — flagged rows **laal**, pending **amber**, colour-coded status, footer me flag legend + "Page X of Y".
-- **Overall PDF** (365 din / 180 din): 45 din tak **day-by-day P/A grid**, usse zyada din par **summary table + colour-coded % bar** (75% par navy tick), KPI tiles (students, classes held, average %, below-75 count).
+- **Overall PDF — window: Annual = 30 din, Semester = 90 din**
+  - **30-din report:** ek page par **day-by-day grid** — month strip upar (mahina), neeche DD columns, P = hara / A = laal.
+  - **90-din report:** **har mahine ka apna page** (title me poora mahina, e.g. "SEPTEMBER 2026", columns me DD) — 90 columns ek page par fit nahi hote, isliye month-wise pages. Har page ke neeche **"day-wise present"** strip (kis din kitne aaye).
+  - **Aakhir me Summary page:** attended / held / % + colour-coded % bar (75% par navy tick) + **"Absent" count** + **"Absent dates (DD-MM)"** column — yaani seedha likha hota hai baccha kis-kis din nahi aaya (`05-09, 12-09, … +3 more`).
+  - Page count = students × mahine + summary (120 students × 3 mahine ≈ 18–20 page; aam class 40–60 students ≈ 8–10 page) — ye data hai, bug nahi.
+- **Excel matrix CSV** (`Reports tab → "Excel matrix"`): ek row = student, ek column = **date** (P/A), poori window — Excel/Sheets me filter, sort, print sab aaram se.
 - **Student PDF**: overall % bada colour-coded + progress bar, subject-wise table, 75% se kam hone par **warning box** (kitni classes aur chahiye).
 - **Email body bhi HTML analytics** ke saath jati hai (KPI chips, first/last mark, distance range, top risky entries) — sirf "PDF attached" nahi.
 - **CSV export** (Excel/Sheets): `Reports tab / Live tab → Download CSV` ya `GET /api/teacher/export.csv?...` — roll, naam, class, subject, type, system, date, IST time, status, distance, accuracy, flags, device.
@@ -214,7 +234,8 @@ GET    /api/teacher/failures                   → location/net fail hue student
 POST   /api/teacher/failures/ignore            → ek failure entry hata do
 POST   /api/teacher/email-test                 → test email bhejo (default inbox dikhaye bina)
 GET    /api/teacher/reports/overall-download   → PDF
-GET    /api/teacher/export.csv                 → CSV
+GET    /api/teacher/export.csv                 → CSV (ek din ka register)
+GET    /api/teacher/export-matrix.csv          → Excel matrix: row = student, column = DATE (P/A)
 POST   /api/teacher/email-reports              → mode: session | overall | student
 GET    /api/teacher/email-settings | POST | DELETE
 GET    /api/teacher/audit                      → ?limit=50
@@ -257,10 +278,11 @@ Render ka free instance ~15 min idle ke baad sota hai, isliye [cron-job.org](htt
 ## 10. Tools / tests (jo repo me hain)
 
 ```bash
-node tools/approval-logic-test.js # Smart approval logic (verified/fail/flag ke 8 case) + reason texts
-node tools/pdf-smoke-test.js      # 5 sample PDF + email HTML -> tmp/ (page-count regression check)
-node tools/boot-smoke-test.js     # DB ke bina server boot + JSON error handling check
-node tools/verify-pages.js        # teacher.html + student.html: JS syntax, duplicate ids, API paths server se match
+node tools/backup-attendance.js    # purana attendance data ka CSV backup (retention change se pehle!)
+node tools/approval-logic-test.js  # Smart approval logic (verified/fail/flag ke 8 case) + reason texts
+node tools/pdf-smoke-test.js       # PDF checks: session, 30-din grid, 90-din month-grid, 120-din summary, student report
+node tools/boot-smoke-test.js      # DB ke bina server boot + JSON error handling check
+node tools/verify-pages.js         # teacher.html + student.html: JS syntax, duplicate ids, API paths server se match
 ```
 
 `paye3 → `tmp/` folder test output ke liye hai (repo me commit karne ki zaroorat nahi).

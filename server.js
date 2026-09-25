@@ -151,15 +151,24 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const IST_TIMEZONE = "Asia/Kolkata";
 
 // Annual vs Semester system. Each has its own report window.
-const REPORT_DAYS = { Annual: 365, Semester: 180 };
+// (Attendance data ab 90 din tak rehta hai, isliye Semester ka window bhi 90
+// hi hai — warna Semester report adhoori/khali aati.)
+const REPORT_DAYS = { Annual: 30, Semester: 90 };
 // Up to this many days the report shows the day-by-day P/A grid. Longer
 // ranges (Annual/Semester) don't fit on a page as a grid, so they use a
 // compact summary table instead.
 const GRID_MAX_DAYS = 45;
-// Attendance records are auto-deleted after this many days. Must be longer
-// than the longest report window (Annual = 365 days), otherwise the Annual
-// report would silently be missing older data.
-const ATTENDANCE_RETENTION_DAYS = Number(process.env.ATTENDANCE_RETENTION_DAYS) || 400;
+// Attendance records are auto-deleted after this many days. Ab default 90 din
+// hai: 2,500 marks/day x 90 = ~2.25 lakh docs ≈ 170 MB (data+index) — Atlas ke
+// FREE M0 (512 MB) me bhi aaram se fit. Report windows (30/90 din) isi ke andar
+// rehte hain. Purana TTL index boot par khud naya ban jata hai.
+const ATTENDANCE_RETENTION_DAYS = Number(process.env.ATTENDANCE_RETENTION_DAYS) || 90;
+
+// GPS proof na milne par student ko kitni koshish milti hai. Iske andar mark
+// SAVE nahi hota — sirf student ko "Koshish X/5" dikhta hai — taki wo sach me
+// GPS ON karne ki koshish kare. Poori koshishein khatam hone ke BAAD hi entry
+// teacher ke paas (pending/approval) jati hai.
+const LOCATION_ATTEMPTS_ALLOWED = Number(process.env.LOCATION_ATTEMPTS_ALLOWED) || 5;
 
 // -----------------------------------------------------------------------
 // DATA RETENTION (12 mahine wala rule)
@@ -289,6 +298,12 @@ if (!CRON_SECRET) {
   console.warn("         Set CRON_SECRET and add ?secret=... to your cron-job.org URLs to lock them down.");
 }
 
+if (ATTENDANCE_RETENTION_DAYS <= 120) {
+  console.warn(`NOTE: attendance retention ${ATTENDANCE_RETENTION_DAYS} din hai — MongoDB is se purane`);
+  console.warn("      saare marks ~60 second me delete kar dega. Purana data ka backup chahiye to");
+  console.warn("      PEHLE ek baar chala lein:  node tools/backup-attendance.js");
+}
+
 
 if (!MONGODB_URI) {
   console.error("ERROR: MONGODB_URI environment variable is not set.");
@@ -389,6 +404,10 @@ const AuditLog = mongoose.model("AuditLog", auditLogSchema);
 const locationAttemptSchema = new mongoose.Schema({
   device_id: { type: String, required: true },
   date: { type: String, required: true },
+  // Ek din me ek student multiple subjects ke liye try kar sakta hai, isliye
+  // attempts per SESSION (class|subject|course_type) ginte hain — Subject A me
+  // 3 fail hone se Subject B ke koshish khatam nahi hote.
+  session_key: { type: String, default: "" },
   roll_no: { type: String, default: "" },
   student_name: { type: String, default: "" },
   class_name: { type: String, default: "" },
@@ -404,7 +423,7 @@ const locationAttemptSchema = new mongoose.Schema({
   resolved_by: { type: String, default: "" },
   createdAtDate: { type: Date, default: Date.now, expires: 2 * 24 * 60 * 60 },
 });
-locationAttemptSchema.index({ device_id: 1, date: 1 }, { unique: true });
+locationAttemptSchema.index({ device_id: 1, date: 1, session_key: 1 }, { unique: true });
 const LocationAttempt = mongoose.model("LocationAttempt", locationAttemptSchema);
 
 const activeCodeSchema = new mongoose.Schema({
@@ -577,6 +596,28 @@ mongoose.connection.once("open", async () => {
       }
     }
     await Attendance.createIndexes(); // (re)create the current indexes from the schema
+
+    // LocationAttempt: pehle unique index (device_id + date) tha. Ab attempts
+    // per SESSION ginte hain, isliye (device_id + date + session_key) chahiye —
+    // purana index hata do, warna ek din me dusre subject ke attempts clash.
+    try {
+      const attemptIndexes = await LocationAttempt.collection.indexes();
+      for (const idx of attemptIndexes) {
+        const k = idx.key || {};
+        const stale =
+          idx.unique &&
+          k.device_id !== undefined &&
+          k.date !== undefined &&
+          k.session_key === undefined;
+        if (stale) {
+          await LocationAttempt.collection.dropIndex(idx.name);
+          console.log("Dropped stale LocationAttempt index:", idx.name);
+        }
+      }
+    } catch (e) {
+      console.error("LocationAttempt index cleanup failed:", e.message);
+    }
+    await LocationAttempt.createIndexes().catch((e) => console.error("LocationAttempt index create failed:", e.message));
 
     // 12-mahine wala rolling retention (Student + DeviceLock) aur 2-saal ka
     // audit log. Pehli baar chalne par purane documents ka timer aaj se
@@ -1061,27 +1102,48 @@ function decideMarkStatus({ requireApproval, autoReview, locationRequired, locat
   return { status: "present", reason: "" };
 }
 
+// Ek "session" ki pehchaan — attempts isi par ginte hain (class|subject|course).
+function failureSessionKey(class_name, subject, course_type) {
+  return [class_name, subject, course_type].map((v) => String(v || "").trim().toLowerCase()).join("|");
+}
+
+// GPS proof na milne par: mark ko teacher ke paas (pending) jane dena hai ya
+// student ko ek aur koshish deni hai? Ye EK jagah decide hota hai taaki
+// student 1 tap me teacher ki list na bhar de (wahi bug tha).
+function attemptsDecision(attemptsUsed, allowed) {
+  const used = Math.max(0, Number(attemptsUsed) || 0);
+  const limit = Math.max(1, Number(allowed) || LOCATION_ATTEMPTS_ALLOWED);
+  return { allowPending: used >= limit, attemptsLeft: Math.max(0, limit - used) };
+}
+
 // Failed mark attempt ko DB me darj karta hai — teacher ki "location/net fail
 // hue students" list isi se banti hai. Best-effort: yahan dikkat aaye to asli
 // request kabhi na ruke.
 async function recordMarkFailure({ device_id, roll_no, name, class_name, subject, course_type, reason }) {
-  if (!device_id) return;
+  if (!device_id) return 0;
   try {
     const now = Date.now();
     const date = todayDateString();
-    const set = { last_at: now, ignored: false, reason: String(reason || "no_gps").slice(0, 40) };
+    const session_key = failureSessionKey(class_name, subject, course_type);
+    const set = { last_at: now, ignored: false, reason: String(reason || "no_gps").slice(0, 40), session_key };
     if (roll_no) set.roll_no = String(roll_no).slice(0, 30);
     if (name) set.student_name = String(name).slice(0, 80);
     if (class_name) set.class_name = String(class_name).slice(0, 40);
     if (subject) set.subject = String(subject).slice(0, 60);
     if (course_type) set.course_type = String(course_type).slice(0, 20);
-    await LocationAttempt.findOneAndUpdate(
-      { device_id, date },
+    const doc = await LocationAttempt.findOneAndUpdate(
+      { device_id, date, session_key },
       { $set: set, $inc: { count: 1 } },
-      { upsert: true, setDefaultsOnInsert: true }
+      { upsert: true, setDefaultsOnInsert: true, new: true }
     );
+    // Kitni koshish ho gayi — isi se decide hota hai ki mark ab teacher ke paas
+    // jayega ya student ko ek aur koshish milegi.
+    return doc && Number.isFinite(Number(doc.count)) ? Number(doc.count) : 1;
   } catch (e) {
     console.error("recordMarkFailure failed (non-fatal):", e.message);
+    // DB dikkat de rahi ho to student ko block na karo — purana behaviour
+    // (age limit lage hone par teacher ke paas) chalta rahe.
+    return LOCATION_ATTEMPTS_ALLOWED;
   }
 }
 
@@ -2717,6 +2779,23 @@ app.post("/api/student/report-failure", studentLookupLimiter, async (req, res) =
     if (!FAILURE_REASON_TEXT[reason]) {
       return res.status(400).json({ error: "Reason theek nahi hai." });
     }
+    // Bypass rok: "no_gps" bhej kar student seedha teacher ki list me nahi ghus
+    // sakta — pehle us device ko apni koshishein khatam karni padengi. (Warna
+    // 1 tap me teacher ki list bhar jati thi — wahi bug tha.)
+    if (reason === "no_gps") {
+      const key = failureSessionKey(class_name, subject, course_type);
+      const existing = await LocationAttempt.findOne({ device_id, date: todayDateString(), session_key: key }).lean();
+      const used = existing ? Number(existing.count) || 0 : 0;
+      const gate = attemptsDecision(used, LOCATION_ATTEMPTS_ALLOWED);
+      if (!gate.allowPending) {
+        return res.status(403).json({
+          error: `Pehle GPS se koshish karein — koshish ${used}/${LOCATION_ATTEMPTS_ALLOWED}.`,
+          reason: "need_location",
+          attempts_used: used,
+          attempts_left: gate.attemptsLeft,
+        });
+      }
+    }
     await recordMarkFailure({ device_id, roll_no, name, class_name, subject, course_type, reason });
     res.json({
       ok: true,
@@ -3029,9 +3108,11 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
           extraFlags: [...hintFlags, ...clientHints],
         });
       } else {
-        // Proof nahi mili -> flag + teacher ki failure list me entry.
-        location.flags = [...new Set([...clientHints, "no_location_proof"])];
-        await recordMarkFailure({
+        // Proof nahi mili: pehle student ko KOshish karne do — jab tak uske
+        // attempts baaki hain, mark SAVE hi nahi hota (teacher ki list bharne se
+        // pehle student khud GPS ON karke try kare). Poori 5 koshish ke BAAD hi
+        // entry teacher ke paas (pending) jayegi.
+        const attemptsUsed = await recordMarkFailure({
           device_id,
           roll_no: cleanRoll,
           name,
@@ -3040,8 +3121,33 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
           course_type,
           reason: location.reason || "no_gps",
         });
+        const gate = attemptsDecision(attemptsUsed, LOCATION_ATTEMPTS_ALLOWED);
+        if (!gate.allowPending) {
+          return res.status(403).json({
+            error:
+              `Location nahi mili. Koshish ${attemptsUsed}/${LOCATION_ATTEMPTS_ALLOWED} — ` +
+              "phone ka GPS/Location ON karein, window ya darwaze ke paas jaakar 20-30 second rukein, phir \"Get location again\" dabakar dobara try karein.",
+            reason: "need_location",
+            attempts_used: attemptsUsed,
+            attempts_allowed: LOCATION_ATTEMPTS_ALLOWED,
+            attempts_left: gate.attemptsLeft,
+            can_ask_teacher: false,
+          });
+        }
+        // Koshishein khatam -> ab entry teacher ke paas (pending) jayegi.
+        location.flags = [...new Set([...clientHints, "no_location_proof"])];
       }
     }
+
+    // 2. Status ka faisla PEHLE kar lete hain (duplicate/upgrade logic ko chahiye).
+    const decision = decideMarkStatus({
+      requireApproval: activeCode.require_approval === true,
+      autoReview: activeCode.auto_review !== false,
+      locationRequired,
+      locationVerified: location.verified,
+      flags: location.flags,
+    });
+    const status = decision.status;
 
     // 1c. Permanent device lock — a device binds to whichever roll number
     //     first uses it. If it's already bound to a DIFFERENT roll number,
@@ -3059,6 +3165,40 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
     const date = todayDateString();
     const alreadyMarked = await Attendance.findOne({ roll_no: cleanRoll, class_name, subject, course_type, system: systemMatch(system), date });
     if (alreadyMarked) {
+      // UPGRADE: pehle entry "pending" bani thi kyunki location proof nahi mili
+      // thi (GPS fail / net off). Ab student ne sahi GPS ke saath try kiya hai aur
+      // location verify ho gayi — to usi entry ko PRESENT kar do. Isse student ko
+      // dobara mark karne ki zaroorat nahi, aur teacher ko approve karne ki bhi.
+      if (alreadyMarked.status === "pending" && location.verified === true && status === "present") {
+        alreadyMarked.status = "present";
+        alreadyMarked.pending_reason = "";
+        alreadyMarked.location_verified = true;
+        alreadyMarked.lat = location.lat;
+        alreadyMarked.lng = location.lng;
+        alreadyMarked.accuracy = location.accuracy;
+        alreadyMarked.distance_m = location.distance_m;
+        alreadyMarked.flags = location.flags;
+        alreadyMarked.approved_at = now;
+        await alreadyMarked.save();
+        // Uske failure entries bhi "resolved" — teacher ki list saaf.
+        await LocationAttempt.updateMany(
+          { date, roll_no: cleanRoll, resolved_at: { $in: [null, 0] } },
+          { $set: { resolved_at: now, resolved_by: "location-verified" } }
+        ).catch(() => {});
+        audit("attendance.auto-confirm", req, `roll_no=${cleanRoll}`, `${class_name}/${subject}/${course_type} date=${date}`);
+        return res.json({
+          success: true,
+          pending: false,
+          status: "present",
+          confirmed_after_retry: true,
+          location_verified: true,
+          flags: location.flags || [],
+          message: "Location verify ho gayi — aapki attendance CONFIRM ho gayi (teacher approval ki zaroorat nahi).",
+          roll_no,
+          date,
+          distance_m: location.distance_m,
+        });
+      }
       return res.status(409).json({
         error: alreadyMarked.status === "pending"
           ? "Your attendance for this subject and course type is already recorded — it is waiting for your teacher's approval."
@@ -3131,17 +3271,7 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       }
     }
 
-    // 4. Status decide — EK jagah (decideMarkStatus):
-    //    location verified + koi flag nahi => seedha present (teacher ko tap nahi)
-    //    fail / flag / approval-mode        => pending (teacher approve kare)
-    const decision = decideMarkStatus({
-      requireApproval: activeCode.require_approval === true,
-      autoReview: activeCode.auto_review !== false,
-      locationRequired,
-      locationVerified: location.verified,
-      flags: location.flags,
-    });
-    const status = decision.status;
+    // 4. Status decide ho chuka hai (upar) — yahan sirf save karte hain.
     await Attendance.create({
       roll_no: cleanRoll,
       student_name,
@@ -3191,6 +3321,8 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       pending_reason_text: decision.reason ? PENDING_REASON_TEXT[decision.reason] || "" : "",
       location_verified: location.verified === true,
       auto_review: activeCode.auto_review !== false,
+      attempts_allowed: LOCATION_ATTEMPTS_ALLOWED,
+      can_ask_teacher: status === "pending",
       flags: location.flags || [],
       message:
         status === "pending"
@@ -3518,6 +3650,9 @@ app.get("/api/teacher/data-policy", requireTeacherAuth, async (req, res) => {
       device_lock_retention_days: DEVICE_LOCK_RETENTION_DAYS,
       audit_retention_days: AUDIT_RETENTION_DAYS,
       session_retention_days: 90,
+      // Report windows (Annual = 30 din, Semester = 90 din) + GPS attempts.
+      report_windows: { Annual: REPORT_DAYS.Annual, Semester: REPORT_DAYS.Semester },
+      location_attempts_allowed: LOCATION_ATTEMPTS_ALLOWED,
       oldest_attendance_date: oldest && oldest[0] ? oldest[0].date : null,
       storage,
       notes: [
@@ -3803,6 +3938,39 @@ app.get("/api/teacher/export.csv", requireTeacherAuth, async (req, res) => {
   }
 });
 
+// 90-din ka "matrix" CSV: ek row = ek student, ek column = ek DATE (P/A).
+// Excel/Sheets me filter-sort-print sab aaram se hota hai — 90 date columns
+// bhi fit ho jate hain, aur teacher ko har din ka saaf pata chalta hai.
+app.get("/api/teacher/export-matrix.csv", requireTeacherAuth, async (req, res) => {
+  try {
+    const { class_name, subject, course_type } = req.query;
+    if (!class_name || !subject || !course_type) {
+      return res.status(400).json({ error: "class_name, subject and course_type are required." });
+    }
+    const system = normalizeSystem(req.query.system);
+    if (!system) return res.status(400).json({ error: "system must be either Annual or Semester." });
+
+    const dates = lastNDates(REPORT_DAYS[system]);
+    const { rows, classDays } = await buildOverallReportRows(class_name, subject, course_type, system, dates);
+    const header = ["Roll No", "Name", ...dates, "Attended", "Held", "%"];
+    const lines = [header.map(csvCell).join(",")];
+    for (const r of rows) {
+      lines.push(
+        [r.roll_no, r.student_name, ...(r.dayMarks || []), r.totalPresent, classDays, `${r.pct}%`].map(csvCell).join(",")
+      );
+    }
+    const csv = "\uFEFF" + lines.join("\r\n"); // BOM: Excel me headings sahi dikhen
+    const filename = `attendance-matrix-${class_name}-${subject}-${course_type}-${system}.csv`.replace(/[^\w.\-]+/g, "_");
+    audit("report.csv.matrix", req, `${class_name}/${subject}/${course_type}`, `system=${system} days=${dates.length} students=${rows.length}`);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(csv);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Matrix CSV export nahi ho paya." });
+  }
+});
+
 // ---------- CRON / MONITORING ----------
 // Shared guard for the two cron endpoints below. If CRON_SECRET is not set the
 // endpoints behave exactly as before (open), so an existing cron-job.org setup
@@ -3856,6 +4024,8 @@ app.get("/api/health", async (req, res) => {
       device_lock_retention_days: DEVICE_LOCK_RETENTION_DAYS,
       audit_retention_days: AUDIT_RETENTION_DAYS,
       teacher_token_hours: Math.round(TEACHER_TOKEN_TTL_MS / 3600000),
+      report_days: { Annual: REPORT_DAYS.Annual, Semester: REPORT_DAYS.Semester },
+      location_attempts_allowed: LOCATION_ATTEMPTS_ALLOWED,
     },
     email_routing: {
       default_inbox_configured: Boolean(TEACHER_EMAIL),
@@ -3959,6 +4129,7 @@ process.on("uncaughtException", (err) => {
 // pure functions use kar sakta hai. Server ka behaviour isse badalta nahi.
 module.exports = {
   decideMarkStatus,
+  attemptsDecision,
   PENDING_REASON_TEXT,
   FAILURE_REASON_TEXT,
   maskEmail,

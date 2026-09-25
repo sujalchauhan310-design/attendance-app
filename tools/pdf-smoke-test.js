@@ -225,15 +225,30 @@ async function main() {
       dates: gridDates, classDays: gridHeld.filter(Boolean).length, collegeName: COLLEGE, generatedAt: GENERATED_AT,
     }, gridRows, opts), "pdf", 4);
 
-  // ---- (d) overall SUMMARY variant: 365 dates x 120 students (> 45 din => summary + % bars) ----
-  const yearDates = lastNDates(365, END_DATE);
+  // ---- (d) overall MONTH-GRID variant: 90 dates x 120 students (31-92 din =>
+  //      mahine-wise pages + summary page with "Absent dates") ----
+  const yearDates = lastNDates(90, END_DATE);
   const yearHeld = yearDates.map(() => rnd() < 0.72);
   const yearRows = buildOverallRows(students120, yearDates, yearHeld, 0.78);
-  reportArtefact(path.join(TMP_DIR, "overall-summary-365d.pdf"),
+  // NOTE: page count = students x mahine + summary — ye data hai, bug nahi.
+  // 120 students x 3 mahine par ~18-20 page normal hai; 40-60 students (aam
+  // class) par ~8-10 page. Isliye bound 24 rakha hai (layout regression pakadne
+  // ke liye, jaisa pehle footer bug me pages double ho gaye the).
+  reportArtefact(path.join(TMP_DIR, "overall-monthgrid-90d.pdf"),
+    await reports.buildOverallReportPdfBuffer({
+      class_name: "BA 1st", subject: "Mathematics", course_type: "DSC", system: "Semester",
+      dates: yearDates, classDays: yearHeld.filter(Boolean).length, collegeName: COLLEGE, generatedAt: GENERATED_AT,
+    }, yearRows, opts), "pdf", 24);
+
+  // ---- (d2) bahut lamba window (>92 din) => summary table + absent dates ----
+  const longDates = lastNDates(120, END_DATE);
+  const longHeld = longDates.map(() => rnd() < 0.7);
+  const longRows = buildOverallRows(students40, longDates, longHeld, 0.75);
+  reportArtefact(path.join(TMP_DIR, "overall-summary-120d.pdf"),
     await reports.buildOverallReportPdfBuffer({
       class_name: "BA 1st", subject: "Mathematics", course_type: "DSC", system: "Annual",
-      dates: yearDates, classDays: yearHeld.filter(Boolean).length, collegeName: COLLEGE, generatedAt: GENERATED_AT,
-    }, yearRows, opts), "pdf", 8);
+      dates: longDates, classDays: longHeld.filter(Boolean).length, collegeName: COLLEGE, generatedAt: GENERATED_AT,
+    }, longRows, opts), "pdf", 8);
 
   // ---- (e) student report: 6 subjects, pehla subject < 75% (warning box test) ----
   const student = {

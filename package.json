@@ -8,6 +8,7 @@
     "test:pdf": "node tools/pdf-smoke-test.js",
     "test:boot": "node tools/boot-smoke-test.js",
     "test:approval": "node tools/approval-logic-test.js",
+    "backup": "node tools/backup-attendance.js",
     "verify:pages": "node tools/verify-pages.js",
     "verify": "node tools/verify-pages.js && node tools/approval-logic-test.js && node tools/pdf-smoke-test.js && node tools/boot-smoke-test.js"
   },

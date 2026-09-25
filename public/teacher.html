@@ -408,8 +408,10 @@
   <section class="tab-panel" id="panel-reports">
     <div class="card">
       <div class="card-title"><h3>Overall attendance % PDF</h3><span class="chip chip-gold" id="reportComboChip">—</span></div>
-      <p class="card-sub">Har student ka attended ÷ held. Window system par depend karta hai: Annual = 365 din, Semester = 180 din. Sirf counted (approved) marks jaate hain.</p>
+      <p class="card-sub">Har student ka attended ÷ held. Window system par depend karta hai: <strong>Annual = 30 din, Semester = 90 din</strong> (90-din report me har mahine ka alag page + "Absent dates" list — kis din baccha nahi aaya, saaf dikhta hai). Sirf counted (approved) marks jaate hain.</p>
       <button type="button" class="btn btn-primary btn-block" id="reportBtn" onclick="downloadOverallReport()">Download report</button>
+      <button type="button" class="btn btn-ghost btn-block mt-2" id="matrixCsvBtn" onclick="downloadMatrixCsv()">⬇️ Excel matrix (ek row = student, ek column = date)</button>
+      <p class="hint">Excel/Sheets me poori window ki har date ka P/A — filter, sort aur print sab aaram se.</p>
       <div id="reportMsg" class="mt-2"></div>
     </div>
 
@@ -933,6 +935,49 @@ function clearActiveSession() {
   stopLivePoll();
 }
 
+// Excel "matrix" CSV: ek row = student, ek column = date (P/A) — poori window.
+async function downloadMatrixCsv() {
+  const c = getCombo();
+  const msg = $('reportMsg');
+  const btn = $('matrixCsvBtn');
+  if (!c.class_name || !c.subject || !c.course_type) {
+    toast('Pehle class, subject aur course type chunein.', 'warn');
+    return;
+  }
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.innerHTML = '<span class="spinner"></span> Excel file ban rahi hai…';
+  try {
+    const params = new URLSearchParams({
+      class_name: c.class_name, subject: c.subject, course_type: c.course_type, system: c.system,
+    });
+    const res = await teacherFetch('/api/teacher/export-matrix.csv?' + params.toString());
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const error = data.error || 'Matrix CSV nahi ban payi.';
+      if (msg) msg.innerHTML = alertErr(error);
+      toast(error, 'err');
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `attendance-matrix-${c.class_name}-${c.subject}-${c.course_type}-${c.system}.csv`.replace(/\s+/g, '_');
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    if (msg) msg.innerHTML = alertOk('Excel matrix download ho gayi — har date ka P/A uske column me hai.');
+    toast('Excel matrix download ho gayi ✓', 'ok');
+  } catch (err) {
+    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
 // Upar ki selection ko chip me dikhata hai, taaki galti turant pakdi ja sake.
 function updateReportLabel() {
   const c = $('className').value || '—';
@@ -945,9 +990,9 @@ function updateReportLabel() {
   const mailChip = $('mailComboChip');
   if (mailChip) mailChip.textContent = c === '—' ? '—' : label;
   $('reportBtn').textContent = sys === 'Semester'
-    ? 'Download Semester report (180 days)'
+    ? 'Download Semester report (90 days)'
     : sys === 'Annual'
-      ? 'Download Annual report (365 days)'
+      ? 'Download Annual report (30 days)'
       : 'Download report';
 }
 
@@ -1761,7 +1806,7 @@ async function downloadOverallReport() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${c.system === 'Semester' ? 180 : 365}day-report-${c.class_name}-${c.subject}-${c.course_type}-${c.system}.pdf`.replace(/\s+/g, '_');
+    a.download = `${c.system === 'Semester' ? 90 : 30}day-report-${c.class_name}-${c.subject}-${c.course_type}-${c.system}.pdf`.replace(/\s+/g, '_');
     document.body.appendChild(a);
     a.click();
     a.remove();

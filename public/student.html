@@ -174,8 +174,8 @@
     <div class="field">
       <label class="label" for="mySystem">System</label>
       <select id="mySystem" class="select">
-        <option value="Semester">Semester (last 180 days)</option>
-        <option value="Annual">Annual (last 365 days)</option>
+        <option value="Semester">Semester (last 90 days)</option>
+        <option value="Annual">Annual (last 30 days)</option>
       </select>
     </div>
 
@@ -640,6 +640,23 @@ async function confirmSubmit() {
     });
     let result = await attemptSubmit(payload, 2);
 
+    // Server ne kaha "pehle GPS se koshish karo" (Koshish X/5) — matlab mark abhi
+    // SAVE NAHI hua aur teacher ki list me bhi nahi gaya. Student ko yaheen rok
+    // kar saaf batate hain ki kaise theek kare (yehi 5-koshish ka pura maqsad hai).
+    if (result.reached && !result.data.success && result.data.reason === 'need_location') {
+      const used = Number(result.data.attempts_used) || 1;
+      const allowed = Number(result.data.attempts_allowed) || 5;
+      const left = Number(result.data.attempts_left) || Math.max(0, allowed - used);
+      setPresence('bad',
+        `Location nahi mili — koshish ${used}/${allowed}`,
+        `Bachi hui koshish: <strong>${left}</strong>. GPS/Location ON karein, window ya darwaze ke paas jaakar 20-30 second rukein, phir “Get location again” dabakar dobara submit karein.`);
+      errBox(result.data.error || 'Location nahi mili — dobara koshish karein.');
+      toast(`Location nahi mili — koshish ${used}/${allowed}`, 'warn', 9000);
+      coords = null;          // purana (kharab) fix hata do
+      fetchLocation({ force: true }); // peeche-peeche naya fix lene ki koshish
+      return;
+    }
+
     // Purane cached page (token flow) ke liye fallback: server token maange to
     // ek baar token le kar dobara bhej do.
     if (result.reached && !result.data.success && (result.data.reason === 'no_token' || result.data.reason === 'bad_token')) {
@@ -690,11 +707,12 @@ async function confirmSubmit() {
       queueOffline(gatherPayload(), coords);
       return;
     }
-    // Code expire / location wali dikkat → teacher ki "Location/net fail hue
-    // students" list me entry chali jaye (best-effort, student ko kuch nahi dikhta).
+    // Code expire hone par teacher ko pata chal jaye (late student ka case) —
+    // GPS fail ka case ab SERVER khud handle karta hai (5 koshish ke baad), isliye
+    // yahan se koi request nahi bhejte (warna student 1 tap me teacher ki list
+    // bhar dega — wahi bug tha).
     const msg = String(err.message || '');
-    if (/expired|code/i.test(msg)) reportFailureToTeacher('expired_code');
-    else if (/location|GPS/i.test(msg)) reportFailureToTeacher('no_gps');
+    if (/expired/i.test(msg)) reportFailureToTeacher('expired_code');
     errBox(msg || 'Kuch galat ho gaya. Dobara try karein.');
     toast(msg || 'Attendance mark nahi ho payi.', 'err');
   } finally {
