@@ -224,7 +224,29 @@ const REQUIRE_APPROVAL_DEFAULT = boolWithDefault(process.env.REQUIRE_APPROVAL_DE
 // automation) lage to wo mark chup-chaap count nahi hoga — "pending" jayega
 // aur teacher ke approve karne par hi register me judega. Ye ek chhoti class
 // me bhi proxy ko bekaar bana deta hai.
+// Ek bhi anti-proxy flag lage to wo mark chup-chaap count nahi hoga — "pending"
+// jayega aur teacher ke approve karne par hi register me judega.
+//
+// SMART APPROVAL (default): location verified + koi flag nahi => SEEDHA PRESENT
+// (teacher ko tap nahi karna padta). Sirf in cases me pending:
+//   - location proof hi nahi mili (GPS fail / net off)  -> teacher approve kare
+//   - is session me location check OFF tha               -> teacher approve kare
+//   - koi anti-proxy flag laga                            -> teacher review kare
+//   - teacher ne khud "approval mode" ON kiya             -> sab pending
 const AUTO_REVIEW_FLAGGED = boolWithDefault(process.env.AUTO_REVIEW_FLAGGED, true);
+const SMART_APPROVAL_DEFAULT = boolWithDefault(process.env.SMART_APPROVAL_DEFAULT, true);
+
+// Teacher page se location check OFF karne ki permission. Agar aap ise false
+// kar dein to location check server par hamesha ON rahega (purana strict
+// behaviour) — koi teacher browser se ise band nahi kar payega.
+const ALLOW_TEACHER_LOCATION_OFF = boolWithDefault(process.env.ALLOW_TEACHER_LOCATION_OFF, true);
+
+// PDF auto-email ka default (teacher checkbox se per-session badal sakta hai).
+const SEND_PDF_DEFAULT = boolWithDefault(process.env.SEND_PDF_DEFAULT, true);
+
+// Student khud apna report (PDF) download kar sakta hai — by default OPEN hai
+// (roll number daal kar), par rate-limited, aur sirf PDF (koi list/JSON nahi).
+const STUDENT_PDF_OPEN = boolWithDefault(process.env.STUDENT_PDF_OPEN, true);
 
 // Resend sends over HTTPS (not SMTP), so it isn't blocked on Render's free tier
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -360,12 +382,26 @@ const auditLogSchema = new mongoose.Schema({
 auditLogSchema.index({ at: -1 });
 const AuditLog = mongoose.model("AuditLog", auditLogSchema);
 
-// Counts "no location came through" submissions per device per day (stored in
-// the DB so a server restart doesn't reset the count). Auto-deleted after 2 days.
+// Counts failed mark attempts per device per day — ab isme STUDENT ki detail
+// bhi rehti hai (roll_no, naam, ASLI karan), taki teacher ko "kaun fail hua aur
+// kyun" ki list mil sake aur wahin se present mark kar sake.
+// Auto-deleted after 2 days (kal-parso ka bhi dikhta hai).
 const locationAttemptSchema = new mongoose.Schema({
   device_id: { type: String, required: true },
   date: { type: String, required: true },
+  roll_no: { type: String, default: "" },
+  student_name: { type: String, default: "" },
+  class_name: { type: String, default: "" },
+  subject: { type: String, default: "" },
+  course_type: { type: String, default: "" },
+  // no_gps | denied | outside_radius | stale_fix | mock_location | automation |
+  // net_off | expired_code | location_off | bad_fix_time
+  reason: { type: String, default: "" },
   count: { type: Number, default: 0 },
+  last_at: { type: Number, default: 0 },
+  ignored: { type: Boolean, default: false }, // teacher ne "Ignore" dabaya
+  resolved_at: { type: Number, default: 0 }, // teacher ne present mark kar diya
+  resolved_by: { type: String, default: "" },
   createdAtDate: { type: Date, default: Date.now, expires: 2 * 24 * 60 * 60 },
 });
 locationAttemptSchema.index({ device_id: 1, date: 1 }, { unique: true });
@@ -380,6 +416,10 @@ const activeCodeSchema = new mongoose.Schema({
 system: { type: String, enum: ["Annual", "Semester"], default: "Annual" }, // Annual / Semester system
 require_location: {type: Boolean, default: true },
 require_approval: { type: Boolean, default: false }, // teacher approves each mark (highest anti-proxy setting)
+// SMART APPROVAL (default ON): location verified + koi flag nahi => seedha
+// present. Fail/flag wale marks apne aap "pending" hote hain (teacher approve
+// kare) — isliye teacher ko roz 60 bacchon par tap nahi karna padta.
+auto_review: { type: Boolean, default: true },
 send_pdf: { type: Boolean, default: true }, // auto-email attendance PDF 20 min after generation
 pdf_sent: { type: Boolean, default: false }, // prevents sending twice if server restarts
   created_at: Number,
@@ -436,6 +476,11 @@ const attendanceSchema = new mongoose.Schema({
   // "present" = counted. "pending" = location verified but the teacher is using
   // manual-approval mode, so it only counts after the teacher approves it.
   status: { type: String, enum: ["present", "pending"], default: "present" },
+  // Pending hone ka ASLI karan (teacher ko dashboard par dikhta hai):
+  // approval_mode | no_location_proof | location_check_off | flagged
+  pending_reason: { type: String, default: "" },
+  // Server ne is mark ke liye GPS proof verify kiya tha ya nahi.
+  location_verified: { type: Boolean, default: false },
   // Exactly how the server verified presence (kept so a teacher can review and
   // spot anything suspicious later). distance_m/accuracy come from the one-time
   // location token, never straight from the client.
@@ -805,6 +850,37 @@ async function getStorageStats() {
   }
 }
 
+// Email addresses ko screen/API par poora kabhi dikhaye bina mask kar dete hain
+// (default inbox sujal... jaisa personal mail kisi ko nahi dikhna chahiye).
+function maskEmail(address) {
+  const value = String(address || "").trim();
+  const at = value.indexOf("@");
+  if (at <= 0) return value ? "hidden" : "";
+  const name = value.slice(0, at);
+  const domain = value.slice(at);
+  const head = name.slice(0, 1);
+  return `${head}${"*".repeat(Math.max(2, Math.min(6, name.length - 1)))}${domain}`;
+}
+
+function maskEmails(list) {
+  return (Array.isArray(list) ? list : [list]).map((e) => maskEmail(e)).filter(Boolean);
+}
+
+// ETag-free simple IST stamp for short notes ("25-09-2026 10:24").
+function istShortStamp(ms) {
+  try {
+    return new Date(ms).toLocaleString("en-IN", {
+      timeZone: IST_TIMEZONE,
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch (e) {
+    return String(ms);
+  }
+}
+
 // Robots / automation (devtools script, Selenium, Puppeteer, curl) se aayi
 // request. Browser se aane wali normal request me ye pattern nahi hota.
 const AUTOMATION_UA_RE =
@@ -942,6 +1018,71 @@ function readGpsFix(body) {
     };
   }
   return { ok: true, lat, lng, accuracy, distance };
+}
+
+// ---------- MARK STATUS DECISION (pure function — unit-testable) ----------
+// Mark "present" hoga ya "pending", ye EK hi jagah decide hota hai.
+// tools/approval-logic-test.js isi function ko test karta hai.
+const PENDING_REASON_TEXT = {
+  approval_mode: "Approval mode ON — teacher approve karega",
+  no_location_proof: "Location proof nahi mili (GPS fail / net off)",
+  location_check_off: "Is session me location check OFF tha",
+  flagged: "Anti-proxy flag laga — teacher review kare",
+};
+
+// Failure list me teacher ko Hinglish me ASLI karan dikhta hai.
+const FAILURE_REASON_TEXT = {
+  no_gps: "Location nahi mili (GPS band / weak signal)",
+  denied: "Phone me location permission band hai",
+  unsupported: "Is phone/browser me GPS support nahi hai",
+  outside_radius: "Classroom radius se bahar tha",
+  accuracy_too_low: "GPS fix bahut dhundhla tha",
+  no_accuracy: "Phone ne accurate location nahi di",
+  stale_fix: "Purani (cached) location bheji gayi",
+  bad_fix_time: "Phone ka date/time galat set hai",
+  mock_location: "Fake/mock location detect hui",
+  automation_blocked: "DevTools/automation se try kiya",
+  net_off: "Internet nahi tha (offline entry)",
+  expired_code: "Code expire ho gaya tha",
+  location_off: "Session me location check OFF tha",
+};
+
+function decideMarkStatus({ requireApproval, autoReview, locationRequired, locationVerified, flags }) {
+  const activeFlags = Array.isArray(flags) ? flags.filter(Boolean) : [];
+  // 1) Teacher ne khud approval mode ON kiya -> sab pending.
+  if (requireApproval === true) return { status: "pending", reason: "approval_mode" };
+  // 2) Location proof nahi mili (GPS fail / net off / is session me location off tha).
+  if (!locationVerified) {
+    return { status: "pending", reason: locationRequired ? "no_location_proof" : "location_check_off" };
+  }
+  // 3) Smart approval: location verify hui par koi flag laga hai -> pending.
+  if (activeFlags.length && autoReview !== false) return { status: "pending", reason: "flagged" };
+  // 4) Sab theek — seedha present (teacher ko tap nahi karna padta).
+  return { status: "present", reason: "" };
+}
+
+// Failed mark attempt ko DB me darj karta hai — teacher ki "location/net fail
+// hue students" list isi se banti hai. Best-effort: yahan dikkat aaye to asli
+// request kabhi na ruke.
+async function recordMarkFailure({ device_id, roll_no, name, class_name, subject, course_type, reason }) {
+  if (!device_id) return;
+  try {
+    const now = Date.now();
+    const date = todayDateString();
+    const set = { last_at: now, ignored: false, reason: String(reason || "no_gps").slice(0, 40) };
+    if (roll_no) set.roll_no = String(roll_no).slice(0, 30);
+    if (name) set.student_name = String(name).slice(0, 80);
+    if (class_name) set.class_name = String(class_name).slice(0, 40);
+    if (subject) set.subject = String(subject).slice(0, 60);
+    if (course_type) set.course_type = String(course_type).slice(0, 20);
+    await LocationAttempt.findOneAndUpdate(
+      { device_id, date },
+      { $set: set, $inc: { count: 1 } },
+      { upsert: true, setDefaultsOnInsert: true }
+    );
+  } catch (e) {
+    console.error("recordMarkFailure failed (non-fatal):", e.message);
+  }
 }
 
 // Spots patterns that usually mean a faked or shared location. Nothing here
@@ -1654,10 +1795,11 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       return res.status(400).json({ error: "system must be either Annual or Semester" });
     }
 
-    // Location check: when the server is in strict (anti-proxy) mode this cannot
-    // be switched off from the browser at all — only the server owner can relax
-    // it, by setting STRICT_LOCATION=false.
-    const locationOn = STRICT_LOCATION ? true : boolWithDefault(require_location, true);
+    // Location check: teacher ise session ke liye off kar sakta hai — par sirf
+    // tab jab server owner ne allow kiya ho (ALLOW_TEACHER_LOCATION_OFF).
+    // OFF hone par us session ke SAARE marks approval ke liye pending jate hain
+    // (decideMarkStatus), isliye bina proof ke kuch chupke se count nahi hota.
+    const locationOn = ALLOW_TEACHER_LOCATION_OFF ? boolWithDefault(require_location, true) : true;
 
     // Optional shorter code window. A code that dies in 2 minutes is far less
     // useful to a student who is not in the room and got it on WhatsApp.
@@ -1675,7 +1817,8 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       system,
       require_location: locationOn,
       require_approval: boolWithDefault(req.body.require_approval, REQUIRE_APPROVAL_DEFAULT),
-      send_pdf: boolWithDefault(send_pdf, true),                 // on unless explicitly turned off
+      auto_review: boolWithDefault(req.body.auto_review, SMART_APPROVAL_DEFAULT),
+      send_pdf: boolWithDefault(send_pdf, SEND_PDF_DEFAULT), // default ON (env se badal sakte hain)
       created_at: now,
       expires_at: now + expiryMs,
     });
@@ -1685,7 +1828,12 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
     if (session.send_pdf) {
       setTimeout(() => sendAttendancePdfEmail(session._id.toString()), PDF_EMAIL_DELAY_MS);
     }
-    audit("session.generate", req, `${class_name}/${subject}/${course_type}`, `code=${code} system=${system} expiry=${expiryMinutes}m`);
+    audit(
+      "session.generate",
+      req,
+      `${class_name}/${subject}/${course_type}`,
+      `code=${code} system=${system} expiry=${expiryMinutes}m location=${locationOn ? "ON" : "OFF"} smart_approval=${session.auto_review} pdf=${session.send_pdf}`
+    );
     res.json({
       code,
       session_id: session._id.toString(),
@@ -1698,6 +1846,8 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       system,
       require_location: session.require_location,
       require_approval: session.require_approval,
+      auto_review: session.auto_review !== false,
+      allow_location_off: ALLOW_TEACHER_LOCATION_OFF,
       send_pdf: session.send_pdf,
       strict_location: STRICT_LOCATION,
       expiry_options_minutes: CODE_EXPIRY_OPTIONS_MIN,
@@ -1740,6 +1890,9 @@ app.get("/api/teacher/session-status", requireTeacherAuth, async (req, res) => {
       system: session.system || "Annual",
       require_location: session.require_location !== false,
       require_approval: session.require_approval === true,
+      auto_review: session.auto_review !== false,
+      location_off: session.require_location === false,
+      allow_location_off: ALLOW_TEACHER_LOCATION_OFF,
       send_pdf: session.send_pdf !== false,
       created_at: session.created_at,
       expires_at: session.expires_at,
@@ -2284,6 +2437,12 @@ app.post("/api/teacher/attendance/manual-mark", requireTeacherAuth, async (req, 
     res.json({ success: true, marked: true, message: `${student_name} (Roll No ${cleanRoll}) marked present by you for ${day.date}.` });
     audit("attendance.manual-mark", req, `roll_no=${cleanRoll}`, `${class_name}/${subject}/${course_type} date=${day.date}`);
     await touchStudentActivity(cleanRoll);
+    // Is roll ke failure rows "resolved" mark kar do — teacher ki list se hat
+    // jayenge (unka kaam khatam ho gaya).
+    await LocationAttempt.updateMany(
+      { date: day.date, roll_no: cleanRoll, resolved_at: { $in: [null, 0] } },
+      { $set: { resolved_at: now, resolved_by: `teacher:${req.ip || ""}` } }
+    ).catch(() => {});
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong marking attendance manually." });
@@ -2329,6 +2488,68 @@ app.get("/api/teacher/review", requireTeacherAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong loading the review list." });
+  }
+});
+
+// ---------- TEACHER: LOCATION / NET FAILURE LIST ----------
+// Us din ke wo students jinki location verify nahi ho payi (GPS band, net off,
+// radius ke bahar) — teacher yahin se ek tap me present mark kar sakta hai ya
+// ignore kar sakta hai. POORI class ko approve karne ki zaroorat nahi.
+app.get("/api/teacher/failures", requireTeacherAuth, async (req, res) => {
+  try {
+    const day = parseReportDate(req.query.date);
+    if (day.error) return res.status(400).json({ error: day.error });
+    const filter = { date: day.date, ignored: { $ne: true }, resolved_at: { $in: [null, 0] } };
+    if (req.query.class_name) filter.class_name = { $in: [req.query.class_name, ""] };
+
+    const rows = await LocationAttempt.find(filter).sort({ last_at: -1 }).limit(200).lean();
+    const rolls = [...new Set(rows.map((r) => r.roll_no).filter(Boolean))];
+    const marked = rolls.length
+      ? await Attendance.find({ date: day.date, roll_no: { $in: rolls } }).select("roll_no").lean()
+      : [];
+    const markedSet = new Set(marked.map((m) => String(m.roll_no)));
+
+    res.json({
+      ok: true,
+      date: day.date,
+      count: rows.length,
+      failures: rows.map((f) => ({
+        attempt_id: f._id.toString(),
+        roll_no: f.roll_no || "",
+        student_name: f.student_name || "",
+        class_name: f.class_name || "",
+        subject: f.subject || "",
+        course_type: f.course_type || "",
+        reason: f.reason || "no_gps",
+        reason_text: FAILURE_REASON_TEXT[f.reason] || "Location verify nahi ho payi",
+        attempts: f.count || 1,
+        last_at: f.last_at || 0,
+        last_at_hhmm: f.last_at ? istHHMM(f.last_at) : "",
+        device_short: f.device_id ? String(f.device_id).slice(-6) : "",
+        already_marked: f.roll_no ? markedSet.has(String(f.roll_no)) : false,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failure list load nahi hui." });
+  }
+});
+
+// "Ignore" — ye entry teacher ki list se hata do (student ne galti se try kiya
+// ya baad me khud hi mark kar liya).
+app.post("/api/teacher/failures/ignore", requireTeacherAuth, async (req, res) => {
+  try {
+    const { attempt_id } = req.body;
+    if (!attempt_id || !mongoose.Types.ObjectId.isValid(attempt_id)) {
+      return res.status(400).json({ error: "A valid attempt_id is required." });
+    }
+    const updated = await LocationAttempt.findByIdAndUpdate(attempt_id, { $set: { ignored: true } }, { new: true });
+    if (!updated) return res.status(404).json({ error: "Entry nahi mili (shayad 2 din purani ho gayi)." });
+    audit("failure.ignore", req, `id=${attempt_id}`, `roll_no=${updated.roll_no || ""} reason=${updated.reason || ""}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Entry ignore nahi ho payi." });
   }
 });
 
@@ -2481,6 +2702,84 @@ app.get("/api/student/my-attendance", studentLookupLimiter, async (req, res) => 
   }
 });
 
+// ---------- STUDENT: FAILURE REPORT + APNA PDF ----------
+
+// Phone me GPS hi na chale (weak net / purana phone / basement room) to student
+// "Teacher se approve karwao" dabata hai — entry turant teacher ki failure list
+// me chali jati hai aur wahin se ek tap me present mark ho jata hai.
+app.post("/api/student/report-failure", studentLookupLimiter, async (req, res) => {
+  try {
+    const { roll_no, name, class_name, subject, course_type, device_id } = req.body;
+    if (!device_id) {
+      return res.status(400).json({ error: "Device identify nahi hua. Page reload kar ke dobara try karein." });
+    }
+    const reason = String(req.body.reason || "no_gps").slice(0, 40);
+    if (!FAILURE_REASON_TEXT[reason]) {
+      return res.status(400).json({ error: "Reason theek nahi hai." });
+    }
+    await recordMarkFailure({ device_id, roll_no, name, class_name, subject, course_type, reason });
+    res.json({
+      ok: true,
+      message: "Aapki request teacher ke paas pahunch gayi. Wo present mark karenge to attendance count hogi.",
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Request bhejne me dikkat aayi. Dobara try karein." });
+  }
+});
+
+// Student khud apna report (PDF) download kare — roll number daal kar. Ye
+// route rate-limited hai aur SIRF PDF deta hai (koi list/JSON nahi), isliye
+// koi student data ka dump nahi nikal sakta.
+app.get("/api/student/my-report.pdf", studentLookupLimiter, async (req, res) => {
+  try {
+    if (!STUDENT_PDF_OPEN) {
+      return res.status(403).json({ error: "Report download band hai. Apna report teacher se lein." });
+    }
+    const cleanRoll = String(req.query.roll_no || "").trim();
+    if (!/^[0-9]+$/.test(cleanRoll)) {
+      return res.status(400).json({ error: "Roll number me sirf digits chahiye." });
+    }
+    const system = normalizeSystem(req.query.system);
+    if (!system) {
+      return res.status(400).json({ error: "Annual ya Semester chunein." });
+    }
+
+    const student = await Student.findOne({ roll_no: cleanRoll }).lean();
+    const { rows, days, dates } = await collectStudentSubjectRows(cleanRoll, system);
+    if (!rows.length) {
+      return res.status(404).json({
+        error: `Roll No ${cleanRoll} ki last ${days} din me koi attendance nahi mili. Roll number check karein.`,
+      });
+    }
+    const pdf = await buildStudentPdf(
+      {
+        system,
+        days,
+        from_date: dates[0],
+        to_date: dates[dates.length - 1],
+        class_name: student ? student.class_name || "" : "",
+      },
+      {
+        roll_no: cleanRoll,
+        name: student ? student.name : "",
+        class_name: student ? student.class_name || "" : "",
+        major_subject: student ? student.major_subject || "" : "",
+        email: "",
+      },
+      rows
+    );
+    audit("student.report.download", req, `roll_no=${cleanRoll}`, `system=${system} rows=${rows.length}`);
+    const filename = `my-attendance-${cleanRoll}-${system}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(pdf);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Report banane me dikkat aayi. Thodi der baad try karein." });
+  }
+});
+
 // ---------- LOCATION VERIFICATION (step 1 of marking attendance) ----------
 // The student's phone sends its GPS fix here. The server checks that the code is
 // live, that the fix is inside the classroom radius AND that the fix is accurate
@@ -2541,15 +2840,17 @@ app.post("/api/student/location-token", locationTokenLimiter, async (req, res) =
 
     const fix = readGpsFix(req.body);
     if (!fix.ok) {
-      // Best-effort audit: how many times did this device fail to prove it was
-      // in class today? Shown to the teacher in the Review tab.
-      try {
-        await LocationAttempt.findOneAndUpdate(
-          { device_id, date: todayDateString() },
-          { $inc: { count: 1 } },
-          { upsert: true, new: true, setDefaultsOnInsert: true } // createdAtDate default drives the 2-day TTL
-        );
-      } catch (e) { /* audit only — never block the response */ }
+      // Teacher ki failure list ke liye record — roll_no/naam/reason ke saath,
+      // taki teacher ko pata chale "kaun fail hua aur kyun".
+      await recordMarkFailure({
+        device_id,
+        roll_no: req.body.roll_no,
+        name: req.body.name,
+        class_name,
+        subject,
+        course_type,
+        reason: fix.code,
+      });
       return res.status(403).json({ error: fix.error, reason: fix.code, distance_m: Math.round(fix.distance || 0), radius_m: RADIUS_METERS });
     }
 
@@ -2634,64 +2935,112 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       return res.status(400).json({ error: "Incorrect code." });
     }
 
-    // 1b. Location — the anti-proxy core.
-    //     There is deliberately NO fallback any more. To mark attendance the
-    //     phone must present a one-time token from /api/student/location-token,
-    //     which the server issues only after it has itself confirmed a fresh,
-    //     accurate GPS fix inside the classroom radius. A copied request body, a
-    //     script run from home, or hand-edited lat/lng all have no valid token.
-    let location = { lat: null, lng: null, accuracy: null, distance_m: null, flags: [] };
-    if (activeCode.require_location !== false) {
+    // 1b. Location — anti-proxy ka core, par weak-net friendly.
+    //     Do raste chalte hain:
+    //       (a) INLINE FIX (aaj ka default = ek hi request): phone apna GPS fix
+    //           seedha yahin bhejta hai aur SERVER khud verify karta hai
+    //           (radius + accuracy + mock + freshness). Weak net par ek round
+    //           trip bachana bahut bada farak hota hai.
+    //       (b) ONE-TIME TOKEN (purana rasta, backward compatible).
+    //     Location proof na milne par mark REJECT nahi hota — wo PENDING ban
+    //     jata hai aur teacher ke "Location/net fail hue students" card me
+    //     dikhta hai (GPS band / net off / bahar khada tha).
+    //     CHEATING signals alag hain: mock/fake location aur automation (devtools)
+    //     ab bhi seedha BLOCK hote hain.
+    const locationRequired = activeCode.require_location !== false;
+    let location = {
+      lat: null,
+      lng: null,
+      accuracy: null,
+      distance_m: null,
+      verified: false,
+      reason: locationRequired ? "no_gps" : "location_off",
+      flags: [],
+    };
+
+    if (locationRequired) {
+      // (a) page ne token bheja ho to pehle wahi try karo (single-use claim).
       const rawToken = typeof req.body.location_token === "string" ? req.body.location_token.trim() : "";
-      if (!rawToken) {
-        return res.status(403).json({
-          error: "Location verification is required before attendance can be marked. Tap \"Get location again\" and submit once more.",
-          reason: "no_token",
-        });
+      let claim = null;
+      if (rawToken) {
+        claim = await LocationToken.findOneAndUpdate(
+          {
+            token_hash: sha256Hex(rawToken),
+            device_id: String(device_id),
+            session_id: activeCode._id.toString(),
+            code: activeCode.code,
+            used: false,
+            expires_at: { $gt: now },
+          },
+          { used: true },
+          { new: true }
+        );
       }
-      // Claim the token atomically: single-use, and bound to this device, this
-      // session and this exact code, so it cannot be replayed or borrowed.
-      const claim = await LocationToken.findOneAndUpdate(
-        {
-          token_hash: sha256Hex(rawToken),
-          device_id: String(device_id),
-          session_id: activeCode._id.toString(),
-          code: activeCode.code,
-          used: false,
-          expires_at: { $gt: now },
-        },
-        { used: true },
-        { new: true }
-      );
-      if (!claim) {
-        return res.status(403).json({
-          error: "Your location check expired or could not be verified. Tap \"Get location again\" and submit once more.",
-          reason: "bad_token",
-        });
+
+      let fix = null; // verified fix (token se ya inline se)
+      let hintFlags = [];
+      if (claim) {
+        // Token ke andar wahi fix hai jo server ne pehle validate kiya tha —
+        // belt-and-braces: yahan dobara check.
+        const recheck = readGpsFix({ lat: claim.lat, lng: claim.lng, accuracy: claim.accuracy });
+        if (recheck.ok) {
+          fix = { lat: claim.lat, lng: claim.lng, accuracy: claim.accuracy, distance: claim.distance_m };
+          hintFlags = [...(claim.hint_flags || []), ...(claim.automation ? ["automation_suspected"] : [])];
+        } else {
+          location.reason = recheck.code;
+        }
       }
-      // Belt-and-braces: validate the stored fix again against the geofence, so
-      // even a stale or reused token can never smuggle in an out-of-class fix.
-      const recheck = readGpsFix({ lat: claim.lat, lng: claim.lng, accuracy: claim.accuracy });
-      if (!recheck.ok) {
-        return res.status(403).json({ error: recheck.error, reason: recheck.code });
+      // (b) token na ho / invalid ho to inline fix se verify karo.
+      if (!fix) {
+        const inline = readGpsFix(req.body);
+        if (inline.ok) {
+          fix = { lat: inline.lat, lng: inline.lng, accuracy: inline.accuracy, distance: inline.distance };
+        } else {
+          location.reason = inline.code || location.reason;
+          // Mock/fake location aur automation cheating hai, weak-net problem nahi
+          // — inhe seedha block karo (bhejne wale app/devtools ke liye rasta band).
+          if (inline.code === "mock_location") {
+            await recordMarkFailure({ device_id, roll_no: cleanRoll, name, class_name, subject, course_type, reason: "mock_location" });
+            return res.status(403).json({
+              error: inline.error,
+              reason: "mock_location",
+              message: "Aapke teacher ko is koshish ki jaankari dikhegi. Fake location hata kar dobara try karein.",
+            });
+          }
+        }
       }
-      location = {
-        lat: claim.lat,
-        lng: claim.lng,
-        accuracy: claim.accuracy,
-        distance_m: claim.distance_m,
-        flags: await computeAntiProxyFlags({
+
+      if (fix) {
+        location.verified = true;
+        location.reason = "";
+        location.lat = fix.lat;
+        location.lng = fix.lng;
+        location.accuracy = fix.accuracy;
+        location.distance_m = fix.distance === undefined || fix.distance === null ? null : Math.round(fix.distance * 100) / 100;
+        location.flags = await computeAntiProxyFlags({
           sessionId: activeCode._id.toString(),
           device_id: String(device_id),
           roll_no: cleanRoll,
           date: todayDateString(),
-          lat: claim.lat,
-          lng: claim.lng,
-          accuracy: claim.accuracy,
-          // Token ke saath jo hints/automation aaye the + abhi ke client hints.
-          extraFlags: [...(claim.hint_flags || []), ...(claim.automation ? ["automation_suspected"] : []), ...clientHints],
-        }),
-      };
+          lat: fix.lat,
+          lng: fix.lng,
+          accuracy: fix.accuracy,
+          // Token ke hints/automation + abhi ke client hints (advisory).
+          extraFlags: [...hintFlags, ...clientHints],
+        });
+      } else {
+        // Proof nahi mili -> flag + teacher ki failure list me entry.
+        location.flags = [...new Set([...clientHints, "no_location_proof"])];
+        await recordMarkFailure({
+          device_id,
+          roll_no: cleanRoll,
+          name,
+          class_name,
+          subject,
+          course_type,
+          reason: location.reason || "no_gps",
+        });
+      }
     }
 
     // 1c. Permanent device lock — a device binds to whichever roll number
@@ -2782,14 +3131,17 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       }
     }
 
-    // 4. Save attendance. In manual-approval mode the entry is saved as
-    //    "pending" — the location was verified, but a human (the teacher) has the
-    //    final say, so a proxy carrying a friend's phone still cannot slip in.
-    //    AUTO_REVIEW_FLAGGED hone par koi bhi anti-proxy flag wali entry bhi
-    //    apne aap "pending" hoti hai — chupke se proxy nahi nikal sakti.
-    const flagged = (location.flags || []).length > 0;
-    const autoReview = AUTO_REVIEW_FLAGGED && flagged && activeCode.require_approval !== true;
-    const status = activeCode.require_approval === true || autoReview ? "pending" : "present";
+    // 4. Status decide — EK jagah (decideMarkStatus):
+    //    location verified + koi flag nahi => seedha present (teacher ko tap nahi)
+    //    fail / flag / approval-mode        => pending (teacher approve kare)
+    const decision = decideMarkStatus({
+      requireApproval: activeCode.require_approval === true,
+      autoReview: activeCode.auto_review !== false,
+      locationRequired,
+      locationVerified: location.verified,
+      flags: location.flags,
+    });
+    const status = decision.status;
     await Attendance.create({
       roll_no: cleanRoll,
       student_name,
@@ -2803,6 +3155,8 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       marked_at: now,
       device_id,
       status,
+      pending_reason: decision.reason || "",
+      location_verified: location.verified === true,
       lat: location.lat,
       lng: location.lng,
       accuracy: location.accuracy,
@@ -2833,13 +3187,18 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       success: true,
       pending: status === "pending",
       status,
-      auto_review: autoReview,
+      pending_reason: decision.reason || "",
+      pending_reason_text: decision.reason ? PENDING_REASON_TEXT[decision.reason] || "" : "",
+      location_verified: location.verified === true,
+      auto_review: activeCode.auto_review !== false,
       flags: location.flags || [],
       message:
         status === "pending"
-          ? autoReview
-            ? "Location verified, but this entry needs your teacher's review before it counts."
-            : "Location verified — your attendance is waiting for your teacher's approval."
+          ? decision.reason === "approval_mode"
+            ? "Location verified — attendance aapke teacher ke approve karne par count hogi."
+            : decision.reason === "flagged"
+              ? "Aapki entry teacher ke review par hai — thodi der me confirm ho jayegi."
+              : "Aapki entry teacher ke paas chali gayi hai (location verify nahi ho payi). Teacher present mark karega to count hogi."
           : "Attendance marked successfully!",
       roll_no,
       date,
@@ -2887,13 +3246,24 @@ app.get("/api/teacher/session-live", requireTeacherAuth, async (req, res) => {
     const feedFilter = { session_id };
     if (Number.isFinite(sinceMs) && sinceMs > 0) feedFilter.marked_at = { $gt: sinceMs };
 
-    const [feed, pending, marked_count, pending_count, flagged_count, roster_size] = await Promise.all([
+    const [feed, pending, marked_count, pending_count, flagged_count, roster_size, failureRows] = await Promise.all([
       Attendance.find(feedFilter).sort({ marked_at: -1 }).limit(limit).lean(),
       Attendance.find({ session_id, status: "pending" }).sort({ marked_at: -1 }).limit(50).lean(),
       Attendance.countDocuments({ session_id }),
       Attendance.countDocuments({ session_id, status: "pending" }),
       Attendance.countDocuments({ session_id, flags: { $exists: true, $ne: [] } }),
       session.class_name ? Student.countDocuments({ class_name: session.class_name }) : Promise.resolve(0),
+      // WO students jinki location/net fail hui — teacher wahin se "Present
+      // mark karo" kar sakta hai (poori class ko approve karne ki zaroorat nahi).
+      LocationAttempt.find({
+        date: todayDateString(),
+        ignored: { $ne: true },
+        resolved_at: { $in: [null, 0] },
+        ...(session.class_name ? { class_name: { $in: [session.class_name, ""] } } : {}),
+      })
+        .sort({ last_at: -1 })
+        .limit(40)
+        .lean(),
     ]);
 
     // Timeline: last 60 minute (ya session shuru hone se ab tak) ke 10-minute
@@ -2923,12 +3293,29 @@ app.get("/api/teacher/session-live", requireTeacherAuth, async (req, res) => {
       marked_at: m.marked_at,
       marked_at_hhmm: istHHMM(m.marked_at),
       status: m.status || "present",
+      pending_reason: m.pending_reason || "",
+      pending_reason_text: m.pending_reason ? PENDING_REASON_TEXT[m.pending_reason] || "Teacher review chahiye" : "",
       flags: m.flags || [],
+      location_verified: m.location_verified === true,
       distance_m: m.distance_m === null || m.distance_m === undefined ? null : Math.round(m.distance_m),
       accuracy: m.accuracy === null || m.accuracy === undefined ? null : Math.round(m.accuracy),
       source: m.source || "student",
       device_short: m.device_id ? String(m.device_id).slice(-6) : "",
     });
+
+    // Failure list ke rolls me se kaun aaj already mark ho chuka hai (unka kaam
+    // khatam) — unhe "already present" dikhana hai, button dabana nahi.
+    const failureRolls = [...new Set(failureRows.map((f) => f.roll_no).filter(Boolean))];
+    const markedToday = failureRolls.length
+      ? await Attendance.find({
+          date: todayDateString(),
+          roll_no: { $in: failureRolls },
+          ...(session.class_name ? { class_name: session.class_name } : {}),
+        })
+          .select("roll_no")
+          .lean()
+      : [];
+    const markedSet = new Set(markedToday.map((r) => String(r.roll_no)));
 
     res.json({
       ok: true,
@@ -2940,6 +3327,8 @@ app.get("/api/teacher/session-live", requireTeacherAuth, async (req, res) => {
       course_type: session.course_type,
       system: session.system || "Annual",
       require_approval: session.require_approval === true,
+      auto_review: session.auto_review !== false,
+      location_off: session.require_location === false,
       active: now <= session.expires_at,
       seconds_left: Math.max(0, Math.round((session.expires_at - now) / 1000)),
       server_now: now,
@@ -2952,6 +3341,18 @@ app.get("/api/teacher/session-live", requireTeacherAuth, async (req, res) => {
       timeline: buckets.map((b) => ({ label: b.label, count: b.count })),
       marks: feed.map(toFeedRow),
       pending: pending.map(toFeedRow),
+      failures: failureRows.map((f) => ({
+        attempt_id: f._id.toString(),
+        roll_no: f.roll_no || "",
+        student_name: f.student_name || "",
+        reason: f.reason || "no_gps",
+        reason_text: FAILURE_REASON_TEXT[f.reason] || "Location verify nahi ho payi",
+        attempts: f.count || 1,
+        last_at: f.last_at || 0,
+        last_at_hhmm: f.last_at ? istHHMM(f.last_at) : "",
+        device_short: f.device_id ? String(f.device_id).slice(-6) : "",
+        already_marked: f.roll_no ? markedSet.has(String(f.roll_no)) : false,
+      })),
     });
   } catch (err) {
     console.error(err);
@@ -2969,7 +3370,9 @@ app.get("/api/teacher/email-settings", requireTeacherAuth, async (req, res) => {
     const settings = await EmailSetting.find({}).sort({ subject: 1, course_type: 1, class_name: 1 }).lean();
     res.json({
       ok: true,
-      default_email: TEACHER_EMAIL || "",
+      // Default inbox ka ADDRESS kabhi nahi bhejte — sirf ye ki set hai ya nahi.
+      // (Personal Gmail teacher page par dikhna nahi chahiye.)
+      default_inbox_configured: Boolean(TEACHER_EMAIL),
       email_configured: Boolean(resend),
       settings: settings.map((s) => ({
         id: s._id.toString(),
@@ -3049,6 +3452,29 @@ app.delete("/api/teacher/email-settings", requireTeacherAuth, async (req, res) =
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Email mapping delete nahi hui." });
+  }
+});
+
+// "Test email bhejo" — teacher apna address type karke check kar sakta hai ki
+// email setup chal raha hai ya nahi (default inbox ka address dikhane ki
+// zaroorat nahi).
+app.post("/api/teacher/email-test", requireTeacherAuth, async (req, res) => {
+  try {
+    const to = String(req.body.email || "").trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
+      return res.status(400).json({ error: "Sahi email address daalein." });
+    }
+    const sent = await sendReportEmail({
+      to,
+      subject: `${COLLEGE_NAME} — test email`,
+      text: "Ye ek test email hai — aapka attendance app ka email setup sahi chal raha hai. Koi action ki zaroorat nahi.",
+    });
+    audit("email.test", req, maskEmail(to), sent.ok ? "sent" : `failed: ${sent.error}`);
+    if (!sent.ok) return res.status(500).json({ error: sent.error });
+    res.json({ ok: true, message: `Test email bhej diya (${maskEmail(to)}). Inbox/spam dono check karein.` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Test email bhejne me dikkat aayi." });
   }
 });
 
@@ -3180,18 +3606,19 @@ async function emailSessionReportNow(req, session_id) {
       },
     ],
   });
-  audit("report.email.session", req, session_id, `${sent.ok ? "sent" : "failed"}: ${(sent.recipients || []).join(", ")}`);
+  const masked = maskEmails(sent.recipients);
+  audit("report.email.session", req, session_id, `${sent.ok ? "sent" : "failed"}: ${masked.join(", ")}`);
   if (!sent.ok) return { status: 500, body: { error: sent.error } };
   return {
     status: 200,
     body: {
       ok: true,
       sent: true,
-      recipients: sent.recipients,
+      recipients_masked: masked,
       attachments: 1,
       records: records.length,
       source: routing.source,
-      message: `Report emailed to ${sent.recipients.join(", ")} (${routing.source}).`,
+      message: `Report bhej di gayi (${masked.join(", ")}) — ${routing.source === "subject-mapping" ? "subject-wise mapping" : "default inbox"}.`,
     },
   };
 }
@@ -3216,19 +3643,20 @@ async function emailOverallReportNow(req, { class_name, subject, course_type, sy
       },
     ],
   });
-  audit("report.email.overall", req, `${class_name}/${subject}/${course_type}`, `${sent.ok ? "sent" : "failed"}: ${(sent.recipients || []).join(", ")}`);
+  const masked = maskEmails(sent.recipients);
+  audit("report.email.overall", req, `${class_name}/${subject}/${course_type}`, `${sent.ok ? "sent" : "failed"}: ${masked.join(", ")}`);
   if (!sent.ok) return { status: 500, body: { error: sent.error } };
   return {
     status: 200,
     body: {
       ok: true,
       sent: true,
-      recipients: sent.recipients,
+      recipients_masked: masked,
       attachments: 1,
       students: rows.length,
       classes_held: classDays,
       source: routing.source,
-      message: `Overall report emailed to ${sent.recipients.join(", ")} (${routing.source}).`,
+      message: `Overall report bhej di gayi (${masked.join(", ")}).`,
     },
   };
 }
@@ -3258,19 +3686,20 @@ async function emailStudentReportNow(req, { roll_no, system }) {
     text: `${student.name} (Roll No ${cleanRoll}) ka ${days}-din ka attendance: ${rows.map((r) => `${r.subject} ${r.pct}%`).join(", ")}.`,
     attachments: [{ filename: `student-report-${cleanRoll}-${system}.pdf`.replace(/\s+/g, "_"), content: pdf }],
   });
-  audit("report.email.student", req, `roll_no=${cleanRoll}`, `${sent.ok ? "sent" : "failed"}: ${(sent.recipients || []).join(", ")}`);
+  const masked = maskEmails(sent.recipients);
+  audit("report.email.student", req, `roll_no=${cleanRoll}`, `${sent.ok ? "sent" : "failed"}: ${masked.join(", ")}`);
   if (!sent.ok) return { status: 500, body: { error: sent.error } };
   return {
     status: 200,
     body: {
       ok: true,
       sent: true,
-      recipients: sent.recipients,
+      recipients_masked: masked,
       attachments: 1,
       used_student_email: usedStudentEmail,
       message: usedStudentEmail
-        ? `Student ka report ${student.email} par bhej diya.`
-        : `Student ka email saved nahi hai — report DEFAULT email (${sent.recipients.join(", ")}) par bheji gayi.`,
+        ? `Student ka report uske email (${masked.join(", ")}) par bhej diya.`
+        : "Student ka email saved nahi hai — report default inbox par bhej di gayi.",
     },
   };
 }
@@ -3414,6 +3843,11 @@ app.get("/api/health", async (req, res) => {
       max_fix_age_sec: Math.round(MAX_FIX_AGE_MS / 1000),
       block_automation: BLOCK_AUTOMATION,
       auto_review_flagged: AUTO_REVIEW_FLAGGED,
+      // Smart approval + location switch + PDF default + student PDF download.
+      smart_approval_default: SMART_APPROVAL_DEFAULT,
+      allow_teacher_location_off: ALLOW_TEACHER_LOCATION_OFF,
+      send_pdf_default: SEND_PDF_DEFAULT,
+      student_pdf_open: STUDENT_PDF_OPEN,
     },
     // 12-mahine wala retention + token window.
     data_policy: {
@@ -3519,6 +3953,16 @@ process.on("uncaughtException", (err) => {
   // zyada zaroori hai, aur har route apna error khud handle karta hai.
   console.error("Uncaught exception:", (err && err.message) || err);
 });
+
+// ---------- TEST HOOKS ----------
+// tools/approval-logic-test.js (aur koi bhi test) server ko require karke ye
+// pure functions use kar sakta hai. Server ka behaviour isse badalta nahi.
+module.exports = {
+  decideMarkStatus,
+  PENDING_REASON_TEXT,
+  FAILURE_REASON_TEXT,
+  maskEmail,
+};
 
 // ---------- START SERVER ----------
 const PORT = process.env.PORT || 3000;

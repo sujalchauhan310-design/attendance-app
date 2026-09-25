@@ -51,7 +51,11 @@ Minimum env vars (Render → Environment tab):
 | `GEOFENCE_STRICT_CIRCLE` | distance + accuracy ≤ radius (poora uncertainty circle andar) | `true` |
 | `LOCATION_TOKEN_TTL_SEC` | One-time location token ki life | 150 |
 | `BLOCK_AUTOMATION` | DevTools/selenium/puppeteer/curl se mark **block** | `true` |
-| `AUTO_REVIEW_FLAGGED` | Koi bhi flag wali entry **auto-pending** (teacher approve kare tab count) | `true` |
+| `AUTO_REVIEW_FLAGGED` | Flag wali entry pending (smart approval ka hissa) | `true` |
+| `SMART_APPROVAL_DEFAULT` | Naya session Smart approval me khule (verified = seedha present, fail/flag = pending) | `true` |
+| `ALLOW_TEACHER_LOCATION_OFF` | Teacher page se location check OFF karne ki permission (false = hamesha ON, server control) | `true` |
+| `SEND_PDF_DEFAULT` | Naya session PDF auto-email (teacher checkbox se badal sakta hai) | `true` |
+| `STUDENT_PDF_OPEN` | Student khud apna PDF download kar sake (roll number daal kar) | `true` |
 | `REQUIRE_APPROVAL_DEFAULT` | Naya session by default approval mode | `false` |
 | `TEACHER_MAX_FAILED_LOGINS` / `TEACHER_LOCKOUT_MINUTES` | Login brute-force lock | 5 / 15 |
 | `TEACHER_TOKEN_TTL_HOURS` | Login token ki life (password har request me nahi bhejna padta) | 12 |
@@ -66,6 +70,30 @@ Minimum env vars (Render → Environment tab):
 6. **Auto-review**: ek bhi flag (mock, shared coordinates, ek device se dusre roll ki entry, poor accuracy) → entry `pending`, register me count nahi hoti jab tak teacher approve na kare.
 7. **Device ↔ roll binding**: ek phone ek hi roll number par bandh hota hai (teacher dashboard se unlock).
 8. **Audit log**: delete/edit/manual-mark/unlock/code-generate/email-settings sab likha jata hai — "Data & Alerts" tab me dikhta hai.
+
+### Smart approval (default ON) — teacher ka time bachane ke liye
+| Situation | Result |
+|---|---|
+| Location verify hui **aur** koi flag nahi | **Seedha PRESENT** (teacher ko tap nahi karna padta) |
+| Location proof nahi mili (GPS fail / net off / offline queue) | **PENDING** → teacher ki "Location/net fail hue students" list me |
+| Session me location check OFF tha | **PENDING** (koi proof hi nahi hai) |
+| Koi anti-proxy flag laga (shared coordinates, ek device se do roll) | **PENDING** → Review tab |
+| Teacher ne khud "Approval mode" ON kiya | **SAARE** pending |
+
+Isliye normal din me 60 bacchon par tap nahi karna padta — sirf jinki genuinely dikkat hui unhi ko approve karna hota hai.
+**Cheating signals alag hain:** fake/mock location aur automation (devtools) ab bhi seedha **BLOCK** hote hain (pending nahi bante) — aur teacher ki list me reason ke saath dikhte hain.
+
+### Weak net / purane phone (Android 12+) ke liye
+- GPS timeouts **8s + 6s + 12s** (pehle 20+12+25 = 57 second tak latak sakta tha).
+- Pehli koshish taaza fix, retries me **25 second tak ka cached fix** (server 45s tak maanta hai) → weak net par turant.
+- **Ek hi request** me mark (GPS fix seedha `mark-attendance` me; server khud verify karta hai) — do round trips ka jhanjhat khatam.
+- **Google Fonts hata diye** (system fonts) → page weak net par turant khulta hai.
+- Code ka default **7 minute** (2/5/7 options rahenge).
+- GPS/net fail hone par student ka attendance **toot-ta nahi** — entry teacher ke paas pending jati hai, aur student ko saaf message milta hai: *"Teacher present mark karenge to count hogi."*
+
+### Location/net fail hue students ki list (teacher ke liye)
+Teacher page (⚡ Live / 🛡 Review) me har student ke saamne **asli karan** dikhta hai — *"Location nahi mili (GPS band)"*, *"Classroom radius se bahar tha"*, *"Code expire ho gaya tha"*, *"Fake location detect hui"* — aur do buttons: **"✅ Present mark karo"** (teacher ke naam se, audit log me) aur **"Ignore"**.
+Poori class ko ek saath approve karne ki zaroorat nahi; "Approve all" confirm dialogue ke andar hai.
 
 ### Honest limitations (jhooth nahi)
 - Web par **absolute** guarantee nahi hoti: rooted phone + custom GPS app, ya teacher ka password share karna, in par 100% rok nahi lagti. Isliye combo use hota hai: **verified location + device binding + chhota code window + approval mode + audit**.
@@ -126,7 +154,9 @@ Storage bachane ke tips: 400 → 200 din retention (Semester system), ya purane 
 
 - **Sabse specific mapping jeetti hai** (subject + course_type + class > sirf subject). Barabar specific wali sab merge ho jati hain.
 - **Kuch match na ho → DEFAULT email** = `TEACHER_EMAIL`. Isliye ek bhi mapping na banayein to bhi har report teacher ko milti hi rahegi.
-- **Student ka apna email**: roster upload me 5th column (`rollno,name,class,major,email`) ya student page par ek baar bhar dein → us bande ka personal report uske email par jata hai. **Email na ho to report DEFAULT email par** chali jati hai (teacher ko pata chal jata hai).
+- **Student ka apna email**: roster upload me 5th column (`rollno,name,class,major,email`) optional hai — diya ho to us bande ka personal report uske inbox me; **na ho to report DEFAULT inbox** par. Student page par email field **jaan-boojh kar hata diya gaya hai** (niche dekhein: student apna PDF khud download karta hai).
+- **Default inbox kisi ko nahi dikhta**: teacher page par sirf "Default inbox: configured (hidden)" likha aata hai; API bhi address nahi bhejti, aur "Email now" ke reply me bhi address **mask** (`s***@gmail.com`) ho kar jata hai. Verify karne ke liye "Test email bhejo" button hai (apna address type karke).
+- **Student apna report khud download karta hai** — student page → *"Mera report download karo (PDF)"* → roll number + system → PDF turant download (`/api/student/my-report.pdf`). Ye route **rate-limited** hai aur sirf PDF deta hai (koi list/JSON nahi). `STUDENT_PDF_OPEN=false` se band bhi kar sakte hain.
 
 Kaun-kaun se email jate hain:
 1. **Session PDF** — code banne ke 20 minute baad automatically (subject-wise mapping / default).
@@ -150,12 +180,12 @@ Kaun-kaun se email jate hain:
 
 | Tab | Kya kar sakte hain |
 |---|---|
-| ⚡ **Live** | Code generate (2/5/7 min), live countdown, marked/pending/flagged/roster counters, **live feed (5 sec refresh)** — naye marks wahin dikhte hain, pending ko wahin se Approve/Reject, 10-minute activity bars, "Email report now", "Download CSV", End session, approval-mode toggle |
+| ⚡ **Live** | Code generate (2/5/7 min, default 7), live countdown, marked/pending/flagged/roster counters, **live feed (5 sec refresh)**, **🚨 Location/net fail hue students** card (per-student "Present mark karo" / "Ignore" + asli karan), pending ko wahin se Approve/Reject, 10-minute activity bars, "Email report now", "Download CSV", End session, approval-mode toggle, location OFF hone par laal warning |
 | 📋 **Register** | Us din ka register, entry edit/delete, present/absent list (roster ke against) |
-| 👥 **Roster** | Poori class ka roster paste upload (`rollno,name,class,major,email`), manual mark (jinka GPS kaam na kare), device unlock |
+| 👥 **Roster** | Poori class ka roster paste upload (`rollno,name,class,major,email` — email optional), manual mark (jinka GPS kaam na kare), device unlock |
 | 📄 **Reports** | Overall % PDF download + **Email overall** + **Email student** (roll number daalein) + **Download CSV** |
 | 🛡 **Review** | Pending approvals, flagged entries, aur jinke phone se location baar-baar fail hui |
-| ⚙️ **Data & Alerts** | Subject-wise email routing, data policy + storage (kitne din me Mongo full hoga), **audit log** (kisne kab kya badla) |
+| ⚙️ **Data & Alerts** | Subject-wise email routing (+ "Test email bhejo"), data policy + storage (kitne din me Mongo full hoga), **audit log** (kisne kab kya badla) |
 
 ---
 
@@ -179,7 +209,10 @@ POST   /api/teacher/session/set-approval
 DELETE /api/teacher/device-lock
 POST   /api/teacher/upload-roster         → email 5th column (optional)
 GET    /api/teacher/roster
-GET    /api/teacher/review
+GET    /api/teacher/review                     → pending / flagged / location failures
+GET    /api/teacher/failures                   → location/net fail hue students (per-student approve/ignore)
+POST   /api/teacher/failures/ignore            → ek failure entry hata do
+POST   /api/teacher/email-test                 → test email bhejo (default inbox dikhaye bina)
 GET    /api/teacher/reports/overall-download   → PDF
 GET    /api/teacher/export.csv                 → CSV
 POST   /api/teacher/email-reports              → mode: session | overall | student
@@ -191,9 +224,11 @@ GET    /api/teacher/data-policy                → retention + storage projectio
 **Student**
 ```
 GET    /api/student/lookup-name      → naam/class/major/email auto-fill
-POST   /api/student/location-token   → GPS verify → one-time token
-POST   /api/student/mark-attendance  → token ke bina kuch save nahi hota
-GET    /api/student/my-attendance    → sirf usi phone/roll ki subject-wise %
+POST   /api/student/location-token   → GPS verify → one-time token (purana rasta, ab optional)
+POST   /api/student/mark-attendance  → inline GPS fix + code; smart approval ke hisaab se present/pending
+GET    /api/student/my-attendance    → subject-wise % (sirf usi phone/roll ke liye)
+POST   /api/student/report-failure   → "teacher se approve karwao" (GPS/net fail ki entry teacher ke paas)
+GET    /api/student/my-report.pdf    → apna attendance PDF download (roll_no + system)
 ```
 
 **Cron / monitoring**
@@ -222,9 +257,10 @@ Render ka free instance ~15 min idle ke baad sota hai, isliye [cron-job.org](htt
 ## 10. Tools / tests (jo repo me hain)
 
 ```bash
+node tools/approval-logic-test.js # Smart approval logic (verified/fail/flag ke 8 case) + reason texts
 node tools/pdf-smoke-test.js      # 5 sample PDF + email HTML -> tmp/ (page-count regression check)
 node tools/boot-smoke-test.js     # DB ke bina server boot + JSON error handling check
-node tools/verify-teacher-ui.js   # teacher.html: JS syntax, duplicate ids, API paths server se match
+node tools/verify-pages.js        # teacher.html + student.html: JS syntax, duplicate ids, API paths server se match
 ```
 
 `paye3 → `tmp/` folder test output ke liye hai (repo me commit karne ki zaroorat nahi).

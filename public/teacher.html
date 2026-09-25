@@ -141,7 +141,7 @@
 
         <div class="stack" style="gap:10px;">
           <div class="switch-row">
-            <div><div class="t">📍 Location check</div><div class="d" id="locSwitchNote">Anti-proxy lock: server par hamesha ON</div></div>
+            <div><div class="t">📍 Location check</div><div class="d" id="locSwitchNote">ON — server GPS verify karega</div></div>
             <label class="switch"><input type="checkbox" id="requireLocation" checked onchange="saveSelection()"><i></i></label>
           </div>
           <div class="switch-row">
@@ -210,6 +210,12 @@
         <div class="card-title"><h3>Live feed — 5 second refresh</h3><span class="chip" id="livePollState">Idle</span></div>
         <p class="card-sub">Server se har 5 second me naya data: kaun abhi mark hua, kitni entries pending hain, aur kis minute me kitne students aaye. Ye countdown timer se alag chalta hai — code ka waqt isi ke bharose nahi rukta.</p>
 
+        <div class="alert alert-err hide mt-2" id="locOffWarn">
+          <span class="ico">⚠</span>
+          <div><strong>Is session me LOCATION CHECK OFF hai</strong> — koi GPS proof nahi liya ja raha, isliye har mark aapke approve karne par hi count hoga.</div>
+        </div>
+        <div class="muted fs-xs mt-2" id="smartApprovalNote"></div>
+
         <div class="stat-grid">
           <div class="stat"><div class="k">Present</div><div class="v ok" id="liveStatPresent">0</div></div>
           <div class="stat"><div class="k">Pending</div><div class="v warn" id="liveStatPending">0</div></div>
@@ -240,6 +246,14 @@
 
         <div class="card-title"><h3>Pending approval (live)</h3><span class="chip chip-warn" id="livePendingChip">0</span></div>
         <div id="livePendingList" class="rec-list"><div class="muted fs-sm">Abhi koi pending entry nahi.</div></div>
+
+        <div class="divider"></div>
+
+        <!-- Location/net fail hue students — ek-ek ko approve karein, poori class ko nahi -->
+        <div class="card-title"><h3>🚨 Location/net fail hue students</h3><span class="chip chip-err" id="liveFailChip">0</span></div>
+        <p class="card-sub">Jinka GPS/net fail hua (ya code expire ho gaya). Yahan se <strong>Present mark karo</strong> (teacher ke naam se, audit log me) ya <strong>Ignore</strong> — poori class ko approve karne ki zaroorat nahi.</p>
+        <div id="liveFailList" class="rec-list"><div class="muted fs-sm">Abhi koi failure nahi. 👍</div></div>
+        <div id="liveFailMsg" class="mt-2"></div>
 
         <div class="divider"></div>
 
@@ -461,7 +475,7 @@
     <div class="card">
       <div class="card-title"><h3>Email routing (subject-wise)</h3><span class="chip" id="opsEmailCount">0</span></div>
       <p class="card-sub">Report PDF kis subject ke liye kis address par jaayegi. Subject zaroori hai; course type / class khaali chhodne par "sab par lagu" hota hai. Sabse specific match jeetta hai.</p>
-      <div class="alert alert-info"><span class="ico">✉</span><div>Default email: <strong id="opsEmailDefault">—</strong> — mapping na ho to yahan jayega.</div></div>
+      <div class="alert alert-info"><span class="ico">✉</span><div>Default inbox: <strong id="opsEmailDefault">—</strong> — mapping na ho to yahan wo reports jati hain (address privacy ke liye hidden rakha jata hai).</div></div>
 
       <div class="table-wrap only-desktop mt-2">
         <table class="data" id="opsEmailTable">
@@ -498,6 +512,18 @@
         <button type="button" class="btn btn-sm btn-ghost" onclick="loadEmailSettings()">↻ Reload mappings</button>
       </div>
       <div id="opsEmailMsg" class="mt-2"></div>
+
+      <div class="divider"></div>
+
+      <!-- Test email: setup chal raha hai ya nahi — default address dikhaye bina -->
+      <div class="field mb-0">
+        <label class="label" for="mailTestEmail">Test email bhejo <span class="opt">(email setup check karne ke liye)</span></label>
+        <div class="row" style="gap:8px;">
+          <input id="mailTestEmail" class="input grow" type="email" inputmode="email" placeholder="apna@email.com">
+          <button type="button" class="btn btn-sm btn-ghost" id="mailTestBtn" onclick="sendTestEmail()">Bhejo</button>
+        </div>
+      </div>
+      <div id="mailTestMsg" class="mt-2"></div>
     </div>
 
     <!-- data policy -->
@@ -855,6 +881,10 @@ let livePollSince = 0;
 let livePollSessionId = null;
 let livePollMarks = [];
 let livePollBusy = false;
+// Location/net fail hue students ki live list (index-based clicks ke liye) aur
+// active session ki detail (manual mark ke liye).
+let liveFailures = [];
+let liveSessionMeta = null;
 
 function saveSelection() {
   try {
@@ -989,8 +1019,10 @@ async function refreshSessionStatus(sessionId) {
   $('approveAllBtn').classList.toggle('hide', !(data.require_approval && (data.pending_count || 0) > 0));
 
   $('locSwitchNote').textContent = data.require_location
-    ? (data.strict_location ? 'Anti-proxy lock: server par hamesha ON' : 'Is session me ON hai')
-    : 'OFF — proxy ka risk hai!';
+    ? (data.allow_location_off
+        ? 'ON — aap ise OFF kar sakte hain (OFF par saare marks approve par)'
+        : 'ON — server ne lock kiya hai (ALLOW_TEACHER_LOCATION_OFF=false)')
+    : 'OFF — is session ke saare marks aapke approve par count honge';
 
   sessionTotalMs = Math.max(1000, (data.expires_at || 0) - (data.created_at || 0));
   expiryTimestamp = Date.now() + (data.seconds_left || 0) * 1000;
@@ -1220,6 +1252,14 @@ async function approveAllPending() {
     toast('Approve-all session ke hisaab se chalta hai — pehle live code khol lein.', 'warn');
     return;
   }
+  // Confirm: galti se poori class approve na ho jaye (har entry audit me jati hai).
+  const pendingNow = Number((liveEl('liveStatPending') || {}).textContent || 0) || 0;
+  const ok = window.confirm(
+    'Poori class ke pending marks ek saath approve karein?' +
+    (pendingNow ? `\n\nAbhi ${pendingNow} pending entries hain.` : '') +
+    '\n\nTip: sirf un students ko approve karein jinka mark genuinely tha — "🚨 Location/net fail hue students" list me ek-ek ko approve karna better hai.'
+  );
+  if (!ok) return;
   try {
     const res = await teacherFetch('/api/teacher/attendance/approve-all', {
       method: 'POST',
@@ -1989,6 +2029,7 @@ function livePendingRow(p) {
         <div>
           <div class="nm">${esc(p.student_name) || '-'} <span class="muted fs-xs">#${esc(p.roll_no)}</span></div>
           <div class="meta">${esc(p.marked_at_hhmm || '')} · ${dist} from class</div>
+          ${p.pending_reason_text ? `<div class="meta text-warn">❓ ${esc(p.pending_reason_text)}</div>` : ''}
         </div>
         <span class="chip chip-warn">Pending</span>
       </div>
@@ -2048,9 +2089,124 @@ function renderLivePoll(data, onlyNewer) {
       : '<div class="muted fs-sm">Koi pending entry nahi — sab clear hai. 👍</div>';
   }
 
+  // ---- Location OFF warning + smart approval note + failure list ----
+  const offWarn = liveEl('locOffWarn');
+  if (offWarn) offWarn.classList.toggle('hide', !data.location_off);
+  const smartNote = liveEl('smartApprovalNote');
+  if (smartNote) {
+    smartNote.textContent = data.auto_review
+      ? 'Smart approval ON — location verified + koi flag nahi = seedha present; GPS fail / flag = aapke approve par.'
+      : 'Smart approval OFF — sirf tab pending hoga jab aap khud "Approval mode" ON karein.';
+  }
+  liveFailures = Array.isArray(data.failures) ? data.failures : [];
+  liveSessionMeta = {
+    class_name: data.class_name || '',
+    subject: data.subject || '',
+    course_type: data.course_type || '',
+    system: data.system || 'Annual',
+  };
+  setText('liveFailChip', liveFailures.length);
+  const failWrap = liveEl('liveFailList');
+  if (failWrap) {
+    failWrap.innerHTML = liveFailures.length
+      ? liveFailures.map(failRow).join('')
+      : '<div class="muted fs-sm">Koi location/net failure nahi — sab students ka mark lag gaya. 👍</div>';
+  }
+
   setText('livePollUpdated', 'Updated ' + new Date().toLocaleTimeString('en-IN', {
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   }));
+}
+
+// ---- Failure list rows (index par click karte hain — text ko JS string me
+// inject nahi karte, isliye koi naam quotes se nahi todega) ----
+function failRow(f, index) {
+  const roll = esc(String(f.roll_no || '—'));
+  const name = esc(String(f.student_name || ''));
+  const reason = esc(String(f.reason_text || 'Location verify nahi ho payi'));
+  const tries = Number(f.attempts) || 1;
+  const meta = `${tries} baar try · ${esc(String(f.last_at_hhmm || '—'))}${f.device_short ? ' · device ' + esc(String(f.device_short)) : ''}`;
+  const done = f.already_marked === true;
+  return `<div class="rec">
+      <div class="top">
+        <div>
+          <div class="nm">${roll}${name ? ' · ' + name : ''}</div>
+          <div class="meta">${reason} · ${meta}</div>
+        </div>
+        ${done ? '<span class="chip chip-ok">already present</span>' : ''}
+      </div>
+      ${done ? '' : `<div class="acts">
+        <button type="button" class="btn btn-sm btn-ok" onclick="failMarkPresent(${index})">✅ Present mark karo</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="failIgnore(${index})">Ignore</button>
+      </div>`}
+    </div>`;
+}
+
+// "Present mark karo" — teacher ke naam se manual mark (audit log me jata hai),
+// aur us roll ke failure rows server par "resolved" ho jate hain.
+async function failMarkPresent(index) {
+  const f = liveFailures[index];
+  const meta = liveSessionMeta || {};
+  if (!f) { toast('Entry nahi mili — live list refresh karein.', 'warn'); return; }
+  if (!f.roll_no) { toast('Is student ka roll number nahi mila — usse dobara mark karne ko kahein.', 'warn'); return; }
+  if (!meta.class_name || !meta.subject || !meta.course_type) {
+    toast('Session ki detail nahi mili — ⚡ Live tab par code generate/khol lein.', 'warn');
+    return;
+  }
+  const msg = liveEl('liveFailMsg');
+  try {
+    const res = await teacherFetch('/api/teacher/attendance/manual-mark', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roll_no: f.roll_no,
+        name: f.student_name || '',
+        class_name: meta.class_name,
+        subject: meta.subject,
+        course_type: meta.course_type,
+        system: meta.system || 'Annual',
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      const error = data.error || 'Present mark nahi ho paya.';
+      if (msg) msg.innerHTML = alertErr(error);
+      toast(error, 'err');
+      return;
+    }
+    if (msg) msg.innerHTML = alertOk(data.message || 'Present mark ho gaya.');
+    toast(data.message || 'Present mark ho gaya.', 'ok', 7000);
+    await pollLiveSession();
+    await loadAttendance();
+    await loadPresentAbsent();
+  } catch (err) {
+    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
+  }
+}
+
+// "Ignore" — entry ko teacher ki list se hata do (galti se try kiya tha).
+async function failIgnore(index) {
+  const f = liveFailures[index];
+  if (!f) return;
+  const msg = liveEl('liveFailMsg');
+  try {
+    const res = await teacherFetch('/api/teacher/failures/ignore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attempt_id: f.attempt_id }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      const error = data.error || 'Ignore nahi ho paya.';
+      if (msg) msg.innerHTML = alertErr(error);
+      toast(error, 'err');
+      return;
+    }
+    toast('List se hata diya.', 'ok');
+    await pollLiveSession();
+  } catch (err) {
+    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
+  }
 }
 
 // Live feed ke Approve / Reject — wahi purane approveEntry / rejectEntry chalte hain.
@@ -2133,6 +2289,43 @@ function loadOps() {
 
 let lastEmailSettings = [];
 
+// Test email — email setup chal raha hai ya nahi, ye check karne ke liye.
+// (Default inbox ka address kabhi screen par nahi aata.)
+async function sendTestEmail() {
+  const input = $('mailTestEmail');
+  const btn = $('mailTestBtn');
+  const msg = $('mailTestMsg');
+  const email = input ? input.value.trim() : '';
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    toast('Sahi email address daalein.', 'err');
+    return;
+  }
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.innerHTML = '<span class="spinner"></span> Bhej rahe hain…';
+  try {
+    const res = await teacherFetch('/api/teacher/email-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      const error = data.error || 'Test email nahi ja paya.';
+      if (msg) msg.innerHTML = alertErr(error);
+      toast(error, 'err');
+      return;
+    }
+    if (msg) msg.innerHTML = alertOk(data.message || 'Test email bhej diya.');
+    toast('Test email bhej diya — inbox/spam check karein.', 'ok', 7000);
+  } catch (err) {
+    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
 async function loadEmailSettings() {
   const msg = $('opsEmailMsg');
   const tbody = document.querySelector('#opsEmailTable tbody');
@@ -2145,7 +2338,7 @@ async function loadEmailSettings() {
       if (msg) msg.innerHTML = alertErr(data.error || 'Email routing load nahi hui.');
       return;
     }
-    setText('opsEmailDefault', data.default_email || '—');
+    setText('opsEmailDefault', data.default_inbox_configured ? 'configured (hidden)' : 'set nahi hai (TEACHER_EMAIL env daalein)');
     lastEmailSettings = Array.isArray(data.settings) ? data.settings : [];
     setText('opsEmailCount', lastEmailSettings.length + ' rule(s)');
 
@@ -2410,8 +2603,8 @@ async function sendEmailReport(mode, body, msgElId) {
       toast(error, 'err');
       return false;
     }
-    const to = Array.isArray(data.recipients) ? data.recipients.join(', ') : '';
-    const message = data.message || (to ? 'Report emailed to ' + to : 'Report email ho gayi.');
+    const to = Array.isArray(data.recipients_masked) ? data.recipients_masked.join(', ') : '';
+    const message = data.message || (to ? 'Report email ho gayi (' + to + ')' : 'Report email ho gayi.');
     const html = alertOk(message + (data.attachments ? ` (${data.attachments} attachment)` : ''));
     if (msg) msg.innerHTML = html;
     if (mirror) mirror.innerHTML = html;

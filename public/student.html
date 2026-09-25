@@ -7,9 +7,9 @@
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0a0e18">
 <meta name="description" content="College attendance — mark attendance from inside the classroom with verified location.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lora:wght@500;600;700&display=swap" rel="stylesheet">
+<!-- Google Fonts jaan-boojh kar hata diye hain: college ke weak net par ye do
+     extra domains (fonts.googleapis.com + fonts.gstatic.com) page ko slow kar
+     dete the. System fonts (app.css me fallback chain) turant load hote hain. -->
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -44,12 +44,6 @@
     <div class="field">
       <label class="label" for="studentName">Your Name <span class="opt">(sirf pehli baar)</span></label>
       <input id="studentName" class="input" type="text" autocomplete="name" placeholder="e.g. Priya Sharma">
-    </div>
-
-    <div class="field">
-      <label class="label" for="studentEmail">Email <span class="opt">(optional)</span></label>
-      <input id="studentEmail" class="input" type="email" inputmode="email" autocomplete="email" placeholder="e.g. priya@gmail.com">
-      <p class="hint">Aapka attendance report isi email par jayega. Email na daalein to report teacher ke default email par chali jayegi — attendance par koi asar nahi padta.</p>
     </div>
 
     <div class="field mb-0">
@@ -169,7 +163,7 @@
       <h3>Check my percentage</h3>
       <span class="chip chip-info">🔒 Sirf aapke phone se</span>
     </div>
-    <p class="card-sub">Roll number daalein. Privacy ke liye ye sirf usi phone par chalta hai jisse aapne attendance mark ki ho.</p>
+    <p class="card-sub">Roll number daalein — subject-wise percentage dekhne ke liye, aur apna attendance PDF download karne ke liye.</p>
 
     <div class="field">
       <label class="label" for="myRollNo">Roll Number</label>
@@ -186,6 +180,9 @@
     </div>
 
     <button id="myAttBtn" type="button" class="btn btn-block" onclick="checkMyAttendance()">Check attendance</button>
+
+    <button id="myReportBtn" type="button" class="btn btn-block mt-2" onclick="downloadMyReport()">⬇️ Mera report download karo (PDF)</button>
+    <p class="hint">Roll number daal kar apna attendance PDF download karein (75% se kam par warning bhi chhapti hai).</p>
 
     <div id="myAttMsg" class="mt-2"></div>
     <div id="myAttResult" class="mt-2 stack" style="gap:10px;"></div>
@@ -395,11 +392,14 @@ async function fetchLocation(opts) {
   $('retryLocBtn').disabled = true;
   setPresence('busy', 'Location check ho rahi hai…', 'GPS fix ka intezaar…');
 
-  // Attempt 1: precise GPS · 2: faster network based fix · 3: precise GPS again
+  // Attempt 1: precise GPS (taaza fix) · 2: cached-but-recent (weak net par
+  // turant) · 3: precise GPS dobara. Timeout chhote rakhe hain — pehle 20+12+25
+  // = 57 second tak ruk sakta tha, ab max ~26 second. Cached fix 45 sec tak ka
+  // server bhi maan leta hai, isliye ye bharosemand bhi hai.
   const tries = [
-    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
-    { enableHighAccuracy: false, timeout: 12000, maximumAge: 0 },
-    { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 },
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 },
+    { enableHighAccuracy: false, timeout: 6000, maximumAge: 25000 },
+    { enableHighAccuracy: true, timeout: 12000, maximumAge: 25000 },
   ];
 
   let fix = { ok: false };
@@ -445,7 +445,6 @@ $('rollNo').addEventListener('input', () => {
   nameField.readOnly = false; nameField.style.opacity = '';
   classField.disabled = false; classField.style.opacity = '';
   majorField.disabled = false; majorField.style.opacity = '';
-  if ($('studentEmail')) { $('studentEmail').readOnly = false; $('studentEmail').style.opacity = ''; }
   $('rollHint').textContent = 'Roll number daalte hi naam/class roster se apne aap bhar jayega.';
 });
 
@@ -473,13 +472,6 @@ $('rollNo').addEventListener('blur', async () => {
       const f = $('majorSubject');
       f.value = data.major_subject;
       f.disabled = true;
-      f.style.opacity = '0.75';
-    }
-    if (data.email && $('studentEmail')) {
-      // Email ek baar save hone ke baad locked rehta hai (naam/class ki tarah).
-      const f = $('studentEmail');
-      f.value = data.email;
-      f.readOnly = true;
       f.style.opacity = '0.75';
     }
   } catch (err) { /* offline — form manually bhara ja sakta hai */ }
@@ -513,9 +505,6 @@ function gatherPayload() {
     course_type: $('courseType').value.trim(),
     major_subject: $('majorSubject').value.trim(),
     code: $('code').value.trim(),
-    // Optional: student ka email (report yahan jayega). Na ho to server
-    // DEFAULT email par report bhej deta hai.
-    email: $('studentEmail') ? $('studentEmail').value.trim() : '',
     client_flags: clientHintFlags(),
   };
 }
@@ -636,34 +625,27 @@ async function confirmSubmit() {
       btn.innerHTML = '<span class="spinner"></span> Getting location…';
       await fetchLocation({});
     }
-    if (!coords) {
-      throw new Error('Location nahi mil paayi. GPS ON karke “Get location again” dabayein, phir submit karein.');
-    }
 
-    // 2. Server-verified one-time token.
-    btn.innerHTML = '<span class="spinner"></span> Verifying you are in class…';
-    const tok = await requestLocationToken(p, coords);
-    if (!tok.ok) {
-      if (tok.data.offline) throw new Error('offline');
-      if (tok.data.reason === 'outside_radius') {
-        setPresence('bad', 'Aap class ke andar nahi hain',
-          `Server ne ~${esc(tok.data.distance_m || '?')} m door bataya (allowed ${esc(tok.data.radius_m || 150)} m). Class me jaakar dobara try karein.`);
-      } else if (['accuracy_too_low', 'no_accuracy', 'no_location'].includes(tok.data.reason)) {
-        setPresence('bad', 'GPS fix kaafi accurate nahi hai', 'Window/darwaze ke paas jaakar “Get location again” dabayein.');
-      }
-      throw new Error(tok.data.error || 'Location verify nahi ho payi.');
-    }
-
-    // 3. Mark attendance using that token.
+    // 2. GPS fix SEEDHA bhej do (ek hi request) — server khud verify karta hai.
+    //    Fix na mile to bhi kuch toot-ta nahi: entry teacher ke paas "pending"
+    //    chali jaati hai (weak net wale college ke liye yahi asli raasta hai).
     btn.innerHTML = '<span class="spinner"></span> Marking attendance…';
-    let payload = Object.assign({}, p, { device_id, location_token: tok.data.token });
+    let payload = Object.assign({}, p, {
+      device_id,
+      // Inline fix + timestamp: server radius/accuracy/mock/freshness khud check karta hai.
+      lat: coords ? coords.lat : null,
+      lng: coords ? coords.lng : null,
+      accuracy: coords ? coords.accuracy : null,
+      fix_timestamp: coords ? coords.fix_at || Date.now() : 0,
+    });
     let result = await attemptSubmit(payload, 2);
 
-    // Token limited time ke liye hota hai — sirf ek baar, naye token ke saath retry.
-    if (result.reached && !result.data.success && (result.data.reason === 'bad_token' || result.data.reason === 'no_token')) {
-      const fresh = await requestLocationToken(p, coords);
-      if (fresh.ok) {
-        payload = Object.assign({}, p, { device_id, location_token: fresh.data.token });
+    // Purane cached page (token flow) ke liye fallback: server token maange to
+    // ek baar token le kar dobara bhej do.
+    if (result.reached && !result.data.success && (result.data.reason === 'no_token' || result.data.reason === 'bad_token')) {
+      const tok = await requestLocationToken(p, coords || { lat: null, lng: null, accuracy: null });
+      if (tok.ok && tok.data.token) {
+        payload = Object.assign({}, payload, { location_token: tok.data.token });
         result = await attemptSubmit(payload, 1);
       }
     }
@@ -677,10 +659,20 @@ async function confirmSubmit() {
     if (result.data.success) {
       closeConfirm();
       if (result.data.pending) {
-        showResult('warn', 'Location verified — approval pending',
-          'Aap class ke andar the. Teacher ke approve karne par ye count hogi.',
+        const reason = result.data.pending_reason || '';
+        const title =
+          reason === 'approval_mode' ? 'Location verified — approval pending' :
+          reason === 'flagged' ? 'Teacher ke review par hai' :
+          'Teacher se approve karwao';
+        const msg =
+          reason === 'approval_mode'
+            ? 'Aap class ke andar the. Teacher ke approve karne par ye count hogi.'
+            : reason === 'flagged'
+              ? 'Aapki entry teacher ke Review tab me hai — wo confirm karenge to attendance count hogi.'
+              : 'Aapki location verify nahi ho payi (net/GPS), isliye entry teacher ke paas chali gayi hai. Wo present mark karenge to attendance count hogi.';
+        showResult('warn', title, msg,
           [['Roll Number', p.roll_no], ['Name', p.name], ['Subject', p.subject], ['Course Type', p.course_type]]);
-        toast('Location verified — teacher approval ka intezaar', 'warn');
+        toast(title, 'warn');
       } else {
         showResult('ok', 'Attendance marked!', 'Aapki attendance record ho gayi hai.',
           [['Roll Number', p.roll_no], ['Name', p.name], ['Class', p.class_name],
@@ -698,8 +690,13 @@ async function confirmSubmit() {
       queueOffline(gatherPayload(), coords);
       return;
     }
-    errBox(err.message || 'Kuch galat ho gaya. Dobara try karein.');
-    toast(err.message || 'Attendance mark nahi ho payi.', 'err');
+    // Code expire / location wali dikkat → teacher ki "Location/net fail hue
+    // students" list me entry chali jaye (best-effort, student ko kuch nahi dikhta).
+    const msg = String(err.message || '');
+    if (/expired|code/i.test(msg)) reportFailureToTeacher('expired_code');
+    else if (/location|GPS/i.test(msg)) reportFailureToTeacher('no_gps');
+    errBox(msg || 'Kuch galat ho gaya. Dobara try karein.');
+    toast(msg || 'Attendance mark nahi ho payi.', 'err');
   } finally {
     submitting = false;
     btn.disabled = false;
@@ -821,6 +818,69 @@ async function flushQueue() {
 
 window.addEventListener('online', flushQueue);
 setInterval(flushQueue, 25000); // safety net, agar 'online' event na aaye
+
+/* =====================================================================
+   Teacher ko batao (weak net / GPS fail) + apna PDF download
+   ===================================================================== */
+// Student ko koi error nahi dikhta — bas teacher ki "Location/net fail hue
+// students" list me ek entry chali jati hai (wahan se ek tap me present mark
+// ho jata hai). GPS fail, code expire — dono ke liye.
+function reportFailureToTeacher(reason) {
+  try {
+    const p = gatherPayload();
+    fetch('/api/student/report-failure', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_id,
+        roll_no: p.roll_no,
+        name: p.name,
+        class_name: p.class_name,
+        subject: p.subject,
+        course_type: p.course_type,
+        reason: reason || 'no_gps',
+      }),
+    }).catch(() => {});
+  } catch (e) { /* best-effort — student ko kabhi na roke */ }
+}
+
+// Roll number daal kar apna attendance PDF download (server par rate-limited
+// hai aur sirf PDF milta hai — koi list/JSON nahi).
+async function downloadMyReport() {
+  const roll_no = $('myRollNo').value.trim();
+  const system = $('mySystem').value;
+  if (!/^[0-9]+$/.test(roll_no)) {
+    toast('Roll number me sirf digits likhein.', 'err');
+    return;
+  }
+  const btn = $('myReportBtn');
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Report ban rahi hai…';
+  try {
+    const res = await fetch('/api/student/my-report.pdf?roll_no=' + encodeURIComponent(roll_no) + '&system=' + encodeURIComponent(system));
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      toast(data.error || 'Report nahi ban payi.', 'err');
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'my-attendance-' + roll_no + '-' + system + '.pdf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast('Report download ho gayi ✓', 'ok');
+  } catch (err) {
+    toast('Internet nahi hai. Dobara try karein.', 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
 
 /* =====================================================================
    My attendance (subject-wise %)

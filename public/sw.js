@@ -3,7 +3,7 @@
 // /api/ requests — those always need to reach the real server, since that's
 // where attendance is actually validated and saved.
 
-const CACHE_NAME = 'attendance-shell-v2';
+const CACHE_NAME = 'attendance-shell-v3';
 const SHELL_FILES = ['student.html', 'teacher.html', 'style.css', 'icon.svg', 'manifest.json'];
 
 self.addEventListener('install', (event) => {
