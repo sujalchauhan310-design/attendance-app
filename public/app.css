@@ -235,7 +235,12 @@ a { color: var(--gold); }
 .btn-danger { background: rgba(255, 122, 122, 0.12); border-color: rgba(255, 122, 122, 0.45); color: var(--err); }
 .btn-danger:hover { background: rgba(255, 122, 122, 0.2); }
 .btn-ok { background: var(--ok-bg); border-color: rgba(55, 211, 153, 0.45); color: var(--ok); }
+/* Leave ka blue variant — "Mark leave" button, jisse green "present" se alag dikhta hai. */
+.btn-info { background: var(--info-bg); border-color: rgba(111, 176, 255, 0.45); color: var(--info); }
+.btn-info:hover { background: rgba(111, 176, 255, 0.2); }
 .btn-sm { padding: 7px 11px; min-height: 34px; font-size: 0.8rem; border-radius: 8px; }
+.btn-xs { padding: 4px 9px; min-height: 26px; font-size: 0.72rem; border-radius: 7px; }
+.nowrap { white-space: nowrap; }
 .btn-block { width: 100%; }
 .btn-row { display: flex; gap: 10px; }
 .btn-row > .btn { flex: 1 1 0; }
@@ -357,6 +362,43 @@ table.data tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
 .rec .acts { display: flex; gap: 8px; margin-top: 10px; }
 .rec.pending { border-color: rgba(245, 179, 86, 0.45); background: var(--warn-bg); }
 .rec.flagged { box-shadow: inset 3px 0 0 var(--warn); }
+
+/* ---------- pending banner (front page pe — teacher ko Review tab me jaane
+   ki zaroorat na pade) ----------
+   Design rule: banner SIRF tab dikhta hai jab koi pending entry ho. Pending 0
+   hote hi wo apne aap hat jaata hai — isliye har 5s polling par koi naga
+   popup/notification nahi aata, sirf kaam hone par dikhta hai. */
+.pending-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(245, 179, 86, 0.5);
+  border-radius: var(--r);
+  background: var(--warn-bg);
+  box-shadow: inset 3px 0 0 var(--warn);
+  animation: pendingPulse 2.4s ease-in-out infinite;
+}
+.pending-banner-ico { flex: 0 0 auto; font-size: 1.35rem; line-height: 1; }
+.pending-banner-body { flex: 1 1 auto; min-width: 0; }
+.pending-banner-title { font-weight: 700; font-size: 0.94rem; color: var(--warn); }
+.pending-banner-sub { font-size: 0.76rem; color: var(--muted); margin-top: 2px; }
+.pending-banner-acts { flex: 0 0 auto; display: flex; gap: 8px; }
+/* Naye pending aate hi ek halka pulse — attention to, par screen par click
+   force nahi (accessibility: reduced-motion me animation band). */
+@keyframes pendingPulse {
+  0%, 100% { box-shadow: inset 3px 0 0 var(--warn), 0 0 0 0 rgba(245, 179, 86, 0); }
+  50% { box-shadow: inset 3px 0 0 var(--warn), 0 0 0 4px rgba(245, 179, 86, 0.09); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pending-banner { animation: none; }
+}
+@media (max-width: 560px) {
+  .pending-banner { flex-wrap: wrap; }
+  .pending-banner-acts { width: 100%; }
+  .pending-banner-acts > .btn { flex: 1 1 0; }
+}
 
 /* ---------- tabs ---------- */
 .tabs {

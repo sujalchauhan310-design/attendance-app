@@ -111,6 +111,23 @@
     </div>
   </section>
 
+  <!-- ==================== PENDING BANNER (front page) ====================
+       Teacher ko Review tab me "pending" dhundhne nahi jaana padta — jab bhi
+       koi entry approve ka intezaar kar rahi ho, ye banner yahin (sabse upar,
+       har tab par dikhta hai) aa jaata hai. Ek tap se sheet khulti hai jisme
+       Approve / Reject buttons hain. Pending 0 hote hi banner apne aap hat
+       jaata hai — isliye polling par koi popup chad-chad nahi hoti. -->
+  <div class="pending-banner hide" id="pendingBanner" role="status" aria-live="polite">
+    <div class="pending-banner-ico">⏳</div>
+    <div class="pending-banner-body">
+      <div class="pending-banner-title" id="pendingBannerTitle">0 entries approve ka intezaar kar rahi hain</div>
+      <div class="pending-banner-sub" id="pendingBannerSub">Teacher approve karein tabhi ye attendance me count honge.</div>
+    </div>
+    <div class="pending-banner-acts">
+      <button type="button" class="btn btn-sm btn-primary nowrap" id="pendingBannerOpen" onclick="openPendingSheet()">Review &amp; approve</button>
+    </div>
+  </div>
+
   <div class="tabs" role="tablist">
     <button class="tab active" data-tab="live" onclick="switchTab('live')" role="tab">⚡ Live</button>
     <button class="tab" data-tab="register" onclick="switchTab('register')" role="tab">📋 Register</button>
@@ -381,6 +398,35 @@
 
         <div class="divider"></div>
 
+        <!-- LEAVE: teacher-approved absence. Attendance count nahi hoti, lekin
+             effective % ke denominator se din hat jata hai (medical/family/sports). -->
+        <div class="card-title"><h3>🩺 Mark leave</h3><span class="chip chip-info" id="leaveCountChip">0 aaj</span></div>
+        <p class="card-sub">Approved leave (medical / family / sports / bereavement). Attendance <strong>count nahi</strong> hoti, lekin wo din percentage se <strong>hat</strong> jaata hai — isliye medical leave par % nahi girega. Register me “L” dikhta hai.</p>
+        <div class="field">
+          <label class="label" for="leaveRollNo">Roll Number</label>
+          <input id="leaveRollNo" class="input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 45678">
+        </div>
+        <div class="field">
+          <label class="label" for="leaveReason">Reason</label>
+          <select id="leaveReason" class="input">
+            <option value="medical">Medical</option>
+            <option value="family">Family function</option>
+            <option value="sports">Sports / tournament</option>
+            <option value="bereavement">Bereavement</option>
+            <option value="personal">Personal reason</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="label" for="leaveNote">Note <span class="opt">(optional)</span></label>
+          <input id="leaveNote" class="input" type="text" maxlength="160" placeholder="e.g. medical certificate submitted">
+        </div>
+        <button type="button" class="btn btn-block btn-info" id="leaveBtn" onclick="markLeave()">Mark leave</button>
+        <div id="leaveMsg" class="mt-2"></div>
+        <div id="leaveList" class="rec-list mt-2"></div>
+
+        <div class="divider"></div>
+
         <div class="card-title"><h3>Unlock a device</h3><span class="chip">Device lock</span></div>
         <p class="card-sub">Ek phone sirf ek roll number se bandha hota hai. Phone badal gaya ho to yahan se unlock karein.</p>
         <div class="row" style="gap:8px;">
@@ -569,13 +615,22 @@
       <div class="card-title"><h3>Activity / audit log</h3><span class="muted fs-xs" id="opsAuditCount">—</span></div>
       <p class="card-sub">Kaun, kab, kya badla — sabse naya sabse upar. Edit / delete / manual mark / device unlock / code generate / email routing sab yahan record hota hai.</p>
       <div class="row wrap" style="gap:8px;">
+        <!-- Action dropdown: audit log me 20+ action types hain. Bina filter ke
+             50 entries me se zyada tar "New marks" hi dikhte the, isliye teacher
+             ko delete/approve/leave dhoondhne me list scroll karni parti thi. -->
+        <select id="opsAuditAction" class="select grow" style="max-width:260px;" onchange="loadAudit()" title="Sirf ye action dikhao">
+          <option value="all">Sab actions</option>
+        </select>
         <select id="opsAuditLimit" class="select" style="max-width:160px;" onchange="loadAudit()">
           <option value="25">25 entries</option>
           <option value="50" selected>50 entries</option>
           <option value="100">100 entries</option>
+          <option value="300">300 entries</option>
         </select>
         <button type="button" class="btn btn-sm" onclick="loadAudit()">↻ Reload log</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="loadAuditActions()">↻ Actions refresh</button>
       </div>
+      <div id="opsAuditFilterNote" class="muted fs-xs mt-1"></div>
       <div class="table-wrap mt-2">
         <table class="data" id="opsAuditTable">
           <thead><tr><th>Time</th><th>Action</th><th>By</th><th>Target</th><th>Details</th></tr></thead>
@@ -658,6 +713,26 @@
   </div>
 </div>
 
+<div class="modal" id="pendingSheetModal" role="dialog" aria-modal="true" aria-labelledby="pendingSheetTitle">
+  <div class="sheet">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head">
+      <div>
+        <h2 id="pendingSheetTitle">Approve pending entries</h2>
+        <p class="muted fs-sm mt-1" id="pendingSheetSub">—</p>
+      </div>
+      <button type="button" class="sheet-close" onclick="closePendingSheet()" aria-label="Close">✕</button>
+    </div>
+    <div class="rec-list" id="pendingSheetList"></div>
+    <div class="sheet-foot">
+      <button type="button" class="btn btn-ghost" onclick="closePendingSheet()">Close</button>
+      <!-- Sirf tab dikhta hai jab live session chal raha ho: approve-all
+           sirf session ki pending hi approve karta hai, din ki poori list nahi. -->
+      <button type="button" class="btn btn-ok hide" id="pendingSheetApproveAll" onclick="approveAllFromSheet()">Approve sab (is session)</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="opsDeleteModal" role="dialog" aria-modal="true" aria-labelledby="opsDeleteTitle">
   <div class="sheet">
     <div class="sheet-grab"></div>
@@ -713,13 +788,25 @@ function closeModal(id) {
   m.classList.remove('open');
   if (!document.querySelector('.modal.open')) document.body.style.overflow = '';
 }
+
+// Esc / backdrop ke liye ek hi dispatcher — koi bhi modal band karne ka raasta
+// ho, us modal ka apna cleanup chalna chahiye. (Pending sheet me ye ZAROORI hai:
+// closeModal seedha call karne par pendingSheetOpen=true reh jata tha aur
+// future me auto-popup kabhi nahi khulata.)
+function dismissModal(id) {
+  if (id === 'pendingSheetModal' && typeof closePendingSheet === 'function') {
+    closePendingSheet();
+    return;
+  }
+  closeModal(id);
+}
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   const open = document.querySelector('.modal.open');
-  if (open) closeModal(open.id);
+  if (open) dismissModal(open.id);
 });
 document.querySelectorAll('.modal').forEach((m) => {
-  m.addEventListener('click', (e) => { if (e.target === m) closeModal(m.id); });
+  m.addEventListener('click', (e) => { if (e.target === m) dismissModal(m.id); });
 });
 
 /* ---------- dates & times (sab IST) ---------- */
@@ -743,6 +830,7 @@ function onDateChange() {
   loadAttendance();
   loadPresentAbsent();
   loadReview();
+  loadLeaveList();
 }
 
 /* ---------- auth ---------- */
@@ -806,12 +894,19 @@ async function signIn() {
 function signOut() {
   clearTeacherAuth();
   stopLivePoll();
+  // Pending banner ka poll bhi yahin band — warna logout ke baad bhi har 20s me
+  // ek 401 request jati rahegi (teacherFetch 401 par khud stop karta hai, par
+  // beech me ek extra request + console error bekaar).
+  stopPendingBannerPoll();
+  hidePendingBanner();
   $('dashView').classList.add('hide');
   $('loginView').classList.remove('hide');
   toast('Sign out ho gaya.', 'ok', 2500);
 }
 function showLogin(message) {
   stopLivePoll();
+  stopPendingBannerPoll();
+  hidePendingBanner();
   $('dashView').classList.add('hide');
   $('loginView').classList.remove('hide');
   $('loginMsg').innerHTML = message ? alertErr(message) : '';
@@ -1781,6 +1876,460 @@ async function manualMark() {
 }
 
 /* =====================================================================
+   LEAVE (teacher-approved absence)
+   Attendance count nahi hoti, lekin effective % ke denominator se din hat
+   jaata hai. Yahan se teacher ek roll par leave laga sakta hai, reason ke
+   saath, aur use galti se hata bhi sakta hai.
+   ---------------------------------------------------------------------- */
+async function markLeave() {
+  const c = getCombo();
+  const roll_no = $('leaveRollNo').value.trim();
+  const leave_reason = $('leaveReason').value;
+  const leave_note = $('leaveNote').value.trim();
+  const msg = $('leaveMsg');
+  const btn = $('leaveBtn');
+
+  const problem = comboMissing(c);
+  if (problem) { toast(problem, 'err'); return; }
+  if (!/^[0-9]+$/.test(roll_no)) { toast('Roll number sirf digits me likhein.', 'err'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Saving…';
+  try {
+    const res = await teacherFetch('/api/teacher/attendance/leave-mark', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roll_no,
+        class_name: c.class_name,
+        subject: c.subject,
+        course_type: c.course_type,
+        system: c.system,
+        date: selectedDate(),
+        leave_reason,
+        leave_note,
+        session_id: typeof activeSessionId === 'string' ? activeSessionId : '',
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) { msg.innerHTML = alertErr(data.error || 'Leave mark nahi hui.'); return; }
+    msg.innerHTML = alertOk(data.message || 'Leave mark ho gayi.');
+    toast('Leave mark ho gayi.', 'ok');
+    $('leaveRollNo').value = '';
+    $('leaveNote').value = '';
+    await loadLeaveList();
+    await loadAttendance();
+    await loadPresentAbsent();
+  } catch (err) {
+    if (!isAuthError(err)) msg.innerHTML = alertErr('Network error. Dobara try karein.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Mark leave';
+  }
+}
+
+// Galti se lagi leave hatao — sirf status="leave" wali entry delete hoti hai
+// (present entry ka flow alag hai: attendance delete).
+async function removeLeave(record_id) {
+  const msg = $('leaveMsg');
+  try {
+    const res = await teacherFetch('/api/teacher/attendance/leave-remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record_id }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) { msg.innerHTML = alertErr(data.error || 'Leave hatane me dikkat.'); return; }
+    msg.innerHTML = alertOk('Leave hata diya gaya.');
+    await loadLeaveList();
+    await loadAttendance();
+  } catch (err) {
+    if (!isAuthError(err)) msg.innerHTML = alertErr('Network error. Dobara try karein.');
+  }
+}
+
+// Selected date ki leave list — blue "L" chips ke saath.
+async function loadLeaveList() {
+  const params = new URLSearchParams({ date: selectedDate() });
+  const class_name = $('className').value.trim();
+  if (class_name) params.set('class_name', class_name);
+  const wrap = $('leaveList');
+  const chip = $('leaveCountChip');
+  if (!wrap || !chip) return;
+  try {
+    const res = await teacherFetch('/api/teacher/leave-list?' + params.toString());
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) { wrap.innerHTML = '<div class="muted fs-sm">Leave list load nahi hui.</div>'; return; }
+    const leaves = data.leaves || [];
+    chip.textContent = leaves.length + ' aaj';
+    if (!leaves.length) { wrap.innerHTML = '<div class="muted fs-sm">Selected date par koi leave nahi.</div>'; return; }
+    wrap.innerHTML = leaves.map((l) => `
+      <div class="rec">
+        <div class="top">
+          <div>
+            <div class="nm">${esc(l.student_name || '-')} <span class="chip chip-info">L</span></div>
+            <div class="meta">#${esc(l.roll_no)} · ${esc(l.subject || '-')} (${esc(l.course_type || '-')}) · ${esc(l.leave_reason_text)}${l.leave_note ? ' · ' + esc(l.leave_note) : ''}</div>
+          </div>
+          <button type="button" class="btn btn-xs btn-ghost" onclick="removeLeave('${esc(l.record_id)}')">Remove</button>
+        </div>
+      </div>`).join('');
+  } catch (err) {
+    if (!isAuthError(err)) wrap.innerHTML = '<div class="muted fs-sm">Leave list load nahi hui.</div>';
+  }
+}
+
+/* =====================================================================
+   PENDING BANNER (front page) + 1-tap APPROVE SHEET
+   ---------------------------------------------------------------------
+   Problem: teacher ko pending entries "Review" tab me dhundhne padti thi.
+   Solution: jaise hi koi entry pending hoti hai, SABSE UPAR ek banner aa
+   jaata hai (har tab par — Live/Register/Roster/Reports sab par). Ek tap
+   se sheet khulti hai jisme Approve / Reject buttons hain.
+
+   Auto-popup JAAN-BOOJH KAR nahi kiya: 5-second polling me har baar modal
+   khulna bahut irritate karta. Banner silent rehta hai, sirf pending > 0
+   hone par dikhta hai, aur 0 hote hi apne aap hat jaata hai.
+   ===================================================================== */
+const PENDING_POLL_MS = 20000; // 5s live-poll se halka — banner ke liye 20s kaafi hai
+let pendingBannerTimer = null;
+let pendingBannerBusy = false;
+let pendingSheetRows = []; // sheet ka cache (server se aaya hua)
+let pendingSheetCount = 0; // total pending (list se zyada ho tab bhi sahi number)
+let pendingSheetOpen = false; // sheet khuli hai ya nahi (approve ke baad sync guard)
+
+// Banner ka text + visibility. Ye SINGLE function update karta hai — chahe
+// data live-poll se aaya ho ya pending-summary se, UI ek jaisa rehta hai.
+function applyPendingBanner(data) {
+  const total = Number(data && data.pending_count) || 0;
+  const todayCount = Number(data && data.today_count) || 0;
+  const olderCount = Number(data && data.older_count) || 0;
+  if (Array.isArray(data && data.pending)) pendingSheetRows = data.pending;
+  pendingSheetCount = total;
+
+  const banner = document.getElementById('pendingBanner');
+  if (!banner) return;
+  // 0 pending = banner bilkul chhup jata hai (khaali warning box bekaar hai).
+  banner.classList.toggle('hide', total <= 0);
+
+  const title = document.getElementById('pendingBannerTitle');
+  if (title) {
+    title.textContent = total === 1
+      ? '1 entry approve ka intezaar kar rahi hai'
+      : total + ' entries approve ka intezaar kar rahi hain';
+  }
+  const sub = document.getElementById('pendingBannerSub');
+  if (sub) {
+    // Aaj vs purani ka alag breakdown — teacher ko pata chale ki kya aaj ka
+    // hai aur kya pehle ka pada hua hai (approve na hua to attendance kam).
+    let text = 'Teacher approve karein tabhi ye attendance me count honge.';
+    if (todayCount && olderCount) {
+      text = `Aaj: ${todayCount} · purane: ${olderCount} — approve karein tabhi attendance me count honge.`;
+    } else if (olderCount) {
+      text = `${olderCount} purani entry approve baaki hai — aaj ki class par asar nahi, par % galat dikhega.`;
+    } else if (todayCount) {
+      text = 'Aaj ki class hai — approve karein tabhi ye attendance me count honge.';
+    }
+    if (data && data.truncated) text += ` (sirf latest ${pendingSheetRows.length} dikh rahe hain)`;
+    sub.textContent = text;
+  }
+}
+
+// Halka poll — sirf tab chalta hai jab page dikh raha hai. Background tab me
+// request nahi jati, isliye battery aur data dono bachte hain.
+async function pollPendingBanner() {
+  if (document.hidden || pendingBannerBusy) return;
+  pendingBannerBusy = true;
+  try {
+    const res = await teacherFetch('/api/teacher/pending-summary?limit=50');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) return; // hiccup — purana banner rehne do
+    // Naye pending aaye to popup bhi (smart guard ke saath) — sirf banner
+    // update karna popup ko chala deta.
+    applyPendingBannerAndMaybePopup(data);
+  } catch (err) {
+    if (isAuthError(err)) stopPendingBannerPoll();
+  } finally {
+    pendingBannerBusy = false;
+  }
+}
+// Ye wrapper sirf "crash na ho" guarantee deta hai — lekin promise RETURN bhi
+// karta hai, taaki caller `await pendingBannerPollSafe()` kar sake. (Pehle ye
+// void thi, isliye approve ke turant baad renderPendingSheet() PURANI list
+// dikhata tha — number ek tick late update hota tha.)
+function pendingBannerPollSafe() {
+  try {
+    const p = pollPendingBanner();
+    if (p && typeof p.catch === 'function') return p.catch(() => {});
+    return Promise.resolve();
+  } catch (err) {
+    return Promise.resolve(); // polling kabhi page crash nahi kar sakti
+  }
+}
+function startPendingBannerPoll() {
+  if (pendingBannerTimer) return;
+  pendingBannerTimer = setInterval(pendingBannerPollSafe, PENDING_POLL_MS);
+  pendingBannerPollSafe(); // pehla update turant — 20s ka intezaar nahi
+}
+function stopPendingBannerPoll() {
+  if (pendingBannerTimer) clearInterval(pendingBannerTimer);
+  pendingBannerTimer = null;
+  // Auto-popup ka pending timer bhi cancel — logout ke baad wo fire hua to
+  // login screen par ek modal khul jaata (confusing).
+  if (pendingAutoOpenTimer) clearTimeout(pendingAutoOpenTimer);
+  pendingAutoOpenTimer = null;
+  pendingSheetOpen = false;
+}
+
+// Logout / login-screen pe jaate waqt banner + sheet ko turant saaf karta hai.
+// (Sirf chhupane se kaam nahi chalta — cache me purane rows rehne se agli
+//  login par sheet khaali ya stale dikhti.)
+function hidePendingBanner() {
+  pendingSheetRows = [];
+  pendingSheetCount = 0;
+  const banner = document.getElementById('pendingBanner');
+  if (banner) banner.classList.add('hide');
+  const list = document.getElementById('pendingSheetList');
+  if (list) list.innerHTML = '';
+  const sub = document.getElementById('pendingSheetSub');
+  if (sub) sub.textContent = '—';
+}
+
+/* ----------------------------------------------------------------------
+   POPUP ki "smart" rule — har poll par popup mat kholo
+   ----------------------------------------------------------------------
+   Teacher ki demand: "jinki entry pending hai unka POPUP front page par hi
+   aa jaye, dhundne ki zaroorat na pade." Lekin har 20-second poll par modal
+   khulna bahut irritate karta hai (teacher apna kaam kar raha hota hai).
+
+   Isliye popup sirf TAB khulta hai jab:
+     1) NAYI pending entry aayi ho (jo pehle kabhi show nahi hui) — ek "fresh"
+        alert, na ki wahi purani list baar-baar.
+     2) Koi dusra modal already khula na ho aur teacher kisi form me type
+        kar raha na ho (typing ke beech modal = risk).
+   Ek hi entry par popup SIRF EK BAAR khulta hai — baad me sirf banner
+   rahega jab tak teacher khud "Review & approve" na dabaaye.
+   ---------------------------------------------------------------------- */
+const PENDING_SEEN_KEY = 'attendance_pending_seen';
+const PENDING_AUTO_OPEN_DELAY_MS = 900;
+let pendingSeenIds = loadSeenPending();
+let pendingAutoOpenTimer = null;
+
+function loadSeenPending() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PENDING_SEEN_KEY) || '[]');
+    return new Set(Array.isArray(raw) ? raw.map(String) : []);
+  } catch (err) { return new Set(); }
+}
+function saveSeenPending() {
+  try {
+    // Sirf aakhri 200 ids — localStorage bhar na jaaye. Purani ids bhoolna
+    // safe hai (worst case: ek purani entry par ek extra popup).
+    const list = Array.from(pendingSeenIds).slice(-200);
+    pendingSeenIds = new Set(list);
+    localStorage.setItem(PENDING_SEEN_KEY, JSON.stringify(list));
+  } catch (err) {}
+}
+// Naye pending me se woh ids jo pehle kabhi show nahi hue.
+function freshPendingIds(rows) {
+  return (rows || [])
+    .map((r) => String(r.record_id || r._id || ''))
+    .filter((id) => id && !pendingSeenIds.has(id));
+}
+
+// Kuch bhi modal khula hai ya teacher type kar raha hai? Tab popup nahi.
+function teacherBusyForPopup() {
+  if (document.querySelector('.modal.open')) return true;
+  const el = document.activeElement;
+  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) return true;
+  return false;
+}
+
+function scheduleAutoOpen(freshIds) {
+  if (!freshIds.length) return;      // purani list hai — popup mat kholo
+  if (pendingSheetOpen) return;      // khud hi khuli hai
+  if (teacherBusyForPopup()) return; // teacher kisi kaam me hai
+  if (pendingAutoOpenTimer) return;  // ek timer already queue me hai
+  // Chhota delay: ek saath 2-3 entry aaye to list poora render ho jaaye, aur
+  // teacher ko "popup chala gaya" ka shock na lage.
+  pendingAutoOpenTimer = setTimeout(() => {
+    pendingAutoOpenTimer = null;
+    if (pendingSheetOpen || teacherBusyForPopup()) return;
+    freshIds.forEach((id) => pendingSeenIds.add(id));
+    saveSeenPending();
+    openPendingSheet('auto');
+  }, PENDING_AUTO_OPEN_DELAY_MS);
+}
+
+// Banner + popup dono ka faisla yahan se hota hai, taaki har poll par dono
+// ek jaisi picture se chalein.
+function applyPendingBannerAndMaybePopup(data) {
+  applyPendingBanner(data);
+  scheduleAutoOpen(freshPendingIds(data && data.pending));
+}
+
+/* =====================================================================
+   APPROVE SHEET — front page par 1-tap (ya naye pending par auto-popup)
+   ===================================================================== */
+function renderPendingSheet() {
+  const list = $('pendingSheetList');
+  const sub = $('pendingSheetSub');
+  if (!list) return;
+  const rows = pendingSheetRows || [];
+
+  if (sub) {
+    sub.textContent = pendingSheetCount > 1
+      ? pendingSheetCount + ' entries me se latest ' + rows.length + ' dikh rahe hain.'
+      : (rows[0]
+          ? (rows[0].student_name || rows[0].roll_no) + ' — approve karein tabhi attendance count hogi.'
+          : '—');
+  }
+
+  if (!rows.length) {
+    list.innerHTML = '<div class="alert alert-ok"><span class="ico">✅</span><div>Koi pending entry nahi — sab approve ho chuka hai.</div></div>';
+    return;
+  }
+
+  list.innerHTML = rows.map((r) => {
+    const reason = r.pending_reason_text || 'Teacher review chahiye';
+    const dist = r.distance_m != null ? Math.round(r.distance_m) + ' m' : null;
+    const acc = r.accuracy != null ? Math.round(r.accuracy) + ' m' : null;
+    const bits = [r.subject || '-', r.course_type || '-', r.marked_at_hhmm || formatTime(r.marked_at)];
+    if (dist) bits.push(dist + ' from class');
+    if (acc) bits.push('accuracy ' + acc);
+    if (r.date && r.date !== istToday()) bits.push(r.date);
+    return `
+      <div class="rec pending">
+        <div class="top">
+          <div>
+            <div class="nm">${esc(r.student_name) || '-'} <span class="muted fs-xs">#${esc(r.roll_no)}</span></div>
+            <div class="meta">${esc(bits.filter(Boolean).join(' · '))}</div>
+            <div class="meta ${r.location_verified ? 'text-ok' : 'text-warn'}">${esc(reason)}</div>
+            ${hasFlags(r) ? `<div class="meta text-warn">⚠ ${esc(flagText(r.flags))}</div>` : ''}
+          </div>
+          <span class="chip chip-warn">Pending</span>
+        </div>
+        <div class="acts">
+          <button type="button" class="btn btn-sm btn-ok" onclick="sheetDecide('${esc(r.record_id)}','approve')">Approve</button>
+          <button type="button" class="btn btn-sm btn-danger" onclick="sheetDecide('${esc(r.record_id)}','reject')">Reject</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  // "Approve sab" sirf tab dikhe jab live session chal raha ho (server ko
+  // session_id chahiye). Bina session ke ye button galat promise dega.
+  const all = $('pendingSheetApproveAll');
+  if (all) all.classList.toggle('hide', !activeSessionId);
+}
+
+async function openPendingSheet(source) {
+  if (!$('pendingSheetModal')) return;
+  pendingSheetOpen = true;
+  // Auto-popup ho ya banner button — data cache me hai, isliye turant render
+  // (network wait karte hue khali sheet na dikhe).
+  renderPendingSheet();
+  openModal('pendingSheetModal');
+  const sub = $('pendingSheetSub');
+  if (sub && source === 'auto') {
+    sub.textContent = 'Nayi entry aayi hai — approve karein tabhi attendance me count hogi.';
+  }
+  // Sheet khulte hi poori list ko "dekh chuka" maan lo. Ye zaroori hai: warna
+  // teacher sheet band kare (bina approve kiye) to agli 20-second poll me wahi
+  // entries phir "fresh" lagkar popup KHUD KHUD dobara khul jaati — jo bahut
+  // irritate karta hai. Approve kiye ya nahi, popup ka kaam tabhi hota hai.
+  markAllPendingSeen();
+  // Turant fresh list (approve ke baad number sahi rahe) + uske baad re-render,
+  // taaki sheet me stale count na dikhe.
+  await pendingBannerPollSafe();
+  if (pendingSheetOpen) renderPendingSheet();
+}
+
+// X / backdrop / Esc — teeno par ye state reset karna ZAROORI hai, warna
+// pendingSheetOpen=true reh jayega aur future me auto-popup kabhi nahi khulega.
+function closePendingSheet() {
+  pendingSheetOpen = false;
+  closeModal('pendingSheetModal');
+  // Ek pending approve/reject hone par turant refresh — banner ka number
+  // turant ghat-ta hai, teacher ko "abhi bhi pending hai" ka pata na chale.
+  pendingBannerPollSafe();
+}
+
+// Sheet ke andar Approve / Reject. `decideEntry` wahi helper hai jo Review
+// tab use karta hai (isiliye confirm dialog, audit, reload — sab same rehte
+// hain). Bas extra: approve ke baad khud-ba-khud agli entry par nahi jaata,
+// kyunki teacher ko har mark khud dekhna hai.
+async function sheetDecide(recordId, action) {
+  const id = String(recordId || '').trim();
+  if (!id) return;
+  if (action === 'approve') {
+    if (await decideEntry(id, 'approve')) {
+      // Ye id "dekh li" — dobara popup na khule.
+      pendingSeenIds.add(id);
+      saveSeenPending();
+      if (activeSessionId) await refreshSessionStatus(activeSessionId);
+      await loadReview();
+      await loadAttendance();
+      await loadPresentAbsent();
+      await pendingBannerPollSafe();
+      renderPendingSheet();
+    }
+    return;
+  }
+  if (await decideEntry(id, 'reject')) {
+    pendingSeenIds.add(id);
+    saveSeenPending();
+    if (activeSessionId) await refreshSessionStatus(activeSessionId);
+    await loadReview();
+    await loadAttendance();
+    await loadPresentAbsent();
+    await pendingBannerPollSafe();
+    renderPendingSheet();
+  }
+}
+
+// "Approve sab" — sirf tab dikhta hai jab live session chal raha ho (server ko
+// session_id chahiye). Confirm + same reload chain jaisa approveAllPending().
+// Sheet me hona zaroori nahi — banner par bhi ye kaam karna pad sakta hai.
+async function approveAllFromSheet() {
+  if (!activeSessionId) {
+    toast('Approve-all session ke hisaab se chalta hai — pehle live code khol lein.', 'warn');
+    return;
+  }
+  const ok = window.confirm(
+    'Poori class ke pending marks ek saath approve karein?' +
+    (pendingSheetCount ? `\n\nAbhi ${pendingSheetCount} pending entries hain.` : '') +
+    '\n\nTip: sirf un students ko approve karein jinka mark genuinely tha.'
+  );
+  if (!ok) return;
+  try {
+    const res = await teacherFetch('/api/teacher/attendance/approve-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: activeSessionId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) { toast(data.error || 'Approve all fail hua.', 'err'); return; }
+    toast((data.approved || 0) + ' entries approve ho gayi.', 'ok');
+    await refreshSessionStatus(activeSessionId);
+    await loadReview();
+    await loadAttendance();
+    await loadPresentAbsent();
+    await pendingBannerPollSafe();
+    renderPendingSheet();
+  } catch (err) {
+    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
+  }
+}
+
+// Sab pending "dekh chuke" — approve ke baad aaye naye hi popup karein.
+function markAllPendingSeen() {
+  pendingSheetRows.forEach((r) => {
+    const id = String((r && (r.record_id || r._id)) || '');
+    if (id) pendingSeenIds.add(id);
+  });
+  saveSeenPending();
+}
+
+/* =====================================================================
    Report download
    ===================================================================== */
 async function downloadOverallReport() {
@@ -2127,6 +2676,34 @@ function renderLivePoll(data, onlyNewer) {
 
   const pending = Array.isArray(data.pending) ? data.pending : [];
   setText('livePendingChip', pending.length);
+
+  // Yahi data pending-banner/pollPendingBanner wale endpoint se BHI aata hai, par
+  // ye zyada tez hai (5s live poll vs 20s banner poll). Isliye naye pending marks
+  // par popup YAHAN se trigger karte hain — teacher ke class chalte hi 5 second
+  // me modal aa jaata hai, usse Review tab dhundhna hi nahi padta. Extra request
+  // nahi jaata, kyunki data already isi response me hai.
+  //
+  // Dhyan dene ki baat: `data.pending` sirf IS SESSION ka pending hai, jabki
+  // banner ka count poore din ka (pending-summary endpoint). Isliye YAHAN
+  // applyPendingBanner() call KARTE HAIN — warna session ke 2 pending se poore
+  // din ke 15 pending ka banner number 2 ho jayega. Sirf popup trigger karta hai;
+  // banner ka number 20s poll / approve ke baad refresh hota hai.
+  if (pending.length) {
+    // Sirf tab jab kuch NAYA aaya ho. `onlyNewer` false hai tab (pehla poll / tab
+    // wapas aaya) — us waqt purani pending ke liye popup chala jaata to teacher
+    // har tab-switch par irritate hota. Banner us waqt bhi number dikhata hai.
+    if (onlyNewer) {
+      scheduleAutoOpen(freshPendingIds(pending));
+    }
+    // Sheet khuli hai to naye rows turant dikhne chahiye (roll number badal gaya
+    // ho to purana stale row na rahe).
+    if (pendingSheetOpen) {
+      pendingBannerPollSafe().then(() => {
+        if (pendingSheetOpen) renderPendingSheet();
+      });
+    }
+  }
+
   const pendingWrap = liveEl('livePendingList');
   if (pendingWrap) {
     pendingWrap.innerHTML = pending.length
@@ -2581,10 +3158,17 @@ async function loadAudit() {
   const body = $('opsAuditBody');
   const empty = $('opsAuditEmpty');
   const limit = $('opsAuditLimit') ? $('opsAuditLimit').value : '50';
+  // Dropdown ka value "" ya "all" ho to koi filter nahi — server par bhi
+  // "all" jaata hai, jo wahan bhi sabhi actions return karta hai.
+  const actionSel = $('opsAuditAction');
+  const action = actionSel ? actionSel.value : 'all';
+  const note = $('opsAuditFilterNote');
   if (body) body.innerHTML = '<tr><td colspan="5" class="muted fs-sm">Loading…</td></tr>';
   if (empty) empty.textContent = '';
+  if (note) note.textContent = action && action !== 'all' ? 'Filter: ' + auditLabel(action) : '';
   try {
-    const res = await teacherFetch('/api/teacher/audit?limit=' + encodeURIComponent(limit));
+    const qs = new URLSearchParams({ limit, action: action || 'all' });
+    const res = await teacherFetch('/api/teacher/audit?' + qs.toString());
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       if (body) body.innerHTML = '';
@@ -2606,10 +3190,53 @@ async function loadAudit() {
       </tr>`).join('');
     }
     setText('opsAuditCount', entries.length + ' entries');
-    if (empty) empty.textContent = entries.length ? '' : 'Abhi koi activity record nahi hai.';
+    if (empty) {
+      // Filter lagane par "kuch nahi mila" vs "kuch hai hi nahi" alag message
+      // chahiye — warna teacher sochega ki database khaali ho gaya hai.
+      empty.textContent = entries.length
+        ? ''
+        : (action && action !== 'all'
+          ? 'Is action ki koi entry nahi mili. Dropdown se "Sab actions" chunkar dekhein.'
+          : 'Abhi koi activity record nahi hai.');
+    }
   } catch (err) {
     if (body) body.innerHTML = '';
     if (!isAuthError(err) && empty) empty.innerHTML = alertErr('Network error. Dobara try karein.');
+  }
+}
+
+// Dropdown ke options server se aate hain (har action + uski count), isliye
+// naye action types (jaise attendance.leave) khud-ba-khud dikh jaate hain —
+// hard-code list me update karna padta nahi.
+// Chuni hui value reload ke baad bhi bachi rehti hai, warna har refresh par
+// dropdown "Sab actions" par wapas aa jaata aur user ka filter kho deta.
+async function loadAuditActions() {
+  const sel = $('opsAuditAction');
+  if (!sel) return;
+  const previous = sel.value || 'all';
+  try {
+    const res = await teacherFetch('/api/teacher/audit-actions');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) return; // chhup-chaap rehne do, log tabhi chalta hai
+    const list = Array.isArray(data.actions) ? data.actions : [];
+    if (!list.length) {
+      sel.innerHTML = '<option value="all">Sab actions</option>';
+      return;
+    }
+    // Total count dropdown ke "Sab actions" par dikhane ke liye.
+    const total = list.reduce((sum, a) => sum + (Number(a.count) || 0), 0);
+    let html = `<option value="all">Sab actions (${total})</option>`;
+    list.forEach((a) => {
+      const key = String(a.action || '');
+      if (!key) return;
+      html += `<option value="${esc(key)}">${esc(auditLabel(key))} (${Number(a.count) || 0})</option>`;
+    });
+    sel.innerHTML = html;
+    // Server se aayi list me wo value shayad na ho (jaise abhi filter laga tha
+    // par wo action 0 ho gaya) — us case me "Sab actions" par wapas.
+    sel.value = Array.prototype.some.call(sel.options, (o) => o.value === previous) ? previous : 'all';
+  } catch (err) {
+    if (!isAuthError(err)) { /* dropdown stale rehne se kuch nahi bigadta */ }
   }
 }
 
@@ -2785,6 +3412,7 @@ function loadEverything() {
   loadAttendance();
   loadPresentAbsent();
   loadReview();
+  loadLeaveList();
   if (activeSessionId) refreshSessionStatus(activeSessionId);
 }
 
@@ -2797,7 +3425,12 @@ async function startDashboard() {
   await loadAttendance();
   await loadPresentAbsent();
   await loadReview();
+  await loadLeaveList();
   startAutoRefresh();
+  // Pending banner ka poll yahin se chalu hota hai — pehle ye call hi nahi ho
+  // rahi thi, isliye banner kabhi update nahi hota tha. Ye teacher ke login ke
+  // BAAD chalu hota hai (login se pehle teacherFetch 401 dega).
+  startPendingBannerPoll();
 }
 
 let autoRefreshTimer = null;

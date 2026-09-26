@@ -932,23 +932,53 @@ async function checkMyAttendance() {
       return;
     }
 
+    // Har subject par DONO % dikhate hain: effective (leave hatake — primary,
+    // green/amber/red) aur raw (leave ke saath — chhota grey). Student ko
+    // confusion na ho ki kaunsa number uska "asli" % hai, isliye labels saath.
     const rows = data.subjects.map((s) => {
-      const pct = Number(s.pct) || 0;
-      const tone = pct >= 75 ? 'var(--ok)' : pct >= 60 ? 'var(--warn)' : 'var(--err)';
+      // effective_pct null => poore period me koi held class bachi hi nahi
+      // (sab leave). Tab 0% dikhana GALAT hota hai — "n/a" dikhate hain.
+      const effPct = s.effective_pct === null || s.effective_pct === undefined ? null : Number(s.effective_pct);
+      const rawPct = s.raw_pct === null || s.raw_pct === undefined ? null : Number(s.raw_pct);
+      const pct = effPct === null ? 0 : effPct;
+      const tone = effPct === null ? 'var(--muted-2)' : effPct >= 75 ? 'var(--ok)' : effPct >= 60 ? 'var(--warn)' : 'var(--err)';
+      const pctText = effPct === null ? 'n/a' : effPct + '%';
+      // Leave wale subject par ek blue "L" chip + reason — student ko pata chale
+      // ki uski % gir nahi, teacher ne approved leave lagi thi.
+      const leaveChip = s.leave_days > 0
+        ? `<span class="chip chip-info" title="Approved leave: ${esc(s.leave_reason_text || 'Approved leave')}">L ${s.leave_days}d leave</span> `
+        : '';
+      const rawNote = (s.leave_days > 0 && rawPct !== null && rawPct !== effPct)
+        ? `<span class="muted fs-xs"> (leave ke saath ${rawPct}%)</span>`
+        : '';
+      const leaveNote = s.leave_days > 0 && s.leave_reason_text
+        ? `<div class="muted fs-xs mt-1">Leave: ${esc(s.leave_reason_text)}${s.leave_dates && s.leave_dates.length ? ' · ' + esc(s.leave_dates.join(', ')) : ''}</div>`
+        : '';
       return `
         <div class="rec">
           <div class="top">
             <div>
-              <div class="nm">${esc(s.subject)}</div>
-              <div class="meta">${esc(s.course_type)} · ${esc(s.class_name)} · ${s.attended} of ${s.held} classes</div>
+              <div class="nm">${esc(s.subject)} ${leaveChip}</div>
+              <div class="meta">${esc(s.course_type)} · ${esc(s.class_name)} · ${s.attended} of ${s.held} classes${rawNote}</div>
+              ${leaveNote}
             </div>
-            <div class="bold" style="color:${tone}; font-size:1.05rem;">${pct}%</div>
+            <div class="bold" style="color:${tone}; font-size:1.05rem;">${pctText}</div>
           </div>
           <div class="progress mt-2"><i style="width:${Math.min(100, pct)}%; background:${tone};"></i></div>
         </div>`;
     }).join('');
 
-    const overallTone = data.overall_pct >= 75 ? 'text-ok' : 'text-err';
+    // Overall bhi same rule: effective primary, leave ka total niche bataya jaye.
+    const overallEff = data.effective_pct === null || data.effective_pct === undefined ? null : Number(data.effective_pct);
+    const overallRaw = data.raw_pct === null || data.raw_pct === undefined ? null : Number(data.raw_pct);
+    const overallTone = overallEff === null ? 'text-err' : overallEff >= 75 ? 'text-ok' : 'text-err';
+    const overallText = overallEff === null ? 'n/a' : overallEff + '%';
+    const overallBar = overallEff === null ? 0 : Math.min(100, overallEff);
+    const overallRawNote = (data.total_leave > 0 && overallRaw !== null && overallRaw !== overallEff)
+      ? ` · leave ke saath ${overallRaw}%` : '';
+    const overallLeaveLine = data.total_leave > 0
+      ? `<div class="muted fs-xs mt-1">${data.total_leave} din approved leave${data.leave_reason_text ? ' (' + esc(data.leave_reason_text) + ')' : ''} ${esc(data.total_effective_held)} effective classes me se hataya gaya — medical/family/sports ki wajah se % nahi gira.</div>`
+      : '';
     resDiv.innerHTML = `
       <div class="card" style="box-shadow:none;">
         <div class="row between">
@@ -956,10 +986,11 @@ async function checkMyAttendance() {
             <div class="bold">${esc(data.name) || 'Roll No ' + esc(data.roll_no)}</div>
             <div class="muted fs-sm">${esc(data.class_name)} · ${esc(data.from_date)} → ${esc(data.to_date)}</div>
           </div>
-          <div class="stat-value bold ${overallTone}" style="font-size:1.5rem;">${data.overall_pct}%</div>
+          <div class="stat-value bold ${overallTone}" style="font-size:1.5rem;">${overallText}</div>
         </div>
-        <div class="progress mt-2"><i style="width:${Math.min(100, Number(data.overall_pct) || 0)}%;"></i></div>
-        <div class="muted fs-xs mt-1">Total ${data.total_attended} attended / ${data.total_held} held. 75% usually minimum hota hai.</div>
+        <div class="progress mt-2"><i style="width:${overallBar}%;"></i></div>
+        <div class="muted fs-xs mt-1">Total ${data.total_attended} attended / ${data.total_held} held${overallRawNote}. 75% usually minimum hota hai.</div>
+        ${overallLeaveLine}
       </div>
       ${rows}`;
 

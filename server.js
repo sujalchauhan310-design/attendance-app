@@ -494,7 +494,15 @@ const attendanceSchema = new mongoose.Schema({
   // ---- anti-proxy audit trail ----
   // "present" = counted. "pending" = location verified but the teacher is using
   // manual-approval mode, so it only counts after the teacher approves it.
-  status: { type: String, enum: ["present", "pending"], default: "present" },
+  // "leave"   = teacher ne approved leave lagi (medical/family/sports/...). Ye
+  //            count NAHI hoti, lekin PDF/register me "L" dikhti hai aur ye day
+  //            us student ke "effective %" ke denominator se nikal jaata hai.
+  status: { type: String, enum: ["present", "pending", "leave"], default: "present" },
+  // Sirf status="leave" par meaningful: medical | family | sports | personal |
+  // bereavement | other. PDF me "L" ke saath chhota reason bhi aata hai.
+  leave_reason: { type: String, default: "" },
+  // Teacher ka free-text note (e.g. "medical certificate submitted").
+  leave_note: { type: String, default: "" },
   // Pending hone ka ASLI karan (teacher ko dashboard par dikhta hai):
   // approval_mode | no_location_proof | location_check_off | flagged
   pending_reason: { type: String, default: "" },
@@ -1088,6 +1096,77 @@ const FAILURE_REASON_TEXT = {
   location_off: "Session me location check OFF tha",
 };
 
+// ---------- LEAVE (teacher-approved absence) ----------
+// Leave ek ALAG status hai — present/pending se different. Iske do rules:
+//  1) Leave kabhi "present" me count nahi hoti (attendance nahi badhti).
+//  2) Effective % nikalte waqt wo din denominator se GHAT jaata hai, isliye
+//     medical leave par student ka % nahi gire.
+// Har jagah DONO % dikhate hain (teacher ka faisla): effective (leave hatake) aur
+// raw (leave ke saath). Raw wahi purana number hai jo pehle PDF me aata tha.
+const LEAVE_REASONS = {
+  medical: "Medical",
+  family: "Family function",
+  sports: "Sports / tournament",
+  bereavement: "Bereavement",
+  personal: "Personal reason",
+  other: "Other",
+};
+
+// Reason key ko validate + normalize karta hai. Unknown key = "other" (crash nahi).
+function normalizeLeaveReason(raw) {
+  const s = String(raw || "").trim().toLowerCase();
+  return LEAVE_REASONS[s] ? s : "other";
+}
+
+function leaveReasonText(raw) {
+  return LEAVE_REASONS[normalizeLeaveReason(raw)];
+}
+
+// "2026-09-05" -> "05-09" (PDF/CSV me chhota DD-MM, jaise registers me hota hai).
+function shortDateForDisplay(dateStr) {
+  const parts = String(dateStr).split("-");
+  return parts.length === 3 ? `${parts[2]}-${parts[1]}` : String(dateStr);
+}
+
+// Ek subject ke saare leave reasons ko ek line me jodta hai. Sab same ho to
+// ek hi naam ("Medical"), warna "Medical, Sports" — student ko pata chal jaata
+// ki mix tha. Order wahi rahega jis din pehle aaya, taaki output stable rahe.
+function leaveSummaryText(reasons) {
+  const list = Array.isArray(reasons) ? reasons : [];
+  const unique = [];
+  for (const r of list) {
+    const text = leaveReasonText(r);
+    if (!unique.includes(text)) unique.push(text);
+  }
+  return unique.join(", ");
+}
+
+// Percentage helper — ZERO se divide karna hi sabse badi galti hoti hai, isliye
+// har % yahan se aata hai. `held <= 0` par pct = null (matlab "NA — koi held
+// class hi nahi"), aur callers usse "—" dikhate hain, "0%" nahi.
+//   rawHeld       = class hold ki total classes
+//   leaveDays     = un me se is student ke leave wale din
+//   effectiveHeld = rawHeld - leaveDays  (0 ho sakta hai)
+//   rawPct        = present / rawHeld            (purana behaviour, back-compat)
+//   effectivePct  = present / effectiveHeld      (naya — leave ghata ke)
+function computePercentages({ present, rawHeld, leaveDays }) {
+  const p = Number(present) || 0;
+  const raw = Number(rawHeld) || 0;
+  const leave = Math.max(0, Number(leaveDays) || 0);
+  const effective = raw - leave;
+  return {
+    present: p,
+    rawHeld: raw,
+    leaveDays: leave,
+    effectiveHeld: effective > 0 ? effective : 0,
+    rawPct: raw > 0 ? Number(((p / raw) * 100).toFixed(1)) : null,
+    effectivePct: effective > 0 ? Number(((p / effective) * 100).toFixed(1)) : null,
+    // Effective denominator hi na bache (poora period leave) to effective % ka
+    // matlab hi nahi — PDF me "—" dikhega, 0% nahi (warna student galat samjhega).
+    effectivePossible: effective > 0,
+  };
+}
+
 function decideMarkStatus({ requireApproval, autoReview, locationRequired, locationVerified, flags }) {
   const activeFlags = Array.isArray(flags) ? flags.filter(Boolean) : [];
   // 1) Teacher ne khud approval mode ON kiya -> sab pending.
@@ -1246,33 +1325,53 @@ async function buildOverallReportRows(class_name, subject, course_type, system, 
     status: { $ne: "pending" }, // pending marks are not counted until approved
   }).lean();
 
-  const classDays = new Set(records.map((r) => r.date)).size;
-  // The denominator is ALWAYS the number of days this class was actually held.
-  // Dividing by calendar days would drag every student's % down with Sundays,
-  // holidays and vacations — and would make a 30-day report and a 365-day
-  // report of the same student disagree wildly. Attended ÷ Held is also the
-  // number a college actually asks for.
-  const denominator = classDays;
+  // "Class hold hua" ka matlab: us din KISI to student ka record bana tha
+  // (present ya leave). Sirf-leave wale din bhi ek held class hai — student ne
+  // apni leave mark kar li thi, class chali thi. Sirf "pending" NAHI (us din ki
+  // attendance abhi confirm nahi hui, isliye wo held count nahi hona chahiye).
+  const classDays = new Set(
+    records.filter((r) => r.status !== "pending").map((r) => r.date)
+  ).size;
 
   const byRoll = new Map();
   for (const r of records) {
     if (!byRoll.has(r.roll_no)) {
-      byRoll.set(r.roll_no, { roll_no: r.roll_no, student_name: r.student_name, present: new Set() });
+      byRoll.set(r.roll_no, {
+        roll_no: r.roll_no,
+        student_name: r.student_name,
+        present: new Set(),
+        leave: new Set(), // teacher-approved leave wale din (attendance nahi badhti)
+      });
     }
     const entry = byRoll.get(r.roll_no);
-    entry.present.add(r.date);
+    if (r.status === "leave") entry.leave.add(r.date);
+    else entry.present.add(r.date);
     if (r.student_name) entry.student_name = r.student_name; // keep most recent known name
   }
 
   const rows = Array.from(byRoll.values()).map((s) => {
-    const totalPresent = s.present.size;
-    const pct = denominator ? ((totalPresent / denominator) * 100).toFixed(1) : "0.0";
+    // Leave days denominator se nikal jaati hain — isliye medical leave par %
+    // nahi girega. Zero se divide hone se bachne ke liye computePercentages
+    // effectivePct = null deta hai (PDF me "—" dikhega, 0% nahi).
+    const stats = computePercentages({
+      present: s.present.size,
+      rawHeld: classDays,
+      leaveDays: Math.min(s.leave.size, classDays),
+    });
     return {
       roll_no: s.roll_no,
       student_name: s.student_name,
-      dayMarks: dates.map((d) => (s.present.has(d) ? "P" : "A")),
-      totalPresent,
-      pct,
+      // Day grid: "P" | "L" (leave) | "A". PDF me L blue me render hota hai.
+      dayMarks: dates.map((d) => (s.present.has(d) ? "P" : s.leave.has(d) ? "L" : "A")),
+      totalPresent: s.present.size,
+      leaveDays: stats.leaveDays,
+      leaveDates: dates.filter((d) => s.leave.has(d)),
+      effectiveHeld: stats.effectiveHeld,
+      effectivePct: stats.effectivePct,
+      rawPct: stats.rawPct,
+      // Purane callers (PDF fallback, CSV, monthly email) sirf `pct` padhte hain
+      // — wahi effective % rehte hain, taaki har jagah ek hi number dikhe.
+      pct: stats.effectivePct === null ? "0.0" : String(stats.effectivePct),
     };
   });
 
@@ -2511,20 +2610,194 @@ app.post("/api/teacher/attendance/manual-mark", requireTeacherAuth, async (req, 
   }
 });
 
+// LEAVE mark — teacher ne approved absence (medical / family / sports / ...).
+// manual-mark ka hi pattern, bas `status: "leave"` aur karan ke saath:
+//   * Attendance count NAHI hoti (student absent hi rehta hai).
+//   * Effective % ke denominator se wo din hat jata hai.
+//   * PDF/register me "L" dikhta hai.
+//   * Ye Attendance collection me hi ek normal entry hai, isliye wo existing
+//     UNIQUE index (roll+class+subject+course+system+date) automatically double
+//     leave rok deta hai — alag collection banane ki zaroorat hi nahi.
+app.post("/api/teacher/attendance/leave-mark", requireTeacherAuth, async (req, res) => {
+  try {
+    const { roll_no, class_name, subject, course_type, name } = req.body;
+    if (!roll_no || !class_name || !subject || !course_type) {
+      return res.status(400).json({ error: "Roll number, class, subject and course type are required." });
+    }
+    if (!/^[0-9]+$/.test(String(roll_no).trim())) {
+      return res.status(400).json({ error: "Roll number must contain digits only." });
+    }
+    const system = normalizeSystem(req.body.system);
+    if (!system) return res.status(400).json({ error: "system must be either Annual or Semester." });
+
+    const day = parseReportDate(req.body.date);
+    if (day.error) return res.status(400).json({ error: day.error });
+
+    // Session (agar teacher abhi live class chala raha hai) — isse leave usi
+    // session ke "session PDF" me bhi "L" ki tarah dikhega, warna sirf 30/90-din
+    // report me dikhega. Galat ya expire ho chuke session ko ignore kar dete hain.
+    let sessionId = "";
+    const rawSession = req.body.session_id;
+    if (rawSession && mongoose.Types.ObjectId.isValid(rawSession)) {
+      const live = await ActiveCode.findById(rawSession).select("_id expires_at").lean();
+      if (live && Date.now() <= live.expires_at) sessionId = live._id.toString();
+    }
+
+    const cleanRoll = String(roll_no).trim();
+    const now = Date.now();
+    const reason = normalizeLeaveReason(req.body.leave_reason);
+    const note = req.body.leave_note ? String(req.body.leave_note).trim().slice(0, 160) : "";
+
+    // Roster/previous record wins over typed name — same rule as manual-mark,
+    // taaki is screen se kisi student ka naam galti se change na ho.
+    const existingStudent = await Student.findOne({ roll_no: cleanRoll });
+    const student_name = existingStudent ? existingStudent.name : (name ? String(name).trim() : "");
+    if (!student_name) {
+      return res.status(400).json({ error: "This roll number is new — enter the student's name as well." });
+    }
+    if (!existingStudent) {
+      try {
+        await Student.create({ roll_no: cleanRoll, name: student_name, class_name, major_subject: "" });
+      } catch (e) {
+        if (e.code !== 11000) throw e;
+      }
+    }
+
+    const clash = await Attendance.findOne({
+      roll_no: cleanRoll, class_name, subject, course_type, system: systemMatch(system), date: day.date,
+    });
+    if (clash) {
+      if (clash.status === "leave") {
+        return res.status(409).json({ error: `${student_name} already has leave marked for this subject on ${day.date}.` });
+      }
+      // Student pehle se present/pending hai. Leave tabhi lagegi jab teacher
+      // SAHI se convert karna chahta hai — hum silently overwrite nahi karte,
+      // warna ek galti se attendance hi gayab ho jayegi.
+      return res.status(409).json({
+        error: `${student_name} is already marked PRESENT for this subject on ${day.date}. Delete that entry first, then mark leave.`,
+        already_present: true,
+      });
+    }
+
+    await Attendance.create({
+      roll_no: cleanRoll,
+      student_name,
+      subject,
+      course_type,
+      system,
+      major_subject: existingStudent ? existingStudent.major_subject || "" : "",
+      class_name,
+      date: day.date,
+      marked_at: now,
+      device_id: "teacher-leave",
+      // Live session se diya hai to is class ke session PDF me bhi "L" dikhega.
+      session_id: sessionId,
+      status: "leave",
+      leave_reason: reason,
+      leave_note: note,
+      source: "teacher-leave",
+      flags: [],
+      approved_at: now,
+    });
+
+    res.json({
+      success: true,
+      leave: true,
+      reason,
+      reason_text: leaveReasonText(reason),
+      message: `${student_name} (Roll No ${cleanRoll}) marked on LEAVE for ${day.date} — ${leaveReasonText(reason)}.`,
+    });
+    audit("attendance.leave-mark", req, `roll_no=${cleanRoll}`, `${class_name}/${subject}/${course_type} date=${day.date} reason=${reason}`);
+    await touchStudentActivity(cleanRoll);
+    // Leave = "ye student aaj aayega hi nahi" — uske purane location-failure
+    // rows bhi resolve ho jaate hain, warna teacher ki list me wahi student
+    // "location fail" me dobara dikhega.
+    await LocationAttempt.updateMany(
+      { date: day.date, roll_no: cleanRoll, resolved_at: { $in: [null, 0] } },
+      { $set: { resolved_at: now, resolved_by: "leave" } }
+    ).catch(() => {});
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong marking leave." });
+  }
+});
+
+// Remove a leave entry — teacher ne galti se laga diya. Sirf status="leave"
+// wali entry hatati hai; present/absent ka flow alag hai (manual-mark).
+app.post("/api/teacher/attendance/leave-remove", requireTeacherAuth, async (req, res) => {
+  try {
+    const { record_id } = req.body;
+    if (!record_id || !mongoose.Types.ObjectId.isValid(record_id)) {
+      return res.status(400).json({ error: "A valid record_id is required." });
+    }
+    const deleted = await Attendance.findOneAndDelete({ _id: record_id, status: "leave" });
+    if (!deleted) {
+      return res.status(404).json({ error: "Leave entry nahi mili (shayad pehle hi hata di gayi ho)." });
+    }
+    audit("attendance.leave-remove", req, `id=${record_id}`, `roll_no=${deleted.roll_no} ${deleted.class_name}/${deleted.subject} date=${deleted.date}`);
+    res.json({ success: true, removed: 1, message: `Leave hata diya — ${deleted.student_name || deleted.roll_no}, ${deleted.date}.` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong removing the leave entry." });
+  }
+});
+
+// Saare leave entries ek din ki — teacher ke "blue chips" list aur review tab
+// dono ke liye ek hi source of truth.
+app.get("/api/teacher/leave-list", requireTeacherAuth, async (req, res) => {
+  try {
+    const day = parseReportDate(req.query.date);
+    if (day.error) return res.status(400).json({ error: day.error });
+    const filter = { date: day.date, status: "leave" };
+    if (req.query.class_name) filter.class_name = req.query.class_name;
+
+    const rows = await Attendance.find(filter).lean();
+    rows.sort(compareRollNo);
+    res.json({
+      ok: true,
+      date: day.date,
+      count: rows.length,
+      reasons: LEAVE_REASONS,
+      leaves: rows.map((r) => ({
+        record_id: r._id.toString(),
+        roll_no: r.roll_no,
+        student_name: r.student_name || "",
+        class_name: r.class_name || "",
+        subject: r.subject || "",
+        course_type: r.course_type || "",
+        system: r.system || "Annual",
+        date: r.date,
+        leave_reason: r.leave_reason || "other",
+        leave_reason_text: leaveReasonText(r.leave_reason),
+        leave_note: r.leave_note || "",
+        marked_at_hhmm: r.marked_at ? istHHMM(r.marked_at) : "",
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Leave list load nahi hui." });
+  }
+});
+
 // Everything a teacher needs to judge one day at a glance: marks waiting for
 // approval, entries flagged by the anti-proxy checks, and which devices failed
 // location verification (a device failing 10 times today deserves a look).
+// NOTE: `leaves` bhi yahi return karta hai — teacher ke blue "Leave" chips
+// ek hi fetch se refresh hote hain (alag /leave-list call nahi lagana padta).
 app.get("/api/teacher/review", requireTeacherAuth, async (req, res) => {
   try {
     const day = parseReportDate(req.query.date);
     if (day.error) return res.status(400).json({ error: day.error });
     const classFilter = req.query.class_name ? { class_name: req.query.class_name } : {};
 
-    const [pending, flagged, failures] = await Promise.all([
+    const [pending, flagged, failures, leaveRows] = await Promise.all([
       Attendance.find({ date: day.date, status: "pending", ...classFilter }).lean(),
       Attendance.find({ date: day.date, flags: { $exists: true, $ne: [] }, ...classFilter }).lean(),
       LocationAttempt.find({ date: day.date, count: { $gt: 0 } }).sort({ count: -1 }).limit(25).lean(),
+      Attendance.find({ date: day.date, status: "leave", ...classFilter }).lean(),
     ]);
+
+    leaveRows.sort(compareRollNo);
 
     // Map failing devices to their roll numbers so the teacher can tell who it is.
     const locks = await DeviceLock.find({ device_id: { $in: failures.map((f) => f.device_id) } }).lean();
@@ -2540,8 +2813,22 @@ app.get("/api/teacher/review", requireTeacherAuth, async (req, res) => {
       date: day.date,
       pending_count: pending.length,
       flagged_count: flagged.length,
+      leave_count: leaveRows.length,
       pending,
       flagged,
+      // Blue "Leave" chips: teacher ke list me kitne leave aaj lage hue hain.
+      leaves: leaveRows.map((r) => ({
+        record_id: r._id.toString(),
+        roll_no: r.roll_no,
+        student_name: r.student_name || "",
+        class_name: r.class_name || "",
+        subject: r.subject || "",
+        course_type: r.course_type || "",
+        leave_reason: r.leave_reason || "other",
+        leave_reason_text: leaveReasonText(r.leave_reason),
+        leave_note: r.leave_note || "",
+        marked_at_hhmm: r.marked_at ? istHHMM(r.marked_at) : "",
+      })),
       location_failures: failures.map((f) => {
         const roll = rollByDevice.get(f.device_id) || "";
         return { device_id: f.device_id, roll_no: roll, student_name: roll ? nameByRoll.get(roll) || "" : "", count: f.count };
@@ -2708,9 +2995,18 @@ app.get("/api/student/my-attendance", studentLookupLimiter, async (req, res) => 
           subject: r.subject,
           course_type: r.course_type,
           present: new Set(),
+          leave: new Set(), // teacher-approved leave wale din
+          // Leave reasons bhi yaad rakhte hain (date -> reason) taaki student ko
+          // dikha sakein ki medical thi ya sports. Ek subject me alag-alag din ke
+          // reasons ho sakte hain, isliye poora map chahiye.
+          leaveReasons: new Map(),
         });
       }
-      groups.get(key).present.add(r.date);
+      // Leave attendance nahi hai — use apne set me, taaki % se nikle.
+      if (r.status === "leave") {
+        groups.get(key).leave.add(r.date);
+        groups.get(key).leaveReasons.set(r.date, r.leave_reason || "other");
+      } else groups.get(key).present.add(r.date);
     }
 
     // How many times each of those classes was actually held (a date on which
@@ -2727,13 +3023,30 @@ app.get("/api/student/my-attendance", studentLookupLimiter, async (req, res) => 
     const subjects = Array.from(groups.entries()).map(([key, g]) => {
       const attended = g.present.size;
       const held = heldMap.get(key) || attended; // fall back to own marks if oldest data was purged
+      // Leave days denominator se nikal jaati hain — medical leave par % nahi girega.
+      const stats = computePercentages({
+        present: attended,
+        rawHeld: held,
+        leaveDays: Math.min(g.leave.size, held),
+      });
       return {
         class_name: g.class_name,
         subject: g.subject,
         course_type: g.course_type,
         attended,
         held,
-        pct: held ? Number(((attended / held) * 100).toFixed(1)) : 0,
+        leave_days: stats.leaveDays,
+        effective_held: stats.effectiveHeld,
+        // Leave ke din (DD-MM) + unka reason — student ke "my attendance" card
+        // par blue "L" chip ke saath dikhta hai. Reason text unique hai: ek
+        // subject me 3 din leave aur teeno medical hain to ek hi naam dikhe.
+        leave_dates: Array.from(g.leave).sort().map(shortDateForDisplay),
+        leave_reason_text: leaveSummaryText(Array.from(g.leaveReasons.values())),
+        // Naya: effective % (leave hatake) + raw % (leave ke saath, purana number).
+        // effectivePct null ka matlab: poore period me koi held class bachi hi nahi.
+        pct: stats.effectivePct === null ? 0 : stats.effectivePct,
+        effective_pct: stats.effectivePct,
+        raw_pct: stats.rawPct,
       };
     });
     subjects.sort((a, b) =>
@@ -2742,6 +3055,18 @@ app.get("/api/student/my-attendance", studentLookupLimiter, async (req, res) => 
 
     const totalAttended = subjects.reduce((sum, s) => sum + s.attended, 0);
     const totalHeld = subjects.reduce((sum, s) => sum + s.held, 0);
+    const totalLeave = subjects.reduce((sum, s) => sum + s.leave_days, 0);
+    const totalStats = computePercentages({ present: totalAttended, rawHeld: totalHeld, leaveDays: totalLeave });
+    // Overall leave dates: unique + DD-MM me. `total_effective_held` ke saath
+    // student ko dikhta hai "kitne din approved leave the, aur % kaise bacha".
+    const totalLeaveDates = Array.from(
+      new Set(records.filter((r) => r.status === "leave").map((r) => r.date))
+    )
+      .sort()
+      .map(shortDateForDisplay);
+    const totalLeaveReasonText = leaveSummaryText(
+      records.filter((r) => r.status === "leave").map((r) => r.leave_reason)
+    );
 
     res.json({
       roll_no: cleanRoll,
@@ -2754,7 +3079,16 @@ app.get("/api/student/my-attendance", studentLookupLimiter, async (req, res) => 
       to_date: dates[dates.length - 1],
       total_attended: totalAttended,
       total_held: totalHeld,
-      overall_pct: totalHeld ? Number(((totalAttended / totalHeld) * 100).toFixed(1)) : 0,
+      total_leave: totalStats.leaveDays,
+      total_effective_held: totalStats.effectiveHeld,
+      leave_dates: totalLeaveDates,
+      leave_reason_text: totalLeaveReasonText,
+      // `overall_pct` effective % hi hai (leave hatake) — UI ka primary number.
+      // effectivePct null (koi held class nahi bachi) par 0, aur `effective_pct`
+      // null rahega taaki UI "—" dikha sake.
+      overall_pct: totalStats.effectivePct === null ? 0 : totalStats.effectivePct,
+      effective_pct: totalStats.effectivePct,
+      raw_pct: totalStats.rawPct,
       pending_count: pendingCount,
       subjects,
     });
@@ -3199,6 +3533,17 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
           distance_m: location.distance_m,
         });
       }
+      // Leave par student ko "already marked" jaisa generic message mat do —
+      // use saaf batao ki teacher ne leave lagi hai, warna student sochega ki
+      // uski attendance ban gayi. (Leave attendance NAHI hai, sirf % se hatta hai.)
+      if (alreadyMarked.status === "leave") {
+        return res.status(409).json({
+          error: `Aapki LEAVE laga di gayi hai is subject ke liye (${leaveReasonText(alreadyMarked.leave_reason)}). Attendance mark karne ki zaroorat nahi.`,
+          leave: true,
+          leave_reason: alreadyMarked.leave_reason || "other",
+          leave_reason_text: leaveReasonText(alreadyMarked.leave_reason),
+        });
+      }
       return res.status(409).json({
         error: alreadyMarked.status === "pending"
           ? "Your attendance for this subject and course type is already recorded — it is waiting for your teacher's approval."
@@ -3355,6 +3700,75 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
     res.status(500).json({ error: "Something went wrong. Try again." });
   }
 });
+// ---------- PENDING ENTRY → FEED ROW (shared) ----------
+// Ek Attendance doc ko "teacher feed row" me badalta hai. Ye EXACT same shape
+// /api/teacher/session-live (live dashboard) aur /api/teacher/pending-summary
+// (front-page banner) dono dete hain — isliye frontend ka ek hi render function
+// dono jagah chalta hai, aur ek jagah ka field bhoolne se doosri jagah UI toot'ti
+// nahi. Naye field add karte waqt dono jagah automatic aa jaate hain.
+function toPendingRow(m) {
+  return {
+    record_id: m._id.toString(),
+    roll_no: m.roll_no,
+    student_name: m.student_name || "",
+    class_name: m.class_name || "",
+    subject: m.subject || "",
+    course_type: m.course_type || "",
+    date: m.date || "",
+    session_id: m.session_id ? String(m.session_id) : "",
+    marked_at: m.marked_at,
+    marked_at_hhmm: m.marked_at ? istHHMM(m.marked_at) : "",
+    status: m.status || "present",
+    pending_reason: m.pending_reason || "",
+    pending_reason_text: m.pending_reason ? PENDING_REASON_TEXT[m.pending_reason] || "Teacher review chahiye" : "",
+    flags: m.flags || [],
+    location_verified: m.location_verified === true,
+    distance_m: m.distance_m === null || m.distance_m === undefined ? null : Math.round(m.distance_m),
+    accuracy: m.accuracy === null || m.accuracy === undefined ? null : Math.round(m.accuracy),
+    source: m.source || "student",
+    device_short: m.device_id ? String(m.device_id).slice(-6) : "",
+  };
+}
+
+// ---------- FRONT-PAGE PENDING SUMMARY (banner ka data source) ----------
+// Teacher ka shikayat: "pending entries dhundhne me time waste hota hai." Ye
+// endpoint isliye ALAG hai kyunki ye:
+//   - live session ki zaroorat NAHI maangta (band session me bhi chalta hai),
+//   - sirf pending (status="pending") deta hai — flagged/leave nahi,
+//   - halka hai: sirf count + latest 50 entries (poora data nahi bhejta).
+// Front page ka banner isko ~20 second me ek call poll karta hai.
+app.get("/api/teacher/pending-summary", requireTeacherAuth, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+    const today = todayDateString();
+
+    // Sirf wahi entries jo teacher ko approve karne hain. "leave" alag status
+    // hai (wo approve nahi hoti) isliye yahin include nahi hoti.
+    const [total, todayCount, rows] = await Promise.all([
+      Attendance.countDocuments({ status: "pending" }),
+      Attendance.countDocuments({ status: "pending", date: today }),
+      Attendance.find({ status: "pending" }).sort({ marked_at: -1 }).limit(limit).lean(),
+    ]);
+
+    // Purani pending (aaj ki nahi) alag se count — banner me "kal: 2" jaisa
+    // hint dena helpful hai, warna teacher sochta hai aaj ke hi pending hain.
+    const older = Math.max(0, total - todayCount);
+
+    res.json({
+      ok: true,
+      pending_count: total,
+      today_count: todayCount,
+      older_count: older,
+      today,
+      truncated: total > rows.length,
+      pending: rows.map(toPendingRow),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Pending summary load nahi hui." });
+  }
+});
+
 // ---------- LIVE SESSION DASHBOARD ----------
 // Teacher page is endpoint ko har ~5 second me poll karta hai (classroom me
 // projector par live chalane ke liye). Ek hi call me: counters, 10-minute
@@ -3416,24 +3830,9 @@ app.get("/api/teacher/session-live", requireTeacherAuth, async (req, res) => {
     }
 
     const confirmed_count = marked_count - pending_count;
-    const toFeedRow = (m) => ({
-      record_id: m._id.toString(),
-      roll_no: m.roll_no,
-      student_name: m.student_name || "",
-      subject: m.subject || "",
-      course_type: m.course_type || "",
-      marked_at: m.marked_at,
-      marked_at_hhmm: istHHMM(m.marked_at),
-      status: m.status || "present",
-      pending_reason: m.pending_reason || "",
-      pending_reason_text: m.pending_reason ? PENDING_REASON_TEXT[m.pending_reason] || "Teacher review chahiye" : "",
-      flags: m.flags || [],
-      location_verified: m.location_verified === true,
-      distance_m: m.distance_m === null || m.distance_m === undefined ? null : Math.round(m.distance_m),
-      accuracy: m.accuracy === null || m.accuracy === undefined ? null : Math.round(m.accuracy),
-      source: m.source || "student",
-      device_short: m.device_id ? String(m.device_id).slice(-6) : "",
-    });
+    // Shared row-builder (upar define) — banner endpoint bhi yahi use karta hai,
+    // isliye live feed aur front-page sheet ka ek row bilkul same dikhta hai.
+    const toFeedRow = toPendingRow;
 
     // Failure list ke rolls me se kaun aaj already mark ho chuka hai (unka kaam
     // khatam) — unhe "already present" dikhana hai, button dabana nahi.
@@ -3614,10 +4013,17 @@ app.post("/api/teacher/email-test", requireTeacherAuth, async (req, res) => {
 app.get("/api/teacher/audit", requireTeacherAuth, async (req, res) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 300);
-    const entries = await AuditLog.find({}).sort({ at: -1 }).limit(limit).lean();
+    // Frontend dropdown ka filter. "all" ya khaali = sabhi actions.
+    // Server side filter isliye zaroori hai ki 300-entry limit ke andar hi
+    // filter lage — warna "sirf delete" chunne par 300 me se shayad 2 delete hi
+    // mile aur user ko lage ki baaki delete hi nahi hue.
+    const action = String(req.query.action || "all").trim();
+    const filter = action && action !== "all" ? { action } : {};
+    const entries = await AuditLog.find(filter).sort({ at: -1 }).limit(limit).lean();
     res.json({
       ok: true,
       count: entries.length,
+      action: action || "all",
       entries: entries.map((e) => ({
         at: e.at,
         at_hhmm: istHHMM(e.at),
@@ -3631,6 +4037,27 @@ app.get("/api/teacher/audit", requireTeacherAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Activity log load nahi hua." });
+  }
+});
+
+// Har action type kitni baar hua — dropdown ke options + unke counts.
+// Regex wale special characters ko escape kiya gaya hai, warna user ka
+// filter string Mongo ko RegExp samajh kar query fail kara deta.
+app.get("/api/teacher/audit-actions", requireTeacherAuth, async (req, res) => {
+  try {
+    const rows = await AuditLog.aggregate([
+      { $group: { _id: "$action", count: { $sum: 1 }, last_at: { $max: "$at" } } },
+      { $sort: { count: -1 } },
+    ]);
+    res.json({
+      ok: true,
+      actions: rows
+        .filter((r) => r._id)
+        .map((r) => ({ action: r._id, count: r.count, last_at: r.last_at })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Action list load nahi hui." });
   }
 });
 
@@ -3685,9 +4112,17 @@ async function collectStudentSubjectRows(roll_no, system) {
   for (const r of records) {
     const key = [r.class_name, r.subject, r.course_type].join("|");
     if (!groups.has(key)) {
-      groups.set(key, { class_name: r.class_name, subject: r.subject, course_type: r.course_type, present: new Set() });
+      groups.set(key, {
+        class_name: r.class_name,
+        subject: r.subject,
+        course_type: r.course_type,
+        present: new Set(),
+        leave: new Set(), // teacher-approved leave — denominator se nikalegi
+      });
     }
-    groups.get(key).present.add(r.date);
+    const g = groups.get(key);
+    if (r.status === "leave") g.leave.add(r.date);
+    else g.present.add(r.date);
   }
 
   const heldAgg = await Attendance.aggregate([
@@ -3700,13 +4135,25 @@ async function collectStudentSubjectRows(roll_no, system) {
   const rows = [...groups.entries()].map(([key, g]) => {
     const attended = g.present.size;
     const held = heldMap.get(key) || attended;
+    // Leave days held count se nikal jaati hain (student PDF + email wale % ke liye).
+    const stats = computePercentages({
+      present: attended,
+      rawHeld: held,
+      leaveDays: Math.min(g.leave.size, held),
+    });
     return {
       class_name: g.class_name,
       subject: g.subject,
       course_type: g.course_type,
       attended,
       held,
-      pct: held ? Number(((attended / held) * 100).toFixed(1)) : 0,
+      leave_days: stats.leaveDays,
+      effective_held: stats.effectiveHeld,
+      // `pct` effective % hai (purane callers isi ko padhte hain) — raw % alag
+      // column me, taaki teacher dono numbers ek saath dekh sake.
+      pct: stats.effectivePct === null ? 0 : stats.effectivePct,
+      effective_pct: stats.effectivePct,
+      raw_pct: stats.rawPct,
     };
   });
   rows.sort((a, b) => String(a.subject + a.course_type).localeCompare(String(b.subject + b.course_type)));
@@ -3896,6 +4343,8 @@ app.get("/api/teacher/export.csv", requireTeacherAuth, async (req, res) => {
       "Date",
       "Marked At (IST)",
       "Status",
+      "Leave Reason",
+      "Leave Note",
       "Source",
       "Distance (m)",
       "Accuracy (m)",
@@ -3904,6 +4353,7 @@ app.get("/api/teacher/export.csv", requireTeacherAuth, async (req, res) => {
     ];
     const lines = [header.join(",")];
     for (const r of rows) {
+      const isLeave = r.status === "leave";
       lines.push(
         [
           r.roll_no,
@@ -3914,7 +4364,10 @@ app.get("/api/teacher/export.csv", requireTeacherAuth, async (req, res) => {
           r.system || "Annual",
           r.date,
           istHHMM(r.marked_at),
-          r.status || "present",
+          isLeave ? "LEAVE (L)" : r.status || "present",
+          // Leave reason sirf leave rows par bharta hai, warna columns khaali rehte hain.
+          isLeave ? leaveReasonText(r.leave_reason) : "",
+          isLeave ? r.leave_note || "" : "",
           r.source || "student",
           r.distance_m === null || r.distance_m === undefined ? "" : Math.round(r.distance_m),
           r.accuracy === null || r.accuracy === undefined ? "" : Math.round(r.accuracy),
@@ -3952,11 +4405,32 @@ app.get("/api/teacher/export-matrix.csv", requireTeacherAuth, async (req, res) =
 
     const dates = lastNDates(REPORT_DAYS[system]);
     const { rows, classDays } = await buildOverallReportRows(class_name, subject, course_type, system, dates);
-    const header = ["Roll No", "Name", ...dates, "Attended", "Held", "%"];
+    // Day columns me "L" aata hai (leave), aur last me dono % — effective
+    // (leave hatake) + raw (leave ke saath) — taaki Excel me bhi dono number
+    // saaf-saaf dikhaye jaye sakein, na ki ek me chhup jaaye.
+    const header = [
+      "Roll No", "Name", ...dates,
+      "Attended", "Leave Days", "Held", "Leave Dates (DD-MM)", "Effective %", "%",
+    ];
     const lines = [header.map(csvCell).join(",")];
+    // Excel me "N/A" text number nahi hota — blank hi chhodna sahi hai, warna
+    // koi bhi SUM/AVERAGE formula us cell par error de deta hai.
+    const fmtPct = (v) => (v === null || v === undefined ? "" : `${v}%`);
     for (const r of rows) {
       lines.push(
-        [r.roll_no, r.student_name, ...(r.dayMarks || []), r.totalPresent, classDays, `${r.pct}%`].map(csvCell).join(",")
+        [
+          r.roll_no,
+          r.student_name,
+          ...(r.dayMarks || []), // "P" | "L" | "A" — PDF waisa hi
+          r.totalPresent,
+          r.leaveDays || 0,
+          classDays,
+          (r.leaveDates || []).map(shortDateForDisplay).join(" "),
+          fmtPct(r.effectivePct),
+          fmtPct(r.rawPct),
+        ]
+          .map(csvCell)
+          .join(",")
       );
     }
     const csv = "\uFEFF" + lines.join("\r\n"); // BOM: Excel me headings sahi dikhen
@@ -4133,6 +4607,13 @@ module.exports = {
   PENDING_REASON_TEXT,
   FAILURE_REASON_TEXT,
   maskEmail,
+  // Leave + percentage helpers — tools/leave-logic-test.js inhi ko test karta hai.
+  computePercentages,
+  normalizeLeaveReason,
+  leaveReasonText,
+  leaveSummaryText,
+  shortDateForDisplay,
+  LEAVE_REASONS,
 };
 
 // ---------- START SERVER ----------

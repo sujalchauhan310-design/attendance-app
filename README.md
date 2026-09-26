@@ -225,6 +225,8 @@ PATCH  /api/teacher/attendance/update
 DELETE /api/teacher/attendance/delete
 POST   /api/teacher/attendance/manual-mark
 POST   /api/teacher/attendance/approve | /reject | /approve-all
+POST   /api/teacher/attendance/leave-mark | /leave-remove
+GET    /api/teacher/leave-list                 → selected date ki approved leaves
 POST   /api/teacher/session/set-approval
 DELETE /api/teacher/device-lock
 POST   /api/teacher/upload-roster         → email 5th column (optional)
@@ -280,6 +282,7 @@ Render ka free instance ~15 min idle ke baad sota hai, isliye [cron-job.org](htt
 ```bash
 node tools/backup-attendance.js    # purana attendance data ka CSV backup (retention change se pehle!)
 node tools/approval-logic-test.js  # Smart approval logic (verified/fail/flag ke 8 case) + reason texts
+node tools/leave-logic-test.js      # Leave + % maths (leave hatane par effective %, zero-denominator guard)
 node tools/pdf-smoke-test.js       # PDF checks: session, 30-din grid, 90-din month-grid, 120-din summary, student report
 node tools/boot-smoke-test.js      # DB ke bina server boot + JSON error handling check
 node tools/verify-pages.js         # teacher.html + student.html: JS syntax, duplicate ids, API paths server se match
