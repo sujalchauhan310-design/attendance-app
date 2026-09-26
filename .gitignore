@@ -1,2 +1,28 @@
 node_modules
 tmp/
+
+# ---- SECRETS (kabhi commit nahi hone chahiye) ----
+# Render me sab secrets Environment Variables me hain. Local .env sirf
+# development ke liye hai — ise kabhi git me nahi daalna.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- Logs / OS / editor noise ----
+*.log
+npm-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ---- Build / cache output ----
+node_modules/
+.cache/
+dist/
+build/
+*.tsbuildinfo
+

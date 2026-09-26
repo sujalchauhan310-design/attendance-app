@@ -282,8 +282,37 @@ const ALLOW_START_WITHOUT_DB = boolWithDefault(process.env.ALLOW_START_WITHOUT_D
 
 const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
+// Resend ka FREE onboarding sender (<account-email>@resend.dev) ek hi rule hai:
+// sirf usi account ke signup email ko mail bhej sakta hai. Doosre kisi address
+// (student, HOD, principal) ko bhejne ki koshish karne par Resend ya to reject
+// kar deta hai, ya silently deliver nahi hota — dono cases me teacher ko pata hi
+// nahi chalta ki mail gayi ya nahi. Isliye hum SAITE hi rok dete hain aur saaf
+// message de dete hain, taaki "report bhej diya" ka jhooth na dikhe.
+const ONBOARDING_SENDER = /^[^<]*<onboarding@resend\.dev>$/i.test(EMAIL_FROM.trim());
+// onboarding sender sirf KHUD ke account ki email ko bhej sakta hai. Ye helper
+// batata hai ki ye recipients list deliver ho sakti hai ya nahi.
+function onboardingAllows(recipients) {
+  if (!ONBOARDING_SENDER) return true; // apna domain verify hai — sab jayega
+  // Domain nahi hai: sirf tab sahi maano jab recipients me wahi email hai jo
+  // Resend account se signup hui. Wo email RESEND_API_KEY se pata nahi chalta,
+  // isliye hum Render me optional RESEND_ACCOUNT_EMAIL se compare karte hain.
+  const account = String(process.env.RESEND_ACCOUNT_EMAIL || "").trim().toLowerCase();
+  if (!account) return true; // pata nahi -> haan maan lo (teacher ne set kiya hoga)
+  const target = (Array.isArray(recipients) ? recipients : [recipients])
+    .map((e) => String(e || "").trim().toLowerCase())
+    .filter(Boolean);
+  return target.length > 0 && target.every((e) => e === account);
+}
+
 if (!resend) {
   console.warn("RESEND_API_KEY not set — automatic PDF emails are disabled.");
+} else if (ONBOARDING_SENDER) {
+  console.warn("EMAIL_FROM is still the Resend onboarding sender (onboarding@resend.dev).");
+  console.warn("         Usse sirf usi Resend account ke signup email ko mail ja sakta hai.");
+  console.warn("         Aur kisi ko (student/HOD) bhejna hai to apna domain verify karo:");
+  console.warn("           EMAIL_FROM=\"Attendance <no-reply@yourdomain.com>\"");
+  console.warn("         Set RESEND_ACCOUNT_EMAIL to your Resend signup email so we can");
+  console.warn("         tell you, at send time, which addresses will actually deliver.");
 }
 
 if (TEACHER_PASSWORD === DEFAULT_TEACHER_PASSWORD) {
@@ -1262,7 +1291,10 @@ async function computeAntiProxyFlags({ sessionId, device_id, roll_no, date, lat,
 // Builds a simple attendance-table PDF (as a Buffer) for one session.
 function buildAttendancePdfBuffer(session, records) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 40, size: "A4" });
+    // createDoc (module load ho chuka ho) use karo — isse Deva font register hota
+    // hai. Warna Devanagari naam draw karte waqt ENOENT se POORA PDF fail ho jata
+    // tha (blank file). Module load na ho to seedha PDFDocument, purana behaviour.
+    const doc = createFallbackDoc({ margin: 40, size: "A4" });
     const chunks = [];
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -1386,7 +1418,7 @@ async function buildOverallReportRows(class_name, subject, course_type, system, 
 // shows a compact summary table, since that many columns can't fit on a page.
 function buildOverallReportPdfBuffer(meta, rows) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 30, size: "A4", layout: "landscape" });
+    const doc = createFallbackDoc({ margin: 30, size: "A4", layout: "landscape" });
     const chunks = [];
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -1696,6 +1728,23 @@ function pdfOpts(extra) {
   return Object.assign({ collegeName: COLLEGE_NAME, generatedAt: Date.now() }, extra || {});
 }
 
+// Fallback PDF (purane simple builder) ke liye doc factory. Advanced module ka
+// createDoc use karta hai taaki Deva font REGISTER ho — warna Devanagari naam
+// draw karte waqt pdfkit ENOENT de kar poora PDF fail kar deta tha (blank file).
+// Module load hi nahi hua (corrupt file) to seedha PDFDocument — waise bhi
+// fallback tabhi chalta hai. Naam phir bhi "?" banenge, par PDF banegi.
+function createFallbackDoc(options) {
+  const mod = getPdfReports();
+  if (mod && typeof mod.createDoc === "function") {
+    try {
+      return mod.createDoc(options);
+    } catch (e) {
+      console.error("createDoc fail hua, seedha PDFDocument use kar rahe hain:", e.message);
+    }
+  }
+  return new PDFDocument(options);
+}
+
 async function buildSessionPdf(session, records) {
   const mod = getPdfReports();
   if (typeof mod.buildSessionPdfBuffer === "function") {
@@ -1757,6 +1806,20 @@ async function sendReportEmail({ to, subject, text, html, attachments }) {
   const recipients = (Array.isArray(to) ? to : [to]).map((e) => String(e || "").trim()).filter(Boolean);
   if (!recipients.length) {
     return { ok: false, error: "Koi email address configured nahi hai (TEACHER_EMAIL ya subject mapping set karein)." };
+  }
+  // Sender abhi bhi Resend ka onboarding address hai. Wo sirf usi account ke
+  // signup email ko bhej sakta hai — in recipients me koi aur hai to mail jaayegi
+  // hi nahi. Use pehle hi rok dete hain aur saaf message dete hain (teacher ko
+  // "bhej diya" ka jhooth nahi dikhna chahiye).
+  if (!onboardingAllows(recipients)) {
+    return {
+      ok: false,
+      error:
+        "Ye email nahi ja sakti: sender abhi bhi Resend ke onboarding address se hai, " +
+        "jo sirf apne hi account ke signup email ko mail bhej sakta hai. " +
+        "Isse kisi aur (student/HOD) ko bhejne ke liye apna email domain verify karo: " +
+        'Resend > Domains > Add Domain, phir EMAIL_FROM="Attendance <no-reply@yourdomain.com>" set karo.',
+    };
   }
   try {
     const payload = { from: EMAIL_FROM, to: recipients, subject, text };
@@ -2258,11 +2321,23 @@ app.post("/api/teacher/upload-roster", requireTeacherAuth, async (req, res) => {
 // student form will auto-fill from) without re-pasting anything.
 app.get("/api/teacher/roster", requireTeacherAuth, async (req, res) => {
   try {
-    const { class_name, roll_no } = req.query;
+    const { class_name, roll_no, q } = req.query;
     const filter = {};
     if (class_name) filter.class_name = class_name;
     if (roll_no) filter.roll_no = String(roll_no).trim();
-    const students = await Student.find(filter).lean();
+    // `q` = naam/roll ka free-text search. "Student report by name" wala flow
+    // isi list se dropdown banata hai. Regex ko escape kiya gaya hai, warna
+    // koi "(" ya "[" likhne par query crash ho jaati.
+    const query = String(q || "").trim();
+    if (query) {
+      if (query.length < 2) return res.json({ count: 0, students: [], query });
+      const rx = new RegExp(escapeRegex(query), "i");
+      filter.$or = [{ name: rx }, { roll_no: rx }];
+    }
+    // Search hote waqt list badi na ho jaaye — dropdown ke liye 50 kaafi hai.
+    const queryObj = Student.find(filter).lean();
+    if (query) queryObj.limit(50);
+    const students = await queryObj;
     students.sort(compareRollNo);
     res.json({
       count: students.length,
@@ -3892,6 +3967,53 @@ app.get("/api/teacher/session-live", requireTeacherAuth, async (req, res) => {
 });
 
 
+// Email wiring ka live status — teacher ko pata chalega ki report kahan jayegi
+// aur kyun nahi jaa rahi. Ye DIAGNOSTIC hai (koi mail nahi bhejta), isliye ye
+// koi test email nahi karta — sirf config batata hai. Secret kuch nahi hai
+// (sirf on/off + sender), par teacher-auth ke peeche rakhte hain.
+app.get("/api/teacher/email-status", requireTeacherAuth, async (req, res) => {
+  try {
+    const allSettings = await EmailSetting.find({}).lean().catch(() => []);
+    const configured = [
+      ...new Set(
+        allSettings
+          .flatMap((s) => s.emails || [])
+          .concat(TEACHER_EMAIL ? [TEACHER_EMAIL] : [])
+          .map((e) => String(e || "").trim())
+          .filter(Boolean)
+      ),
+    ];
+    const account = String(process.env.RESEND_ACCOUNT_EMAIL || "").trim().toLowerCase();
+    // Same rule jo send karte waqt lagti hai — UI ko pehle se bata do ki kaunsa
+    // address actually deliver hoga, taaki user ko email bhejte waqt surprise na mile.
+    const deliverable = ONBOARDING_SENDER && account
+      ? configured.filter((e) => e.toLowerCase() === account)
+      : configured;
+    const blocked = configured.filter((e) => !deliverable.includes(e));
+    res.json({
+      ok: true,
+      email_configured: Boolean(resend),
+      sender: EMAIL_FROM,
+      onboarding_sender: ONBOARDING_SENDER,
+      // Render me set karne wala email (taaki app compare kar sake).
+      resend_account_email: process.env.RESEND_ACCOUNT_EMAIL || "",
+      default_inbox: TEACHER_EMAIL || "",
+      configured_recipients: configured,
+      deliverable_recipients: deliverable,
+      // Ye woh hain jo abhi deliver NAHI honge (domain verify karne tak).
+      blocked_recipients: blocked,
+      can_email_anyone: !ONBOARDING_SENDER,
+      hint: ONBOARDING_SENDER
+        ? "Sender abhi onboarding@resend.dev hai — sirf Resend signup email tak delivery ho sakti hai. "
+          + "Kisi aur ko bhejne ke liye apna domain verify karke EMAIL_FROM set karein."
+        : "Apna domain verify hai — koi bhi recipient email le sakta hai.",
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Email status load nahi hua." });
+  }
+});
+
 // ---------- SUBJECT-WISE EMAIL ROUTING (teacher page se manage) ----------
 
 // Kahan-kahan report jayegi, ye list. DEFAULT email bhi bhejta hai taki
@@ -4243,9 +4365,78 @@ async function emailOverallReportNow(req, { class_name, subject, course_type, sy
   };
 }
 
+// ---------------------------------------------------------------------------
+// NAME -> STUDENT RESOLVER
+// Teacher ke paas aksar roll number nahi hota, sirf naam hota hai ("Rahul ki PDF
+// bhej do"). Ye function naam se student dhoondta hai. Do rules rakhi hain:
+//  1) EXACT match pehle — "Rahul Kumar" ko "Rahul" se badi list nahi milni chahiye.
+//  2) Ek se zyada match ho to GUESS nahi karte: candidates wapas bhejte hain,
+//     taaki teacher sahi student chune. Galat student ko report bhej dena
+//     privacy leak hai, isliye "best match" guess karna jaiz nahi.
+// ---------------------------------------------------------------------------
+function escapeRegex(text) {
+  return String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function resolveStudentByName(name) {
+  const clean = String(name || "").trim().replace(/\s+/g, " ");
+  if (!clean) return { error: "Student ka naam likhein." };
+  if (clean.length < 2) return { error: "Naam kam se kam 2 letter ka hona chahiye." };
+
+  // 1) Exact, case-insensitive match. Deterministic hai aur best-guess banata hai.
+  const exact = await Student.find({ name: { $regex: `^${escapeRegex(clean)}$`, $options: "i" } })
+    .select("roll_no name class_name major_subject email")
+    .lean();
+  if (exact.length === 1) return { student: exact[0] };
+  if (exact.length > 1) return { ambiguous: exact, query: clean };
+
+  // 2) Partial match — sirf tab, jab exact koi na mile.
+  const partial = await Student.find({ name: { $regex: escapeRegex(clean), $options: "i" } })
+    .select("roll_no name class_name major_subject email")
+    .sort({ name: 1 })
+    .limit(12)
+    .lean();
+  if (partial.length === 1) return { student: partial[0] };
+  if (partial.length > 1) return { ambiguous: partial, query: clean };
+  return { notFound: true, query: clean };
+}
+
+// UI ke liye chhota shape — email poora nahi bhejte, sirf "hai / nahi" boolean.
+function publicStudentRow(s) {
+  return {
+    roll_no: s.roll_no,
+    name: s.name,
+    class_name: s.class_name || "",
+    major_subject: s.major_subject || "",
+    has_email: Boolean(String(s.email || "").trim()),
+  };
+}
+
 // Ek student ka personal report: uske apne email par, warna DEFAULT email par.
-async function emailStudentReportNow(req, { roll_no, system }) {
-  const cleanRoll = String(roll_no || "").trim();
+// `roll_no` ke saath ab `student_name` bhi de sakte hain — teacher ke paas
+// aksar sirf naam hota hai. Naam se resolve hua roll number yahan aata hai.
+async function emailStudentReportNow(req, { roll_no, student_name, system }) {
+  // Naam diya hai aur roll nahi -> pehle naam se student dhoondo.
+  let cleanRoll = String(roll_no || "").trim();
+  if (!cleanRoll && student_name) {
+    const found = await resolveStudentByName(student_name);
+    if (found.error) return { status: 400, body: { error: found.error } };
+    if (found.notFound) {
+      return { status: 404, body: { error: `"${found.query}" naam ka koi student roster me nahi mila. Naam check karein ya roll number use karein.` } };
+    }
+    if (found.ambiguous) {
+      // Guess nahi karte — teacher se sahi roll number chunne ko kehte hain.
+      return {
+        status: 409,
+        body: {
+          error: `"${found.query}" se ${found.ambiguous.length} students mile. Roll number se bhejein (ya dropdown se chunein).`,
+          ambiguous: true,
+          candidates: found.ambiguous.map(publicStudentRow),
+        },
+      };
+    }
+    cleanRoll = String(found.student.roll_no || "").trim();
+  }
   if (!/^[0-9]+$/.test(cleanRoll)) return { status: 400, body: { error: "Roll number digits me hona chahiye." } };
   const student = await Student.findOne({ roll_no: cleanRoll }).lean();
   if (!student) {
@@ -4265,11 +4456,11 @@ async function emailStudentReportNow(req, { roll_no, system }) {
   const sent = await sendReportEmail({
     to: recipients,
     subject: `Attendance Report — ${student.name} (Roll No ${cleanRoll}) — ${system}`,
-    text: `${student.name} (Roll No ${cleanRoll}) ka ${days}-din ka attendance: ${rows.map((r) => `${r.subject} ${r.pct}%`).join(", ")}.`,
+    text: `${student.name} (Roll No ${cleanRoll}) ka ${days}-din ka attendance: ${rows.map((r) => `${r.subject} ${r.pct}%`).join(", ")}. Ye report "${student.name}" naam se bheja gaya hai.`,
     attachments: [{ filename: `student-report-${cleanRoll}-${system}.pdf`.replace(/\s+/g, "_"), content: pdf }],
   });
   const masked = maskEmails(sent.recipients);
-  audit("report.email.student", req, `roll_no=${cleanRoll}`, `${sent.ok ? "sent" : "failed"}: ${masked.join(", ")}`);
+  audit("report.email.student", req, `roll_no=${cleanRoll}`, `${sent.ok ? "sent" : "failed"}: ${masked.join(", ")}${student_name ? ` (by name: ${student_name})` : ""}`);
   if (!sent.ok) return { status: 500, body: { error: sent.error } };
   return {
     status: 200,
@@ -4279,6 +4470,7 @@ async function emailStudentReportNow(req, { roll_no, system }) {
       recipients_masked: masked,
       attachments: 1,
       used_student_email: usedStudentEmail,
+      resolved_from_name: Boolean(student_name),
       message: usedStudentEmail
         ? `Student ka report uske email (${masked.join(", ")}) par bhej diya.`
         : "Student ka email saved nahi hai — report default inbox par bhej di gayi.",
@@ -4304,7 +4496,14 @@ app.post("/api/teacher/email-reports", requireTeacherAuth, async (req, res) => {
         system,
       });
     } else if (mode === "student") {
-      result = await emailStudentReportNow(req, { roll_no: req.body.roll_no, system });
+      // Roll number YA student name — dono me se koi ek kaafi hai. Naam se
+      // bhejne par server khud roll number resolve karta hai (exact match pehle,
+      // warna candidates dikhakar teacher se choose karwata hai).
+      result = await emailStudentReportNow(req, {
+        roll_no: req.body.roll_no,
+        student_name: req.body.student_name,
+        system,
+      });
     } else {
       return res.status(400).json({ error: "mode must be session, overall or student." });
     }

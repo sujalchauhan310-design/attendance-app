@@ -37,6 +37,19 @@ Minimum env vars (Render → Environment tab):
 | `CLASSROOM_RADIUS_METERS` | Allowed radius (m) | 150 |
 | `COLLEGE_NAME` | PDF/email header par naam | College Attendance System |
 | `EMAIL_FROM` | Bhejne wala address (Resend par verified domain) | Attendance App &lt;onboarding@resend.dev&gt; |
+| `RESEND_ACCOUNT_EMAIL` | Jis email se Resend account banaya gaya — app ko ye batata hai ki onboarding sender kisko bhej sakta hai | — |
+
+> **⚠️ `onboarding@resend.dev` ka rule (bahut zaroori):**
+> Resend ka free onboarding sender **sirf usi account ke signup email** ko mail bhej sakta hai.
+> Kisi doosre address (student, HOD, principal) ko bhejne ki koshish ka mail **jaayegi hi nahi** —
+> aur pehle pata bhi nahi chalta tha, teacher ko "bhej diya" dikhta tha jabki kuch hua nahi tha.
+>
+> Ab `RESEND_ACCOUNT_EMAIL` set karne par app **pehle hi rok deta hai** aur saaf message deta hai.
+> Ya domain verify karke `EMAIL_FROM="Attendance <no-reply@yourdomain.com>"` set kar do —
+> phir koi bhi recipient mail le sakta hai (student khud, HOD, sabko).
+>
+> **Teacher ke liye live check:** `GET /api/teacher/email-status` — ye batata hai ki kaunsa
+> address deliver hoga, kaunsa block hai, aur kya karna chahiye.
 
 ---
 
@@ -170,6 +183,8 @@ Storage bachane ke tips: 400 → 200 din retention (Semester system), ya purane 
 - **Sabse specific mapping jeetti hai** (subject + course_type + class > sirf subject). Barabar specific wali sab merge ho jati hain.
 - **Kuch match na ho → DEFAULT email** = `TEACHER_EMAIL`. Isliye ek bhi mapping na banayein to bhi har report teacher ko milti hi rahegi.
 - **Student ka apna email**: roster upload me 5th column (`rollno,name,class,major,email`) optional hai — diya ho to us bande ka personal report uske inbox me; **na ho to report DEFAULT inbox** par. Student page par email field **jaan-boojh kar hata diya gaya hai** (niche dekhein: student apna PDF khud download karta hai).
+- **Teacher PDF NAAM se bhi bhej sakta hai** (roll number yaad rakhne ki zaroorat nahi): Email reports card me *"Student report — naam ya roll number"* field hai. Teacher 2+ letter likhta hai → `/api/teacher/roster?q=` se suggestions aate hain; sahi student chunne par roll number khud bhujh jata hai. Server par bhi fallback hai (`resolveStudentByName`): **exact** naam pehle, warna substring. Ek se zyada match ho to **guess nahi karte** — 409 + candidates list aati hai, teacher ek tap se sahi student chun leta hai (galat student ko report bhejna privacy leak hota hai, isliye best-match guess jaiz nahi).
+  - `POST /api/teacher/email-reports` `{ mode: "student", student_name: "Rahul" }` — `roll_no` bhi de sakte hain (dono me se koi ek kaafi).
 - **Default inbox kisi ko nahi dikhta**: teacher page par sirf "Default inbox: configured (hidden)" likha aata hai; API bhi address nahi bhejti, aur "Email now" ke reply me bhi address **mask** (`s***@gmail.com`) ho kar jata hai. Verify karne ke liye "Test email bhejo" button hai (apna address type karke).
 - **Student apna report khud download karta hai** — student page → *"Mera report download karo (PDF)"* → roll number + system → PDF turant download (`/api/student/my-report.pdf`). Ye route **rate-limited** hai aur sirf PDF deta hai (koi list/JSON nahi). `STUDENT_PDF_OPEN=false` se band bhi kar sakte hain.
 
@@ -230,7 +245,7 @@ GET    /api/teacher/leave-list                 → selected date ki approved lea
 POST   /api/teacher/session/set-approval
 DELETE /api/teacher/device-lock
 POST   /api/teacher/upload-roster         → email 5th column (optional)
-GET    /api/teacher/roster
+GET    /api/teacher/roster                 → ?q=rahul (search, 50 max) | ?class_name= | ?roll_no=
 GET    /api/teacher/review                     → pending / flagged / location failures
 GET    /api/teacher/failures                   → location/net fail hue students (per-student approve/ignore)
 POST   /api/teacher/failures/ignore            → ek failure entry hata do
@@ -239,6 +254,7 @@ GET    /api/teacher/reports/overall-download   → PDF
 GET    /api/teacher/export.csv                 → CSV (ek din ka register)
 GET    /api/teacher/export-matrix.csv          → Excel matrix: row = student, column = DATE (P/A)
 POST   /api/teacher/email-reports              → mode: session | overall | student
+                                                   student mode me roll_no YA student_name
 GET    /api/teacher/email-settings | POST | DELETE
 GET    /api/teacher/audit                      → ?limit=50
 GET    /api/teacher/data-policy                → retention + storage projection

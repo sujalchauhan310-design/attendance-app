@@ -469,12 +469,22 @@
         <button type="button" class="btn btn-sm" id="mailOverallBtn" onclick="emailOverallReport()">📧 Email overall report</button>
       </div>
       <div class="field mt-3 mb-0">
-        <label class="label" for="mailRollNo">Student report — Roll Number</label>
-        <div class="row" style="gap:8px;">
-          <input id="mailRollNo" class="input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 45678">
+        <label class="label" for="mailStudentSearch">Student report — naam ya roll number</label>
+        <!-- Typeahead + dropdown: teacher sirf NAAM type karke bhi PDF bhej
+             sakta hai. List /api/teacher/roster?q= se aati hai, aur sahi roll
+             number chunne par wahi field me store ho jata hai. -->
+        <input id="mailStudentSearch" class="input" type="text" autocomplete="off" role="combobox"
+               aria-expanded="false" aria-controls="mailStudentOptions" aria-autocomplete="list"
+               oninput="onMailStudentSearchInput()" onkeydown="onMailStudentSearchKeydown(event)"
+               onchange="onMailStudentSearchPick()"
+               placeholder="e.g. Rahul ya 45678">
+        <datalist id="mailStudentOptions"></datalist>
+        <div id="mailStudentPicked" class="mt-2"></div>
+        <div class="row mt-2" style="gap:8px;">
+          <input id="mailRollNo" class="input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Roll number (auto bhi ho jata hai)">
           <button type="button" class="btn btn-sm nowrap" id="mailStudentBtn" onclick="emailStudentReport()">Email student report</button>
         </div>
-        <p class="hint">Us student ka attendance PDF usi ke subject/class ke hisaab se bhejta hai.</p>
+        <p class="hint">Naam type karte hi suggestion aayega — sahi student chun lein, phir "Email student report" dabayein. PDF usi student ke email par jaati hai (email na ho to aapke inbox me).</p>
       </div>
       <div id="mailReportMsg" class="mt-2"></div>
     </div>
@@ -3271,6 +3281,23 @@ async function sendEmailReport(mode, body, msgElId) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) {
       const error = data.error || 'Report email nahi ho payi.';
+      // Naam se bhejne par ek se zyada students match ho sakte hain. Server
+      // 409 + candidates bhejta hai — yahan unko clickable list dikhate hain
+      // taaki teacher ek tap me sahi student chun sake (dobara type na karna pade).
+      if (data.ambiguous && Array.isArray(data.candidates) && data.candidates.length) {
+        const list = data.candidates.map((c) => `
+          <button type="button" class="rec" style="width:100%; text-align:left; cursor:pointer;"
+                  onclick="pickMailStudentFrom('${esc(String(c.roll_no))}'); emailStudentReport();">
+            <div class="top"><div>
+              <div class="nm">${esc(c.name)}</div>
+              <div class="meta">#${esc(c.roll_no)} · ${esc(c.class_name) || '-'}${c.has_email ? ' · email saved' : ' · email nahi'}</div>
+            </div></div>
+          </button>`).join('');
+        if (msg) msg.innerHTML = `<div class="alert alert-warn"><span class="ico">?</span><div>${esc(error)}</div></div><div class="mt-2">${list}</div>`;
+        toast('Ek se zyada students mile — list se chunein.', 'warn', 6000);
+        mailStudentMatches = data.candidates;
+        return false;
+      }
       if (msg) msg.innerHTML = alertErr(error);
       toast(error, 'err');
       return false;
@@ -3316,23 +3343,160 @@ async function emailOverallReport() {
   }, 'mailReportMsg'));
 }
 
+// ---------------------------------------------------------------------------
+// Student report: NAAM se bhi PDF bhej do
+// Teacher ke paas aksar roll number nahi, sirf naam hota hai. Ye typeahead
+// /api/teacher/roster?q= se students dhoondta hai; sahi ek chunne par roll
+// number `mailRollNo` me bhujh jata hai. Server par bhi naam se bhejne ka
+// fallback hai (resolveStudentByName), isliye dropdown ke bina bhi kaam chalta.
+// ---------------------------------------------------------------------------
+let mailStudentSearchTimer = null;
+let mailStudentMatches = [];
+let mailStudentPickedRoll = '';
+
+function pickMailStudent(roll) {
+  mailStudentPickedRoll = String(roll || '');
+  const s = mailStudentMatches.find((x) => String(x.roll_no) === mailStudentPickedRoll);
+  const box = $('mailStudentPicked');
+  if (!s) {
+    if (box) box.innerHTML = '';
+    return;
+  }
+  const emailNote = s.email
+    ? '<span class="chip chip-ok">email saved</span>'
+    : '<span class="chip chip-warn">email nahi — aapke inbox me jayegi</span>';
+  if (box) {
+    box.innerHTML = `<div class="rec"><div class="top"><div>
+      <div class="nm">${esc(s.name)}</div>
+      <div class="meta">#${esc(s.roll_no)} · ${esc(s.class_name) || '-'} · ${esc(s.major_subject) || '-'} ${emailNote}</div>
+    </div></div></div>`;
+  }
+  if ($('mailRollNo')) $('mailRollNo').value = String(s.roll_no);
+}
+
+async function searchMailStudents() {
+  const input = $('mailStudentSearch');
+  if (!input) return;
+  const q = input.value.trim();
+  const dl = $('mailStudentOptions');
+  if (q.length < 2) {
+    if (dl) dl.innerHTML = '';
+    mailStudentMatches = [];
+    mailStudentPickedRoll = '';
+    return;
+  }
+  try {
+    const res = await teacherFetch('/api/teacher/roster?q=' + encodeURIComponent(q));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return;
+    mailStudentMatches = data.students || [];
+    // <datalist> ka label/display-value pattern browser me consistent nahi hota
+    // (kuch "Rahul — 45678" dikhate hain, kuch sirf label), isliye value hamesha
+    // roll number rakhte hain aur dropdown text me naam dikhate hain.
+    if (dl) {
+      dl.innerHTML = mailStudentMatches
+        .map((s) => `<option value="${esc(String(s.roll_no))}">${esc(s.name)}${s.class_name ? ' — ' + esc(s.class_name) : ''}</option>`)
+        .join('');
+    }
+    // Ek hi exact match mila to turant chun lein — ek extra click bacha jata hai.
+    if (mailStudentMatches.length === 1) pickMailStudent(mailStudentMatches[0].roll_no);
+  } catch (err) {
+    if (!isAuthError(err)) { /* search fail ho to manual roll number chalega */ }
+  }
+}
+
+function onMailStudentSearchInput() {
+  // Har keystroke par request nahi — 250ms debounce, warna "Ra" type karte hi
+  // teen network calls chale jaate hain.
+  clearTimeout(mailStudentSearchTimer);
+  mailStudentPickedRoll = '';
+  const box = $('mailStudentPicked');
+  if (box) box.innerHTML = '';
+  mailStudentSearchTimer = setTimeout(searchMailStudents, 250);
+}
+
+function onMailStudentSearchKeydown(ev) {
+  if (ev.key !== 'Enter') return;
+  const input = $('mailStudentSearch');
+  const q = input.value.trim().toLowerCase();
+  if (!q) return;
+  // Enter se form submit na ho — sirf student chun lein.
+  ev.preventDefault();
+  const match = mailStudentMatches.find((s) => String(s.name || '').toLowerCase() === q)
+    || mailStudentMatches[0];
+  if (match) {
+    pickMailStudent(match.roll_no);
+    input.value = match.name;
+  }
+}
+
+// Datalist se koi option chunne par browser input me us option ka VALUE daal
+// deta hai — jo humne roll number rakha hai. Isliye yahan value se match karke
+// roll number lock kar dete hain, taaki "koi aur naam" ka PDF na ja jaaye.
+function onMailStudentSearchPick() {
+  const input = $('mailStudentSearch');
+  if (!input) return;
+  const value = input.value.trim();
+  if (!value) return;
+  const byRoll = mailStudentMatches.find((s) => String(s.roll_no) === value);
+  const byName = mailStudentMatches.find((s) => String(s.name || '').toLowerCase() === value.toLowerCase());
+  const match = byRoll || byName;
+  if (match) {
+    pickMailStudent(match.roll_no);
+    input.value = match.name;
+  }
+}
+
+function clearMailStudentPicked() {
+  mailStudentPickedRoll = '';
+  const box = $('mailStudentPicked');
+  if (box) box.innerHTML = '';
+}
+
+// 409-candidates list se chunne wala shortcut. Server ka shape thoda alag hai
+// (`has_email` boolean, `email` nahi), isliye yahan seedha roll number set karte
+// hain — dropdown wali card ki zaroorat nahi, user ne abhi chun hi liya hai.
+function pickMailStudentFrom(roll) {
+  mailStudentPickedRoll = String(roll || '');
+  if ($('mailRollNo')) $('mailRollNo').value = String(roll || '');
+  if ($('mailStudentSearch')) $('mailStudentSearch').value = '';
+}
+
 async function emailStudentReport() {
   const c = getCombo();
   const msg = $('mailReportMsg');
-  const roll_no = $('mailRollNo') ? $('mailRollNo').value.trim() : '';
+  const rollField = $('mailRollNo');
+  const searchField = $('mailStudentSearch');
+  const roll_no = rollField ? rollField.value.trim() : '';
+  const typedName = searchField && !mailStudentPickedRoll ? searchField.value.trim() : '';
   const problem = comboMissing(c);
   if (problem) { toast(problem, 'err'); return; }
-  if (!/^[0-9]+$/.test(roll_no)) {
+
+  // Sirf roll number chahiye ya roll + naam (server par naam se resolve hoga).
+  if (!roll_no && !typedName) {
+    if (msg) msg.innerHTML = alertErr('Student ka naam ya roll number likhein.');
+    return;
+  }
+  if (roll_no && !/^[0-9]+$/.test(roll_no)) {
     if (msg) msg.innerHTML = alertErr('Roll number sirf digits me likhein (e.g. 45678).');
     return;
   }
-  await withBusyButton($('mailStudentBtn'), 'Emailing…', () => sendEmailReport('student', {
+  const body = {
     class_name: c.class_name,
     subject: c.subject,
     course_type: c.course_type,
     system: c.system,
     roll_no,
-  }, 'mailReportMsg'));
+  };
+  // Roll number nahi hai -> naam bhejte hain, server exact match dhoondhega.
+  if (!roll_no && typedName) body.student_name = typedName;
+
+  const ok = await withBusyButton($('mailStudentBtn'), 'Emailing…', () => sendEmailReport('student', body, 'mailReportMsg'));
+  if (ok) {
+    if (rollField) rollField.value = '';
+    clearMailStudentPicked();
+    if (searchField) searchField.value = '';
+  }
 }
 
 // Server CSV file (Content-Disposition: attachment) bhejta hai — token header ke
