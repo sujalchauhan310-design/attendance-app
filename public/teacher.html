@@ -55,12 +55,27 @@
     <div class="grid-2">
       <div class="field">
         <label class="label" for="className">Course / Year</label>
+        <!-- Annual aur Semester ke options SAATH me ek hi list me hain. System
+             dropdown se is list ka koi link nahi — teacher jo chahega chun leta
+             hai. Annual wale pehle (purana behaviour bilkul same), Semester wale
+             uske baad. localStorage me purana class name safe rehta hai. -->
         <select id="className" class="select">
           <option value="">Select class</option>
-          <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
-          <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
-          <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
-          <option>MA 1st</option><option>MA 2nd</option>
+          <optgroup label="Annual system">
+            <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
+            <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
+            <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
+            <option>MA 1st</option><option>MA 2nd</option>
+          </optgroup>
+          <optgroup label="Semester system">
+            <option>BA Sem 1</option><option>BA Sem 2</option><option>BA Sem 3</option><option>BA Sem 4</option>
+            <option>BA Sem 5</option><option>BA Sem 6</option><option>BA Sem 7</option><option>BA Sem 8</option>
+            <option>BSc Sem 1</option><option>BSc Sem 2</option><option>BSc Sem 3</option><option>BSc Sem 4</option>
+            <option>BSc Sem 5</option><option>BSc Sem 6</option><option>BSc Sem 7</option><option>BSc Sem 8</option>
+            <option>BCom Sem 1</option><option>BCom Sem 2</option><option>BCom Sem 3</option><option>BCom Sem 4</option>
+            <option>BCom Sem 5</option><option>BCom Sem 6</option><option>BCom Sem 7</option><option>BCom Sem 8</option>
+            <option>MA Sem 1</option><option>MA Sem 2</option>
+          </optgroup>
         </select>
       </div>
       <div class="field">
@@ -84,14 +99,30 @@
       </div>
       <div class="field">
         <label class="label" for="courseTypeSelect">Course Type</label>
+        <!-- Semester wale (NEP/CBCS) aur Annual wale SAATH me. Purane DSC/SEC/GE/
+             AEC/VAC/MDC pehle hi tarah se hain — koi purana localStorage value
+             toota nahi. Annual wale extra options me se. -->
         <select id="courseTypeSelect" class="select">
           <option value="">Select course type</option>
-          <option value="DSC">DSC — Discipline Specific Core</option>
-          <option value="SEC">SEC — Skill Enhancement Course</option>
-          <option value="GE">GE — Generic Elective</option>
-          <option value="AEC">AEC — Ability Enhancement Course</option>
-          <option value="VAC">VAC — Value Added Course</option>
-          <option value="MDC">MDC — Multi-Disciplinary Course</option>
+          <optgroup label="Semester system (NEP / CBCS)">
+            <option value="DSC">DSC — Discipline Specific Core</option>
+            <option value="SEC">SEC — Skill Enhancement Course</option>
+            <option value="GE">GE — Generic Elective</option>
+            <option value="AEC">AEC — Ability Enhancement Course</option>
+            <option value="VAC">VAC — Value Added Course</option>
+            <option value="MDC">MDC — Multi-Disciplinary Course</option>
+          </optgroup>
+          <optgroup label="Annual system">
+            <option value="Theory">Theory</option>
+            <option value="Practical">Practical</option>
+            <option value="Lab">Lab</option>
+            <option value="Elective I">Elective I</option>
+            <option value="Elective II">Elective II</option>
+            <option value="Project">Project</option>
+            <option value="Internship">Internship</option>
+            <option value="Workshop">Workshop</option>
+            <option value="Fieldwork">Fieldwork</option>
+          </optgroup>
         </select>
       </div>
       <div class="field mb-0">
