@@ -1,4 +1,4 @@
-/**
+﻿/**
  * College Attendance System — Backend
  * -------------------------------------------------
  * Features:
@@ -163,6 +163,14 @@ const GRID_MAX_DAYS = 45;
 // FREE M0 (512 MB) me bhi aaram se fit. Report windows (30/90 din) isi ke andar
 // rehte hain. Purana TTL index boot par khud naya ban jata hai.
 const ATTENDANCE_RETENTION_DAYS = Number(process.env.ATTENDANCE_RETENTION_DAYS) || 90;
+
+// Beacon ON ho to ye classes me code chahiye
+const BEACON_DURATION_OPTIONS_MIN = [40, 45, 50, 60, 90];
+const BEACON_DEFAULT_DURATION_MS = 45 * 60 * 1000;
+// Beacon default ON hai (user ka main anti-proxy ask). Koi session ise OFF karke
+// chala sakta hai, ya poori app ke liye env se band kar sakta hai:
+// BEACON_DEFAULT=false
+const BEACON_DEFAULT = boolWithDefault(process.env.BEACON_DEFAULT, true);
 
 // GPS proof na milne par student ko kitni koshish milti hai. Iske andar mark
 // SAVE nahi hota — sirf student ko "Koshish X/5" dikhta hai — taki wo sach me
@@ -464,6 +472,22 @@ const activeCodeSchema = new mongoose.Schema({
 system: { type: String, enum: ["Annual", "Semester"], default: "Annual" }, // Annual / Semester system
 require_location: {type: Boolean, default: true },
 require_approval: { type: Boolean, default: false }, // teacher approves each mark (highest anti-proxy setting)
+// BEACON (rotating in-class secret). Browser me real Bluetooth beacon chal hi nahi
+// sakta (iOS Safari me Web Bluetooth API hi nahi hai), isliye beacon ko aise banaya
+// gaya hai jo HAR phone par chalta hai: server har 45 second ka naya 6-digit code
+// banata hai. Teacher ka screen par wahi code chalta hai, student ko wahi type karna
+// hota hai. Ghar bait ke koi purana/screenshot wala code kaam nahi karta, aur
+// WhatsApp par bheja hua code 45 second me stale ho jaata hai.
+beacon_enabled: { type: Boolean, default: false },
+// Server-only secret. KABHI student ko nahi bhejte — isse hi codes derive hote hain.
+// Isliye student chahe server ka pura source code padh le, aage ke codes guess nahi
+// kar sakta (HMAC hai, brute-force impractical).
+beacon_secret: { type: String, default: "" },
+// Beacon me class kitni der chalti hai. Iske dauran student har PULSE_INTERVAL
+// par ping bhejta hai (nahaan bhejega = attendance save nahi). Isse "mark karke
+// phone chhupana" pakad me aata hai — 40-minute ki class me 40 minute signal chahiye.
+beacon_started_at: { type: Number, default: 0 },
+beacon_duration_ms: { type: Number, default: 0 },
 // SMART APPROVAL (default ON): location verified + koi flag nahi => seedha
 // present. Fail/flag wale marks apne aap "pending" hote hain (teacher approve
 // kare) — isliye teacher ko roz 60 bacchon par tap nahi karna padta.
@@ -537,6 +561,13 @@ const attendanceSchema = new mongoose.Schema({
   pending_reason: { type: String, default: "" },
   // Server ne is mark ke liye GPS proof verify kiya tha ya nahi.
   location_verified: { type: Boolean, default: false },
+  // Beacon (rotating in-class code) se verify hua ya nahi. Beacon OFF session
+  // me ye `false` rahega — isliye PDF me "beacon chahiye" ka matlab "sirf
+  // beacon wale session me nahi tha", cheating ka proof nahi.
+  beacon_verified: { type: Boolean, default: false },
+  // Beacon ka kaunsa slot use hua — audit ke liye (teacher ek baar me dekh
+  // sakta hai ki saare students ek hi 45-second window me the ya nahi).
+  beacon_slot: { type: Number, default: -1 },
   // Exactly how the server verified presence (kept so a teacher can review and
   // spot anything suspicious later). distance_m/accuracy come from the one-time
   // location token, never straight from the client.
@@ -1255,9 +1286,110 @@ async function recordMarkFailure({ device_id, roll_no, name, class_name, subject
   }
 }
 
-// Spots patterns that usually mean a faked or shared location. Nothing here
-// blocks a student on its own — it tags the entry so the teacher can review it
-// in the Review tab (and so approval mode has something to act on).
+// Ashli signal: ye location proof kitne sahi maane jaa sakti hai. Isse bade
+// fix ka matlab hi nahi (±50 m ka matlab hai "kahin bhi 50 m ke andar"), aur
+// wahi range hai jahan network/cell-tower location aati hai. Uske neeche ke
+// coordinates ka milna KOI evidence nahi hai — sirf network artefact hai.
+const SHARED_COORD_MAX_ACCURACY_METERS = Number(process.env.SHARED_COORD_MAX_ACCURACY_METERS) || 25;
+
+// Ek hi point par itne students = tower/wifi artefact, cheating nahi.
+// Asli proxy me phone ghooma hota hai, aur usse 5+ roll numbers ek saath nahi
+// mil sakte (device-lock + ek phone = ek banda). 40 students ek point par
+// matlab cell tower, ya poori class ka wifi se resolve hua location.
+const SHARED_COORD_CLUSTER_LIMIT = Number(process.env.SHARED_COORD_CLUSTER_LIMIT) || 5;
+
+// Coordinates sirf tab "same" maane jaate hain jab wo ASLI distance accuracy se
+// bhi chhota ho. 40 m door do phones ka reported point match hona coincidence
+// hai, proof nahi.
+const SHARED_COORD_DISTANCE_FACTOR = Number(process.env.SHARED_COORD_DISTANCE_FACTOR) || 1;
+
+// ---------------------------------------------------------------------------
+// BEACON CORE (pure functions — tools/beacon-test.js isi ko test karta hai)
+// ---------------------------------------------------------------------------
+// Har 45 second ka ek "slot" hota hai. Us slot ka code HMAC(secret, slot) se
+// banta hai — isliye code DETERMINISTIC hai (teacher ka screen aur server ek hi
+// code nikalte hain) par aage ke codes guess nahi kiye ja sakte.
+//
+// Slot math server time par hai, isliye phone ki ghadi galat ho tab bhi student
+// kaam karta hai — wo sirf jo code teacher ke screen par hai wahi type karta hai.
+const BEACON_SLOT_MS = 45 * 1000;
+// Student ek slot purana code bhi maan sakta hai — typing me 10-15 second lagte
+// hain, aur teacher ka screen 1 second pehle ka code dikha raha hoga. Isse
+// "maine to sahi code daala tha" wali galtiyan nahi aatin. 1 se zyada purana
+// NAHI maante — warna WhatsApp par purana code chal phir se sakta hai.
+const BEACON_GRACE_SLOTS = 1;
+
+// Beacon ka current slot number (floor). Negative time (clock glitch) par 0.
+function beaconSlotAt(nowMs, slotMs) {
+  const slot = slotMs || BEACON_SLOT_MS;
+  const n = Number(nowMs);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.floor(n / slot);
+}
+
+// Slot number se 6-digit numeric code. Sirf digits (student type karta hai,
+// isliye ambiguous characters — O/0, I/1 — nahi hone chahiye).
+function beaconCodeForSlot(secret, slot, slotMs) {
+  const slot2 = slotMs || BEACON_SLOT_MS;
+  const digest = crypto
+    .createHmac("sha256", String(secret || ""))
+    .update(`beacon.${slot2}.${slot}`)
+    .digest("hex");
+  // Pehle 4 hex chars -> number -> 6 digits me map. 16^4 = 65,536 values,
+  // 6-digit space me fold karke lagatar repeat hone ka chance kam hai.
+  let value = parseInt(digest.slice(0, 8), 16);
+  value = value % 1000000;
+  return String(value).padStart(6, "0");
+}
+
+// Abhi ka code + jab tak next code aayega (teacher ke countdown ke liye).
+function currentBeacon(secret, nowMs, slotMs) {
+  const slot = beaconSlotAt(nowMs, slotMs);
+  const slotMs2 = slotMs || BEACON_SLOT_MS;
+  return {
+    code: beaconCodeForSlot(secret, slot, slotMs2),
+    slot,
+    // Slot ke end tak kitne second bache (0 ho sakte hain — tab next code ready).
+    seconds_left: Math.max(0, Math.ceil((slot + 1) * slotMs2 - Number(nowMs || 0)) / 1000),
+    rotates_in_ms: Math.max(0, (slot + 1) * slotMs2 - Number(nowMs || 0)),
+  };
+}
+
+/**
+ * Student ke bheje code ko validate karta hai.
+ * Accept hota hai: current slot, ya GRACE ke andar ka pichla slot.
+ * Equal-length compare + constant-time-ish behaviour chahiye isliye simple
+ * string compare kiye hain (6 digits, timing attack ka realistic risk nahi).
+ * returns: { ok: true, slot, stale: false } | { ok: false, reason }
+ */
+function verifyBeaconCode(secret, submitted, nowMs, slotMs) {
+  const raw = String(submitted || "").trim();
+  if (!/^\d{6}$/.test(raw)) {
+    return { ok: false, reason: "Beacon code 6 digit ka hona chahiye." };
+  }
+  const slot = beaconSlotAt(nowMs, slotMs);
+  const slotMs2 = slotMs || BEACON_SLOT_MS;
+  for (let back = 0; back <= BEACON_GRACE_SLOTS; back++) {
+    const candidate = beaconCodeForSlot(secret, slot - back, slotMs2);
+    if (candidate === raw) {
+      return { ok: true, slot: slot - back, stale: back > 0 };
+    }
+  }
+  return {
+    ok: false,
+    reason: "Beacon code galat ya purana ho gaya. Screen par naya code dekhein aur dobara try karein.",
+  };
+}
+
+// Beacon nahi hai ya band hai to student ko koi extra proof nahi dena hai.
+function beaconRequired(session) {
+  return Boolean(session && session.beacon_enabled && session.beacon_secret);
+}
+
+// ---------------------------------------------------------------------------
+// ANTI-PROXY FLAGS
+// Marks ke saath jo "suspicious" reasons chipakte hain — teacher ke Review tab
+// me dikhte hain (aur approval mode on ho to mark pending reh jaata hai).
 // `extraFlags` = client hints + automation flags jo route ne pehle hi detect kar liye.
 async function computeAntiProxyFlags({ sessionId, device_id, roll_no, date, lat, lng, accuracy, extraFlags }) {
   const flags = [];
@@ -1271,15 +1403,42 @@ async function computeAntiProxyFlags({ sessionId, device_id, roll_no, date, lat,
 
   if (Number.isFinite(lat) && Number.isFinite(lng)) {
     const EPS = 0.00002; // ~2 metres
-    const samePoint = await Attendance.findOne({
-      session_id: sessionId,
-      device_id: { $ne: device_id },
-      lat: { $gte: lat - EPS, $lte: lat + EPS },
-      lng: { $gte: lng - EPS, $lte: lng + EPS },
-    }).lean();
-    // Two different phones never report the exact same 5-decimal coordinate —
-    // when they do, the same fix was almost certainly copied/handed around.
-    if (samePoint) flags.push("shared_coordinates");
+    // Dhundhle fix (±25 m se bada) par coordinates ka milna KOI evidence nahi —
+    // network/cell-tower location me poori class ek hi point aati hai. Upar
+    // "accuracy_poor" already lag chuka hai, wo kaafi signal hai.
+    const accuracyUsable =
+      Number.isFinite(accuracy) && accuracy > 0 && accuracy <= SHARED_COORD_MAX_ACCURACY_METERS;
+
+    if (!accuracyUsable) {
+      // Intentionally kuch nahi — dhundhle fix par match = artefact, not cheating.
+    } else {
+      const cluster = await Attendance.find({
+        session_id: sessionId,
+        device_id: { $ne: device_id },
+        lat: { $gte: lat - EPS, $lte: lat + EPS },
+        lng: { $gte: lng - EPS, $lte: lng + EPS },
+      })
+        .select("lat lng accuracy")
+        .limit(SHARED_COORD_CLUSTER_LIMIT)
+        .lean();
+
+      if (cluster.length >= SHARED_COORD_CLUSTER_LIMIT) {
+        // Cluster bada = poori class ek hi network point par. Ek phone se itne
+        // log proxy nahi kar sakte, isliye ise flag mat lagao (warna poore
+        // batch ko galat flag milega — jo abhi ho raha hai).
+      } else {
+        // Cluster chhota (1..limit-1) → asli proxy ka signal. Par confirm karo
+        // ki wo point ASLI distance se door to nahi hain — dhundhle fix par
+        // coordinates ka match sirf coincidence hota hai, proof nahi.
+        const suspicious = cluster.some((c) => {
+          const dy = (c.lat - lat) * 111320;
+          const dx = (c.lng - lng) * 111320 * Math.cos((lat * Math.PI) / 180);
+          const realDistance = Math.sqrt(dx * dx + dy * dy);
+          return realDistance <= accuracy * SHARED_COORD_DISTANCE_FACTOR;
+        });
+        if (suspicious) flags.push("shared_coordinates");
+      }
+    }
   }
 
   const reusedDevice = await Attendance.findOne({ date, device_id, roll_no: { $ne: roll_no } }).lean();
@@ -2033,6 +2192,25 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
 
     const code = generateCode();
     const now = Date.now(); // SERVER time
+
+    // BEACON: teacher class start karte waqt ON karta hai. Secret server me
+    // hi rehta hai — student ko sirf derive hua code jaata hai. Duration
+    // chahiye kyunki iske dauran "live ping" bhi chalta hai (nahaan bhejega =
+    // attendance save nahi hogi).
+    const beaconOn = boolWithDefault(req.body.beacon_enabled ?? req.body.require_beacon, BEACON_DEFAULT);
+    // Frontend dono naam bhejta hai (beacon_minutes / beacon_duration_minutes) —
+    // dono padhte hain taaki ek bhi spelling change se beacon chupke se OFF na ho
+    // jaye (jo uska poora anti-proxy ka kaam khaali kar deta).
+    const beaconMinutes = Number(req.body.beacon_duration_minutes ?? req.body.beacon_minutes);
+    const beaconPickedMs =
+      BEACON_DURATION_OPTIONS_MIN.includes(beaconMinutes) ? beaconMinutes * 60 * 1000 : BEACON_DEFAULT_DURATION_MS;
+    // Beacon ka window attendance code se CHHOTA kabhi nahi hona chahiye. Pehle
+    // aisa ho sakta tha (dropdown me 40 min, par code sirf 2 min) — phir code
+    // expire hote hi beacon bhi bekaar ho jata tha aur teacher ko "beacon khatam"
+    // message aata, jabki usne 40 min chuna tha. Ab chhota duration silently
+    // code-window tak barh (upar) kar dete hain, taaki dono hamesha saath chalein.
+    const beaconDurationMs = Math.max(beaconPickedMs, expiryMs);
+
     const session = await ActiveCode.create({
       code,
       class_name,
@@ -2043,6 +2221,12 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       require_approval: boolWithDefault(req.body.require_approval, REQUIRE_APPROVAL_DEFAULT),
       auto_review: boolWithDefault(req.body.auto_review, SMART_APPROVAL_DEFAULT),
       send_pdf: boolWithDefault(send_pdf, SEND_PDF_DEFAULT), // default ON (env se badal sakte hain)
+      beacon_enabled: beaconOn,
+      // 32 hex chars = 128 bits random secret. crypto.randomBytes se banta hai,
+      // isliye predict karna impossible hai.
+      beacon_secret: beaconOn ? crypto.randomBytes(16).toString("hex") : "",
+      beacon_started_at: beaconOn ? now : 0,
+      beacon_duration_ms: beaconOn ? beaconDurationMs : 0,
       created_at: now,
       expires_at: now + expiryMs,
     });
@@ -2056,7 +2240,7 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       "session.generate",
       req,
       `${class_name}/${subject}/${course_type}`,
-      `code=${code} system=${system} expiry=${expiryMinutes}m location=${locationOn ? "ON" : "OFF"} smart_approval=${session.auto_review} pdf=${session.send_pdf}`
+      `code=${code} system=${system} expiry=${expiryMinutes}m location=${locationOn ? "ON" : "OFF"} smart_approval=${session.auto_review} pdf=${session.send_pdf} beacon=${beaconOn ? beaconMinutes + "m" : "OFF"}`
     );
     res.json({
       code,
@@ -2075,10 +2259,75 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       send_pdf: session.send_pdf,
       strict_location: STRICT_LOCATION,
       expiry_options_minutes: CODE_EXPIRY_OPTIONS_MIN,
+      // Beacon info — secret KABHI nahi bhejte, sirf duration + enabled flag.
+      beacon_enabled: session.beacon_enabled,
+      beacon_duration_ms: session.beacon_duration_ms,
+      beacon_duration_options_minutes: BEACON_DURATION_OPTIONS_MIN,
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong generating the code." });
+  }
+});
+
+// Teacher ka beacon screen. Har 45 second me naya code aata hai, isliye page
+// har 10 second me ye route poll karta hai aur code + countdown update karta hai.
+// Server time hi source of truth hai — teacher ki ghadi galat ho tab bhi code
+// student ke phone se match karega (dono ek hi slot number par hain).
+// Alias path: frontend /api/teacher/beacon call karta hai. Purana naam
+// (/api/teacher/session-beacon) bhi rakha hai taaki koi purana bookmarked tab
+// ya cached page na toote.
+app.get(["/api/teacher/session-beacon", "/api/teacher/beacon"], requireTeacherAuth, async (req, res) => {
+  try {
+    const { session_id } = req.query;
+    if (!session_id || !mongoose.Types.ObjectId.isValid(session_id)) {
+      return res.status(400).json({ error: "A valid session_id is required." });
+    }
+    const session = await ActiveCode.findById(session_id)
+      .select("beacon_enabled beacon_secret beacon_started_at beacon_duration_ms expires_at created_at")
+      .lean();
+    if (!session) return res.status(404).json({ error: "Session not found." });
+    if (!beaconRequired(session)) {
+      // beacon_required flag jaan-boojh kar alag rakha hai: frontend isse
+      // "beacon band" samajh kar polling BAND kar deta hai (color = false).
+      return res.json({ beacon_enabled: false, beacon_required: false, code: "", beacon_code: "" });
+    }
+    const now = Date.now();
+    const beacon = currentBeacon(session.beacon_secret, now);
+    // Beacon ka apna window (40-90 min) aur attendance code ka window (2-7 min)
+    // alag-alag expire hote hain, isliye do alag flags chahiye.
+    const beaconEnd = (session.beacon_started_at || session.created_at || now) + (session.beacon_duration_ms || 0);
+    const beaconWindowOver = now > beaconEnd;
+    const codeExpired = now > (session.expires_at || beaconEnd);
+    const beaconActive = !beaconWindowOver && !codeExpired;
+    res.json({
+      beacon_enabled: true,
+      beacon_required: true,
+      // Beacon khatam hone wala hai par attendance code zinda hai -> warning,
+      // taaki teacher dobara start kar sake (class 60 min ki thi par attendance
+      // code 90 min ka chal raha hai).
+      beacon_active: beaconActive,
+      // Beacon window khatam — teacher ko naya code generate karna hi padega.
+      beacon_over: beaconWindowOver,
+      // Attendance code expire — alag message (naya beacon bekaar hai, sirf
+      // naya code chahiye).
+      code_expired: codeExpired,
+      // Dono naam jaan-boojh kar: frontend ek, purana page doosra padhta hai.
+      code: beacon.code,
+      beacon_code: beacon.code,
+      seconds_left: beacon.seconds_left,
+      ms_until_next: beacon.rotates_in_ms,
+      rotates_in_ms: beacon.rotates_in_ms,
+      slot_ms: BEACON_SLOT_MS,
+      server_now: now,
+      server_time: now,
+      ends_at: beaconEnd,
+      ms_left: Math.max(0, beaconEnd - now),
+      duration_ms: session.beacon_duration_ms || 0,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Beacon status nahi mil paaya." });
   }
 });
 
@@ -2129,6 +2378,16 @@ app.get("/api/teacher/session-status", requireTeacherAuth, async (req, res) => {
       roster_size,
       flagged_count,
       strict_location: STRICT_LOCATION,
+      // BEACON: frontend (refreshSessionStatus) isi se decide karta hai ki
+      // rotating-code panel start kare ya na. Ye field pehle MISSING thi —
+      // matlab refresh hote hi beacon turant band ho jata tha aur toggle bhi
+      // OFF dikhta, jabki server par beacon ON hota hai. Students ko phir
+      // beacon code maanga jata jo teacher ke screen par hota hi nahi.
+      // Secret KABHI nahi bhejte — sirf "required hai / nahi".
+      beacon_required: beaconRequired(session),
+      beacon_enabled: session.beacon_enabled === true,
+      beacon_duration_ms: session.beacon_duration_ms || 0,
+      slot_ms: BEACON_SLOT_MS,
     });
   } catch (err) {
     console.error(err);
@@ -2544,6 +2803,114 @@ app.post("/api/teacher/session/set-approval", requireTeacherAuth, async (req, re
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong updating approval mode." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// ONE-TIME CLEANUP: purane false "shared_coordinates" flags hatao
+// ---------------------------------------------------------------------------
+// Kyun zaroori: network/cell-tower location me poori class ka ek hi point aata
+// tha, aur har student ko "shared_coordinates" flag mil gaya. Ye GALAT flag
+// the — bacche sahi class me the. Result: 40 students pending atke the aur
+// teacher ko ek-ek approve karna pada.
+//
+// Ye route SIRF "shared_coordinates" flag hatata hai aur un entries ko present
+// karta hai. Doosre flags (mock_location, automation, device_used_for_other_roll)
+// BILKUL nahi chhede — wo asli cheating ke signals hain.
+//
+// Safety ke liye teen rules:
+//   1) default = DRY RUN. Pehle dekho kaun kaun badlega, phir apply karo.
+//   2) sirf status="pending" entries hi badalti hain (present ko koi haal nahi)
+//   3) jis entry me shared_coordinates KE ALAVA koi flag ho, use chhoda jayega
+async function runSharedCoordCleanup(req, { apply }) {
+  const today = todayDateString();
+  // Sirf aaj ke pending marks — purane data TTL ke saath hat jata hai, aur aapki
+  // dikkat aaj ki hi class me hui thi.
+  const candidates = await Attendance.find({
+    date: today,
+    status: "pending",
+    flags: "shared_coordinates",
+  })
+    .select("roll_no student_name class_name subject course_type flags")
+    .lean();
+
+  // Mixed-flag wale entries ko chhodna hai — unke baaki flags asli signal hain.
+  const pureShared = candidates.filter(
+    (r) => Array.isArray(r.flags) && r.flags.length === 1 && r.flags[0] === "shared_coordinates"
+  );
+  const pureIds = new Set(pureShared.map((r) => String(r._id)));
+  const mixedFlag = candidates.filter((r) => !pureIds.has(String(r._id)));
+
+  if (!apply) {
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        dry_run: true,
+        message: `${pureShared.length} entry sirf 'shared_coordinates' flag ki wajah se pending thi. Apply karne ke liye confirm bhejein.`,
+        would_fix: pureShared.map((r) => ({
+          roll_no: r.roll_no,
+          student_name: r.student_name,
+          class_name: r.class_name,
+          subject: r.subject,
+        })),
+        skipped_mixed_flags: mixedFlag.length, // inhe haath nahi chheda
+        note: "Ye sirf ek baar chalane ke liye hai — baad me is route ki zaroorat nahi.",
+      },
+    };
+  }
+
+  const ids = pureShared.map((r) => r._id);
+  let fixed = 0;
+  if (ids.length) {
+    const res = await Attendance.updateMany(
+      { _id: { $in: ids }, status: "pending" },
+      {
+        $set: { status: "present", approved_at: Date.now(), pending_reason: "" },
+        $pull: { flags: "shared_coordinates" },
+      }
+    );
+    fixed = res.modifiedCount || 0;
+  }
+
+  audit(
+    "attendance.cleanup-shared-coordinates",
+    req,
+    `date=${today}`,
+    `${fixed}/${pureShared.length} fixed, ${mixedFlag.length} skipped (mixed flags)`
+  );
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      dry_run: false,
+      fixed,
+      skipped_mixed_flags: mixedFlag.length,
+      message:
+        fixed > 0
+          ? `${fixed} student ki attendance present kar di gayi. Ab wo pending list se bahar hain.`
+          : "Koi entry fix nahi hui (shayad already approve ho chuki hain).",
+    },
+  };
+}
+
+app.get("/api/teacher/cleanup/shared-coordinates", requireTeacherAuth, async (req, res) => {
+  try {
+    const out = await runSharedCoordCleanup(req, { apply: false });
+    res.status(out.status).json(out.body);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Cleanup preview nahi ho paya." });
+  }
+});
+
+app.post("/api/teacher/cleanup/shared-coordinates", requireTeacherAuth, async (req, res) => {
+  try {
+    const out = await runSharedCoordCleanup(req, { apply: req.body.confirm === true });
+    res.status(out.status).json(out.body);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Cleanup nahi ho paya." });
   }
 });
 
@@ -3278,6 +3645,38 @@ app.get("/api/student/my-report.pdf", studentLookupLimiter, async (req, res) => 
 //   2. scripting this endpoint from home (no fix → no token),
 //   3. hand-editing lat/lng in the browser's network tab (token is bound to the
 //      exact fix the server itself validated).
+// Student ka beacon chahiye ya nahi — wo sirf UI hint hai, attendance ka
+    // faisla nahi (mark-attendance me server khud verify karta hai).
+    //
+    // SECURITY: isse koi mark nahi hota, sirf ek boolean leak hota hai — isliye
+    //   * sirf 5-digit code chahiye (roll/class/subject nahi),
+    //   * code valid hona zaroori,
+    //   * rate-limited hai.
+// Is route ko jaan-boojh kar POST /api/student/location-token se PEHLE rakha
+// gaya hai. Pehle ye us route ke andar ghaas tha — jo do bade bug laata tha:
+//   1) route tab tak REGISTER hi nahi hota jab tak koi location-token request
+//      na aaye (student page beacon-check karta hai, wo 404/404-mirror deta),
+//   2) har location-token request par ek naya route layer register hota —
+//      Express ki layer list phir se phir se bhari (memory leak + slowdown).
+app.get("/api/student/beacon-check", studentLookupLimiter, async (req, res) => {
+  try {
+    const code = String(req.query.code || "").trim();
+    if (!/^[0-9]{5}$/.test(code)) {
+      // Galat format par bhi honest jawab dete hain (field chhupa rahega).
+      return res.json({ beacon_enabled: false });
+    }
+    const now = Date.now();
+    const session = await ActiveCode.findOne({ code }).lean();
+    // Code hi galat hai ya expire ho gaya → koi live class nahi, beacon OFF.
+    if (!session || now > session.expires_at) return res.json({ beacon_enabled: false });
+    return res.json({ beacon_enabled: beaconRequired(session) });
+  } catch (err) {
+    console.error(err);
+    // Is route ka fail hona student ko block nahi karega — default OFF.
+    res.json({ beacon_enabled: false });
+  }
+});
+
 app.post("/api/student/location-token", locationTokenLimiter, async (req, res) => {
   try {
     const { device_id, code, class_name, subject, course_type } = req.body;
@@ -3304,7 +3703,8 @@ app.post("/api/student/location-token", locationTokenLimiter, async (req, res) =
       return res.status(400).json({ error: "Incorrect code." });
     }
 
-    // The teacher explicitly turned location check off for this session (only
+
+// The teacher explicitly turned location check off for this session (only
     // possible when the server allows it) → nothing to verify, no token needed.
     if (activeCode.require_location === false) {
       return res.json({ success: true, token: null, location_not_required: true, require_approval: activeCode.require_approval === true });
@@ -3421,6 +3821,53 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
     }
     if (activeCode.code !== String(code).trim()) {
       return res.status(400).json({ error: "Incorrect code." });
+    }
+
+    // Beacon result bahar rakhte hain taaki Attendance.create() me bhi likh
+    // sakein (audit trail: kaunsa slot use hua). -1 = beacon is session me
+    // band tha, matlab ye mark beacon se verify NAHI hua.
+    let beaconSlotUsed = -1;
+    let beaconWasRequired = false;
+
+    // 1c. BEACON — "abhi class me ho" ka live proof.
+    //     Attendance code to ek dum constant hota hai (WhatsApp par chal jata
+    //     hai). Beacon har 45 second badalta hai aur sirf teacher ke screen par
+    //     dikhta hai — isliye ghar bait ke koi purana code kaam nahi karta.
+    //     Ye check HARD fail hai (pending bhi nahi): galat beacon = student
+    //     class me hi nahi hai, aur teacher approve karne se koi matlab nahi.
+    if (beaconRequired(activeCode)) {
+      beaconWasRequired = true;
+      const beaconEnd = (activeCode.beacon_started_at || activeCode.created_at || now) + (activeCode.beacon_duration_ms || 0);
+      if (now > beaconEnd) {
+        // Beacon window khatam. Ye tabhi hota hai jab teacher ne beacon OFF
+        // karke turant naya code banaya ho (naya session = naya beacon), ya
+        // system clock bigad gaya ho. Student ko saaf batao ki teacher se
+        // naya code maange — error chhupaane se wo confuse hoga.
+        return res.status(400).json({
+          error: "Class ka beacon time khatam ho gaya. Teacher se kahiye ki wo naya code de.",
+          reason: "beacon_over",
+          // Student ko batate hain ki field khatam ho gayi — wo UI par
+          // chhupa dega, taaki wo dobara submit karke same error na mile.
+          beacon_finished: true,
+        });
+      }
+      const beaconResult = verifyBeaconCode(activeCode.beacon_secret, req.body.beacon_code, now);
+      if (!beaconResult.ok) {
+        audit("beacon.fail", req, `roll_no=${cleanRoll}`, `${class_name}/${subject}/${course_type} wrong_code`);
+        return res.status(400).json({
+          error: beaconResult.reason,
+          reason: "beacon_wrong",
+          // Student ko batate hain kitne second me naya code aayega.
+          retry_after_ms: BEACON_SLOT_MS,
+        });
+      }
+      beaconSlotUsed = beaconResult.slot;
+      audit(
+        "beacon.ok",
+        req,
+        `roll_no=${cleanRoll}`,
+        `${class_name}/${subject}/${course_type} slot=${beaconResult.slot}${beaconResult.stale ? " (stale-by-one)" : ""}`
+      );
     }
 
     // 1b. Location — anti-proxy ka core, par weak-net friendly.
@@ -3707,6 +4154,11 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       status,
       pending_reason: decision.reason || "",
       location_verified: location.verified === true,
+      // beacon_verified: sirf tab true jab is session me beacon ON tha aur
+      // student ne sahi code diya. Beacon OFF session me false rahega — PDF
+      // me ise "sab verify hue the" jaisa mat padhna chahiye.
+      beacon_verified: beaconWasRequired && beaconSlotUsed >= 0,
+      beacon_slot: beaconSlotUsed,
       lat: location.lat,
       lng: location.lng,
       accuracy: location.accuracy,

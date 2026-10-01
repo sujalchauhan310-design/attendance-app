@@ -187,6 +187,30 @@
           <p class="hint">Chhota window = code WhatsApp par share hokar bahar use hone ka mauka kam.</p>
         </div>
 
+        <!-- BEACON: attendance code to constant hota hai (WhatsApp par chal jata
+             hai). Beacon ek ROTATING code hai jo har 45s badalta hai aur sirf
+             teacher ke screen/projector par dikhta hai. Isi se pata chalta hai ki
+             student ABHI class me hai — ghar bait ke koi purana code nahi de
+             sakta. Beacon ON karne par students ko ye 6-character code type
+             karna padega. -->
+        <div class="field">
+          <div class="switch-row">
+            <div><div class="t">📡 Live beacon (rotating code)</div><div class="d" id="beaconSwitchNote">ON — students ko rotating code type karna hoga</div></div>
+            <label class="switch"><input type="checkbox" id="requireBeacon" checked onchange="updateBeaconNote()"><i></i></label>
+          </div>
+          <div id="beaconDurationWrap" class="mt-2">
+            <label class="label" for="beaconMinutes">Beacon kitni der chalega</label>
+            <select id="beaconMinutes" class="select">
+              <option value="40">40 minute</option>
+              <option value="45" selected>45 minute (default — ek period)</option>
+              <option value="50">50 minute</option>
+              <option value="60">60 minute (double period)</option>
+              <option value="90">90 minute (long lab)</option>
+            </select>
+            <p class="hint">Beacon time attendance code se thoda LAMBA rakhein — warna class khatam hone par students mark hi nahi kar payenge. <a href="#" onclick="beaconHelp(); return false;">Kaise kaam karta hai?</a></p>
+          </div>
+        </div>
+
         <div class="stack" style="gap:10px;">
           <div class="switch-row">
             <div><div class="t">📍 Location check</div><div class="d" id="locSwitchNote">ON — server GPS verify karega</div></div>
@@ -221,6 +245,27 @@
         <div class="center mt-2">
           <div class="mono" id="codeDisplay" style="font-size:2.4rem; letter-spacing:.28em; font-weight:700; color:var(--gold);">-----</div>
           <div class="muted fs-sm mt-1" id="codeCombo"></div>
+        </div>
+
+        <!-- BEACON projector block: teacher ise projector/board par chala
+             sakta hai. Har 45 second me code badal jata hai, isliye purana code
+             screenshot karke ghar se use nahi ho sakta. -->
+        <div id="beaconBlock" class="hide" style="margin-top:14px; padding:14px; border:1px solid rgba(111,176,255,.35); border-radius:12px; background:rgba(111,176,255,.06);">
+          <div class="row between" style="align-items:center;">
+            <div>
+              <div style="font-size:.8rem; font-weight:700; color:var(--info); letter-spacing:.04em;">📡 LIVE BEACON — students ye code type karein</div>
+              <div class="muted fs-sm mt-1" id="beaconHint">Har 45 second me badalta hai. Ye screen projector par dikhayein.</div>
+            </div>
+            <div class="mono" id="beaconCode" style="font-size:2.1rem; letter-spacing:.3em; font-weight:700; color:var(--info); min-width:170px; text-align:center;">------</div>
+          </div>
+          <div class="row between mt-2" style="gap:8px;">
+            <div class="progress grow" style="margin:0;"><i id="beaconBar" style="width:100%; background:var(--info);"></i></div>
+            <span class="muted fs-sm nowrap" id="beaconCountdown">--s</span>
+          </div>
+          <div class="row mt-2" style="gap:8px;">
+            <button type="button" class="btn btn-sm grow" onclick="openBeaconProjector()">📺 Projector mode</button>
+            <button type="button" class="btn btn-sm btn-ghost grow" onclick="copyBeacon()">Copy beacon</button>
+          </div>
         </div>
 
         <div class="row" style="gap:8px; margin-top:12px;">
@@ -684,6 +729,17 @@
 </div>
 
 <!-- ==================== MODALS ==================== -->
+<!-- BEACON PROJECTOR: fullscreen rotating code. Teacher ise projector/TV par
+     chala sakta hai — peeche baithe students bhi code padh lein. Ye ek
+     rotation/attempt ka live proof hai: ghar bait ke koi current code nahi
+     de sakta kyunki wo teacher ke screen par hi hai. -->
+<div class="beacon-projector" id="beaconProjector" role="dialog" aria-modal="true" aria-labelledby="bpLabel">
+  <button type="button" class="bp-close" onclick="closeBeaconProjector()">✕ Band karein</button>
+  <div class="bp-label" id="bpLabel">📡 CLASS BEACON — APNA CODE TYPE KARO</div>
+  <div class="bp-code" id="beaconProjectorCode">------</div>
+  <div class="bp-meta">Ye code <span id="beaconProjectorCount">--s</span> me badal jayega · <span id="beaconProjectorCombo">—</span></div>
+</div>
+
 <div class="modal" id="generateModal" role="dialog" aria-modal="true" aria-labelledby="genTitle">
   <div class="sheet">
     <div class="sheet-grab"></div>
@@ -1035,6 +1091,10 @@ function saveSelection() {
       expiry_minutes: $('expiryMinutes').value,
       require_approval: $('requireApproval').checked,
       send_pdf: $('autoSendPdf').checked,
+      // Beacon prefs bhi save: reload ke baad teacher ko dobara toggle nahi
+      // karna padta.
+      require_beacon: $('requireBeacon').checked,
+      beacon_minutes: $('beaconMinutes').value,
     }));
   } catch (err) {}
 }
@@ -1050,6 +1110,13 @@ function restoreSelection() {
     if (saved.expiry_minutes) $('expiryMinutes').value = saved.expiry_minutes;
     if (typeof saved.require_approval === 'boolean') $('requireApproval').checked = saved.require_approval;
     if (typeof saved.send_pdf === 'boolean') $('autoSendPdf').checked = saved.send_pdf;
+    if (typeof saved.require_beacon === 'boolean') $('requireBeacon').checked = saved.require_beacon;
+    if (saved.beacon_minutes) $('beaconMinutes').value = saved.beacon_minutes;
+    // Duration sirf tab dikhe jab beacon ON ho — warna UI confusing lagega.
+    $('beaconDurationWrap').classList.toggle('hide', !$('requireBeacon').checked);
+    $('beaconSwitchNote').textContent = $('requireBeacon').checked
+      ? 'ON — students ko rotating code type karna hoga'
+      : 'OFF — sirf GPS check (ghar se mark ho sakta hai)';
   } catch (err) {}
 }
 function saveActiveSession(data) {
@@ -1138,6 +1205,9 @@ function updateReportLabel() {
 const RING_CIRCUMFERENCE = 326.7; // 2πr, r = 52
 
 function updateTimer() {
+  // Beacon countdown bhi 1-second tick par update ho — students ka panel aur
+  // projector ek hi timer se chalenge, isliye do alag intervals nahi.
+  if (beaconActive) updateBeaconCountdown();
   if (!expiryTimestamp) return;
   const remaining = Math.max(0, Math.round((expiryTimestamp - Date.now()) / 1000));
   const m = Math.floor(remaining / 60);
@@ -1213,7 +1283,20 @@ async function refreshSessionStatus(sessionId) {
   updateTimer();
 
   // Countdown timer ko chhue bina: live feed sirf chalte session me poll karti hai.
-  if (data.active) startLivePoll(); else stopLivePoll();
+  if (data.active) {
+    startLivePoll();
+    // Beacon ON session me rotating code polling shuru — students ko code
+    // dikhna zaroori hai warna wo mark hi nahi kar payenge.
+    if (data.beacon_required) startBeaconLoop(); else stopBeaconLoop();
+    $('requireBeacon').checked = data.beacon_required === true;
+    $('beaconSwitchNote').textContent = data.beacon_required
+      ? `ON — code har ${Math.round((data.slot_ms || 45000) / 1000)}s badalta hai`
+      : 'OFF — sirf GPS check (ghar se mark ho sakta hai)';
+    $('beaconDurationWrap').classList.toggle('hide', !data.beacon_required);
+  } else {
+    stopLivePoll();
+    stopBeaconLoop();
+  }
   return data;
 }
 
@@ -1227,6 +1310,173 @@ async function restoreActiveSession() {
   } catch (err) {
     $('codeCard').classList.add('hide');
   }
+}
+
+/* =====================================================================
+   BEACON (live rotating code)
+   Attendance code constant hota hai — wo WhatsApp par chal jata hai. Beacon
+   uska "ABHI class me ho" proof hai: server har 45 second me ek naya code
+   banata hai jo sirf teacher ke screen par dikhta hai. Student ko wo current
+   code type karna padta hai, isliye:
+     - ghar bait ke koi purana code kaam nahi karta
+     - purani class ka code naye class me kaam nahi karta
+   Teacher har 45s par ek chhota GET karta hai (lightweight, koi DB write nahi).
+   ===================================================================== */
+const BEACON_SLOT_MS_FALLBACK = 45000; // server se aata hai; yahin sirf fallback
+let beaconPollTimer = null;
+let beaconProjectorTimer = null;
+let beaconSlotMs = BEACON_SLOT_MS_FALLBACK;
+let beaconSlot = -1;
+let beaconSecretLive = '';
+let beaconActive = false;
+// Teacher ka "band" button / beacon-off session — iske baad polling nahi chalti.
+// (beaconActive se alag: wo sirf "code live hai" batata hai.)
+let beaconStopped = false;
+// Beacon-over warning ek hi baar dikhe, har 45s me dobara na aaye.
+let beaconOverWarned = false;
+// Last fetch par server ne kitne ms me next code bataya tha. Countdown hamesha
+// isme se "local elapsed time" minus karke banti hai — phone ki ghadi kitni bhi
+// galat ho, beacon ka timer sahi rahega.
+let beaconMsUntilNext = BEACON_SLOT_MS_FALLBACK;
+let beaconFetchedAt = 0;
+
+// Beacon toggle ka note + duration dropdown ka visibility.
+function updateBeaconNote() {
+  const on = $('requireBeacon').checked;
+  $('beaconSwitchNote').textContent = on
+    ? 'ON — students ko rotating code type karna hoga'
+    : 'OFF — sirf GPS check (ghar se mark ho sakta hai)';
+  $('beaconDurationWrap').classList.toggle('hide', !on);
+  saveSelection();
+}
+
+// Beacon poora band karne par projector/panel turant band.
+function stopBeaconLoop() {
+  if (beaconPollTimer) { clearTimeout(beaconPollTimer); beaconPollTimer = null; }
+  if (beaconProjectorTimer) { clearInterval(beaconProjectorTimer); beaconProjectorTimer = null; }
+  beaconStopped = true;
+  beaconActive = false;
+  beaconSlot = -1;
+  beaconSecretLive = '';
+  closeBeaconProjector();
+  if ($('beaconBlock')) $('beaconBlock').classList.add('hide');
+}
+
+// Server se current slot ka code le kar UI update karta hai.
+// NOTE: gate me `beaconActive` NAHI dekhna — wo tab set hota hai jab pehla
+// response render hota hai. Pehle yahi bug tha: startBeaconLoop() se
+// pollBeaconOnce() call hoti thi, jo `!beaconActive` par turant return kar
+// deta tha — matlab beacon kabhi start hi nahi hota tha. Ab sirf
+// `beaconStopped` (teacher ne band kiya) check karte hain.
+async function pollBeaconOnce() {
+  if (!activeSessionId || beaconStopped) return;
+  try {
+    const res = await teacherFetch('/api/teacher/beacon?session_id=' + encodeURIComponent(activeSessionId));
+    if (res.status === 404) { stopBeaconLoop(); return; }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) { stopBeaconLoop(); return; }
+    if (data.beacon_required === false) { stopBeaconLoop(); return; }
+    renderBeacon(data);
+    // Server batata hai kitne ms me next slot aayega — hum uske thoda pehle
+    // poll karte hain taaki screen par stale code na dikhe.
+    const next = Math.max(1500, (data.ms_until_next || beaconSlotMs) - 1200);
+    beaconPollTimer = setTimeout(pollBeaconOnce, next);
+  } catch (err) {
+    // Network hiccup: 3 second me retry. Beacon zinda rehna chahiye, warna
+    // students class me khade rahenge aur mark nahi kar payenge.
+    // Gate me `beaconActive` NAHI — wo tab set hota hai jab pehla response
+    // render hota hai. Yahan check karte to pehle fetch fail = retry hi nahi
+    // hota, aur beacon hamesha ke liye dead reh jata tha.
+    if (!beaconStopped) beaconPollTimer = setTimeout(pollBeaconOnce, 3000);
+  }
+}
+
+function renderBeacon(data) {
+  beaconActive = true;
+  beaconSecretLive = data.beacon_code || '';
+  beaconSlotMs = data.slot_ms || BEACON_SLOT_MS_FALLBACK;
+  // Countdown server ke bheje hue ms_until_next se chalti hai — iske liye hum
+  // apna local clock bilkul use NAHI karte. (Pehle yahan `serverNow` se gina
+  // jata tha, jisme clock offset ghar-tha-hai wala bug tha: phone ki ghadi 10
+  // minute aage ho to countdown "45s - 10min" = 0 par atak jata tha.)
+  beaconMsUntilNext = Number(data.ms_until_next) || beaconSlotMs;
+  beaconFetchedAt = Date.now();
+  if ($('beaconBlock')) $('beaconBlock').classList.remove('hide');
+  if ($('beaconCode')) $('beaconCode').textContent = beaconSecretLive || '------';
+  updateBeaconCountdown();
+  // Beacon khatam hone par saaf message. Do alag cases hain, dono ko ek jaisa
+  // message dene se teacher confuse hota tha:
+  //  - code_expired: attendance code bhi khatam -> dono naye banane padenge
+  //  - sirf beacon khatam: code zinda, par students mark nahi kar sakte
+  // Polling CHALU rakhte hain taaki teacher naya code generate kar sake.
+  if ((data.beacon_over || data.code_expired) && !beaconOverWarned) {
+    beaconOverWarned = true;
+    toast(
+      data.code_expired
+        ? 'Attendance code aur beacon dono khatam ho gaye. Naya code generate karein.'
+        : 'Beacon time khatam — attendance code zinda hai par ab koi mark nahi kar sakta. Naya code generate karein.',
+      'warn',
+      9000
+    );
+  }
+}
+
+function updateBeaconCountdown() {
+  if (!beaconActive || !beaconSecretLive) return;
+  // Sirf "kitna time guzra" count karte hain (Date.now() - beaconFetchedAt).
+  // Server ne kitna time bacha tha wo beaconMsUntilNext se aata hai — hum
+  // kabhi apni ghadi se server ka time derive NAHI karte, warna phone ki ghadi
+  // galat ho to countdown 0 par atak jata tha.
+  const elapsed = Date.now() - beaconFetchedAt;
+  const left = Math.max(0, beaconMsUntilNext - elapsed);
+  const secs = Math.ceil(left / 1000);
+  if ($('beaconCountdown')) $('beaconCountdown').textContent = secs + 's';
+  if ($('beaconBar')) $('beaconBar').style.width = Math.min(100, (left / beaconSlotMs) * 100) + '%';
+}
+
+// Session ke shuru me beacon ON hai to loop start.
+function startBeaconLoop() {
+  if (!activeSessionId) return;
+  // Naya session ya dobara ON kiya to pehle ka "stopped" flag saaf karo,
+  // warna polling turant return kar degi.
+  beaconStopped = false;
+  if (beaconPollTimer) { clearTimeout(beaconPollTimer); beaconPollTimer = null; }
+  pollBeaconOnce();
+}
+
+function copyBeacon() {
+  if (!beaconSecretLive) { toast('Abhi koi live beacon code nahi hai.', 'warn'); return; }
+  const text = `${beaconSecretLive}`;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text)
+      .then(() => toast('Beacon copy: ' + text, 'ok'))
+      .catch(() => toast('Copy nahi hua. Code: ' + text, 'warn'));
+  } else { toast('Beacon code: ' + text, 'warn'); }
+}
+
+// Fullscreen projector view — phone/laptop ko board se chipka do, students
+// peeche baithe baith ke padh lein.
+function openBeaconProjector() {
+  if (!beaconSecretLive) { toast('Pehle code generate karein.', 'warn'); return; }
+  document.getElementById('beaconProjector').classList.add('open');
+  const combo = $('codeCombo');
+  if (combo && $('beaconProjectorCombo')) $('beaconProjectorCombo').textContent = combo.textContent || '—';
+  if (beaconProjectorTimer) clearInterval(beaconProjectorTimer);
+  beaconProjectorTimer = setInterval(() => {
+    const code = $('beaconProjectorCode');
+    const cd = $('beaconProjectorCount');
+    if (code) code.textContent = beaconSecretLive || '------';
+    if (cd) cd.textContent = ($('beaconCountdown') ? $('beaconCountdown').textContent : '--s');
+  }, 250);
+}
+function closeBeaconProjector() {
+  document.getElementById('beaconProjector').classList.remove('open');
+  if (beaconProjectorTimer) { clearInterval(beaconProjectorTimer); beaconProjectorTimer = null; }
+}
+
+function beaconHelp() {
+  toast('Beacon har 45s me badalta hai. Isi liye sirf class me baithe students mark kar sakte hain — ghar se purana code kaam nahi karta.', 'ok');
+  setTimeout(() => toast('Projector mode se board par dikhayein. Beacon time attendance code se lamba rakhein.', 'ok'), 3200);
 }
 
 /* =====================================================================
@@ -1261,6 +1511,7 @@ function openGenerateConfirm() {
     ['Location check', $('requireLocation').checked ? 'ON (verified)' : 'OFF — risky'],
     ['Approval mode', $('requireApproval').checked ? 'ON (aapko approve karna hoga)' : 'OFF'],
     ['PDF email', $('autoSendPdf').checked ? 'ON' : 'OFF'],
+    ['Live beacon', $('requireBeacon').checked ? `ON — ${$('beaconMinutes').value} minute, har 45s code badlega` : 'OFF (sirf GPS)'],
   ];
   $('generateSummary').innerHTML = rows.map(([k, v]) => `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>`).join('');
   openModal('generateModal');
@@ -1288,6 +1539,10 @@ async function confirmGenerate() {
         require_approval: $('requireApproval').checked,
         send_pdf: $('autoSendPdf').checked,
         expiry_minutes: Number($('expiryMinutes').value),
+        // Beacon: teacher ka live proof ki student ABHI class me hai. Code
+        // har 45s badalta hai aur sirf uske screen par dikhta hai.
+        require_beacon: $('requireBeacon').checked,
+        beacon_minutes: Number($('beaconMinutes').value),
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -1295,6 +1550,9 @@ async function confirmGenerate() {
 
     closeModal('generateModal');
     saveSelection();
+    // Naya session = naya beacon. Purane session ka "over" warning ab
+    // galat hoga, isliye reset kar do ( warna teacher ko dobara warning milega).
+    beaconOverWarned = false;
     await refreshSessionStatus(data.session_id);
     saveActiveSession({ code: data.code, session_id: data.session_id, class_name: data.class_name, subject: data.subject, course_type: data.course_type, system: data.system });
     await loadSessions(data.session_id);

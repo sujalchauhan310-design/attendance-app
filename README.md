@@ -69,6 +69,7 @@ Minimum env vars (Render → Environment tab):
 | `AUTO_REVIEW_FLAGGED` | Flag wali entry pending (smart approval ka hissa) | `true` |
 | `SMART_APPROVAL_DEFAULT` | Naya session Smart approval me khule (verified = seedha present, fail/flag = pending) | `true` |
 | `ALLOW_TEACHER_LOCATION_OFF` | Teacher page se location check OFF karne ki permission (false = hamesha ON, server control) | `true` |
+| `BEACON_DEFAULT` | Naya session beacon (rotating code) ke saath khule — teacher toggle se badal sakta hai | `true` |
 | `SEND_PDF_DEFAULT` | Naya session PDF auto-email (teacher checkbox se badal sakta hai) | `true` |
 | `STUDENT_PDF_OPEN` | Student khud apna PDF download kar sake (roll number daal kar) | `true` |
 | `REQUIRE_APPROVAL_DEFAULT` | Naya session by default approval mode | `false` |
@@ -85,6 +86,33 @@ Minimum env vars (Render → Environment tab):
 6. **Auto-review**: ek bhi flag (mock, shared coordinates, ek device se dusre roll ki entry, poor accuracy) → entry `pending`, register me count nahi hoti jab tak teacher approve na kare.
 7. **Device ↔ roll binding**: ek phone ek hi roll number par bandh hota hai (teacher dashboard se unlock).
 8. **Audit log**: delete/edit/manual-mark/unlock/code-generate/email-settings sab likha jata hai — "Data & Alerts" tab me dikhta hai.
+
+### Live beacon — ghar se mark karna band (rotating code)
+
+Attendance code **constant** hota hai (WhatsApp par chal jata hai). Isliye GPS ke saath
+ek aur proof lagaya gaya: **beacon** — ek **6-digit code jo har 45 second badalta hai**
+aur sirf teacher ke screen par dikhta hai.
+
+| Kya | Kaise |
+|---|---|
+| Code banta hai | `HMAC(server secret, slot number)` → 6 digits. Server aur teacher ka screen dono **same** code nikalte hain (deterministic) |
+| Secret kahan rehta hai | Sirf server me (DB). **Kabhi browser tak nahi jaata** — isliye aage ka code guess nahi ho sakta |
+| Student kya karta hai | Attendance code + **6-digit beacon code** dono type karta hai |
+| Galat beacon | **Hard fail** (pending bhi nahi) — matlab student class me nahi hai, teacher approve kar ke bhi woh galat hoga |
+| Typing grace | 1 purana slot (45s) bhi chalta hai, warna typing me 10–15s lagte hain |
+| 2 purana slot | **Reject** — WhatsApp par purana code nahi chalega |
+
+**Teacher ke liye:** Generate code card me "📡 Live beacon" toggle + duration dropdown
+(40/45/50/60/90 min). **Har 45 second** me 6-digit code rotate hota hai. **Projector mode**
+(fullscreen) se board/TV par dikhayein — peeche baithe students bhi padh lein.
+
+**Duration ka rule:** beacon time attendance code se **thoda lamba** rakhein (default
+45 vs 7 min). Agar beacon pehle khatam ho gaya to students mark hi nahi kar payenge —
+isliye teacher ko us situation par ek clear warning milti hai.
+
+**Zaroori design note:** browser me real Bluetooth beacon chal hi nahi sakta (iOS Safari
+me Web Bluetooth API hi nahi hai). Isliye beacon ko **server-side rotating code** ke roop
+me banaya gaya — ye har device par chalta hai (Android/iPhone/laptop sab).
 
 ### Smart approval (default ON) — teacher ka time bachane ke liye
 | Situation | Result |
@@ -231,6 +259,7 @@ Kaun-kaun se email jate hain:
 POST   /api/teacher/login                 → { token, expires_in_seconds }
 POST   /api/teacher/generate-code         → naya 5-digit code + session_id
 GET    /api/teacher/session-status        → countdown + counters
+GET    /api/teacher/beacon                → is session ka current rotating code (6 digit) + countdown
 GET    /api/teacher/session-live          → live feed (since_ms se sirf naye marks)
 POST   /api/teacher/end-session
 GET    /api/teacher/session-report        → present / pending / absent
@@ -264,7 +293,8 @@ GET    /api/teacher/data-policy                → retention + storage projectio
 ```
 GET    /api/student/lookup-name      → naam/class/major/email auto-fill
 POST   /api/student/location-token   → GPS verify → one-time token (purana rasta, ab optional)
-POST   /api/student/mark-attendance  → inline GPS fix + code; smart approval ke hisaab se present/pending
+POST   /api/student/mark-attendance  → inline GPS fix + code + beacon_code; smart approval ke hisaab se present/pending
+GET    /api/student/beacon-check     → ?code= (is code wale session me beacon chahiye ya nahi — UI hint)
 GET    /api/student/my-attendance    → subject-wise % (sirf usi phone/roll ke liye)
 POST   /api/student/report-failure   → "teacher se approve karwao" (GPS/net fail ki entry teacher ke paas)
 GET    /api/student/my-report.pdf    → apna attendance PDF download (roll_no + system)
@@ -298,6 +328,7 @@ Render ka free instance ~15 min idle ke baad sota hai, isliye [cron-job.org](htt
 ```bash
 node tools/backup-attendance.js    # purana attendance data ka CSV backup (retention change se pehle!)
 node tools/approval-logic-test.js  # Smart approval logic (verified/fail/flag ke 8 case) + reason texts
+node tools/beacon-test.js          # Beacon core: slot rotation, 6-digit shape, grace slot, leak check (32 case)
 node tools/leave-logic-test.js      # Leave + % maths (leave hatane par effective %, zero-denominator guard)
 node tools/pdf-smoke-test.js       # PDF checks: session, 30-din grid, 90-din month-grid, 120-din summary, student report
 node tools/boot-smoke-test.js      # DB ke bina server boot + JSON error handling check

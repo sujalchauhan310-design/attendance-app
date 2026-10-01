@@ -452,6 +452,54 @@ table.data tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
 .tab-panel.active { display: block; animation: fadeUp 0.22s ease; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
+/* ---------- beacon projector (fullscreen, students ko dikhne wala) ---------- */
+.beacon-projector {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 18px;
+  /* Gehre background par bade akshar — peeche baithe students bhi padh lein. */
+  background: radial-gradient(circle at 50% 40%, #0b1220 0%, #04060c 100%);
+  padding: 24px;
+}
+.beacon-projector.open { display: flex; }
+.beacon-projector .bp-label {
+  font-size: clamp(0.9rem, 2.2vw, 1.4rem);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: #7dd3fc;
+  text-align: center;
+}
+.beacon-projector .bp-code {
+  /* 10m door tak bhi 6-characters ka gap saaf dikhe. */
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: clamp(4rem, 22vw, 16rem);
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #e2e8f0;
+  text-align: center;
+  line-height: 1;
+  text-shadow: 0 0 40px rgba(125, 211, 252, 0.35);
+}
+.beacon-projector .bp-meta { color: #64748b; font-size: clamp(0.8rem, 2vw, 1.1rem); text-align: center; }
+.beacon-projector .bp-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.beacon-projector .bp-close:hover { background: var(--surface-2); }
+
 /* ---------- modals (bottom sheet on mobile, card on desktop) ---------- */
 .modal {
   position: fixed;

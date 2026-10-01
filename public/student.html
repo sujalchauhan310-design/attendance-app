@@ -33,6 +33,18 @@
       <p id="codeErr" class="field-error hide">Code me sirf digits (0–9) chalte hain.</p>
     </div>
 
+    <!-- BEACON: teacher ka board/projector par dikhta hai ROTATING code. Ye
+         attendance code se alag hai aur har 45 second badalta hai — isliye
+         ghar bait ke purana code kaam nahi karta. Field tab dikhegi jab
+         teacher ka session beacon ON rakhta hai (peek se pata chalta hai). -->
+    <div class="field hide" id="beaconField">
+      <label class="label" for="beaconCode">📡 Beacon code (board par rotating)</label>
+      <input id="beaconCode" class="code-input" type="text" inputmode="numeric" pattern="[0-9]*"
+        maxlength="6" autocomplete="off" placeholder="000000" aria-describedby="beaconHint">
+      <p class="hint" id="beaconHint">Teacher ke screen par dikhta hai. Ye har 45 second badalta hai — sirf class me baithe students hi dekh sakte hain.</p>
+      <p id="beaconErr" class="field-error hide">Beacon code me sirf digits (0–9) chalte hain.</p>
+    </div>
+
     <div class="field">
       <label class="label" for="rollNo">Roll Number</label>
       <input id="rollNo" class="input" type="text" inputmode="numeric" pattern="[0-9]*"
@@ -344,6 +356,56 @@ function enforceDigitsOnly(inputEl, errEl) {
 enforceDigitsOnly($('code'), $('codeErr'));
 enforceDigitsOnly($('rollNo'), $('rollNoErr'));
 enforceDigitsOnly($('myRollNo'), $('myRollNoErr'));
+enforceDigitsOnly($('beaconCode'), $('beaconErr'));
+
+/* ---------- beacon field auto-show ----------
+   Student ko pata nahi hota ki teacher ka session beacon ON hai ya nahi. Har
+   keystroke pe network call karna bhaari hai, isliye sirf tab PEEK karte hain
+   jab attendance code 5-digit ho jaaye (matlab user ne poora code type kar liya).
+   Result cache hota hai — ek code par ek hi request, aur student jaldi-jaldi
+   type kar raha ho to har 1.2s se zyada nahi. */
+let beaconPeekCache = { code: '', needed: false, done: false };
+let beaconPeekBusy = false;
+
+async function peekBeaconNeeded(code) {
+  const clean = String(code || '').trim();
+  if (!/^[0-9]{5}$/.test(clean)) return;
+  if (beaconPeekCache.code === clean && beaconPeekCache.done) return;
+  if (beaconPeekBusy) return;
+  beaconPeekBusy = true;
+  try {
+    const res = await fetch('/api/student/beacon-check?code=' + encodeURIComponent(clean), {
+      headers: { Accept: 'application/json' },
+    });
+    const data = await res.json().catch(() => ({}));
+    const needed = res.ok && data.beacon_enabled === true;
+    beaconPeekCache = { code: clean, needed, done: true };
+    const field = $('beaconField');
+    if (!field) return;
+    field.classList.toggle('hide', !needed);
+    if (needed) {
+      // Field abhi khula hai to focus le jao — student ko ek step kam karte hain.
+      const input = $('beaconCode');
+      if (input && !input.value && document.activeElement !== input) input.focus();
+    }
+  } catch (err) {
+    // Net fail = beacon OFF mat maano. Field chhupa rahega aur server ka apna
+    // error message student ko bata dega (better than blocking on a guess).
+    beaconPeekCache = { code: clean, needed: false, done: true };
+  } finally {
+    beaconPeekBusy = false;
+  }
+}
+
+$('code').addEventListener('input', () => {
+  const v = $('code').value.trim();
+  if (v.length === 5) peekBeaconNeeded(v);
+  // Code badal gaya to purana peek result bekaar — naya code dobara check hoga.
+  else if (beaconPeekCache.code !== v) {
+    beaconPeekCache = { code: v, needed: false, done: false };
+    $('beaconField') && $('beaconField').classList.add('hide');
+  }
+});
 
 /* ---------- platform help (iOS vs Android steps) ---------- */
 function detectPlatform() {
@@ -535,6 +597,10 @@ function gatherPayload() {
     course_type: $('courseType').value.trim(),
     major_subject: $('majorSubject').value.trim(),
     code: $('code').value.trim(),
+    // Beacon ON session me ye zaroori hai. Field hide ho tab bhi bhej dete
+    // hain (empty string) — server "missing" ko "beacon_wrong" se alag
+    // message de sakta hai, isliye student ko pata chale ki code bhool gaye.
+    beacon_code: ($('beaconCode') && $('beaconCode').value.trim()) || '',
     client_flags: clientHintFlags(),
   };
 }
@@ -547,6 +613,14 @@ function validatePayload(p) {
   if (!p.system) return 'Annual ya Semester chunein.';
   if (!p.subject) return 'Subject chunein.';
   if (!p.course_type) return 'Course type chunein.';
+  // Beacon field tab dikhegi jab teacher ka session beacon ON rakhta hai.
+  // Sirf tab mandatory — beacon OFF session me ise chhodna theek hai.
+  const beaconEl = $('beaconCode');
+  if (beaconEl && !$('beaconField').classList.contains('hide')) {
+    if (!/^[0-9]{6}$/.test(p.beacon_code)) {
+      return 'Board par dikha 6-digit BEACON code bhi daalein — bina iske attendance nahi banegi.';
+    }
+  }
   return null;
 }
 
@@ -649,6 +723,45 @@ async function confirmSubmit() {
   btn.innerHTML = '<span class="spinner"></span> Checking location…';
   errEl.classList.add('hide');
 
+  // BEACON galat: server ne mana kar diya (student class me nahi hai). Ye
+  // RETRYABLE hai (code 45s me naya ho jayega), isliye student ko naya code
+  // dekhkar dobara bhejne ko kehte hain — teacher ke approve ka wait karne ki
+  // zaroorat NAHI hai. (Attendance delete/pending nahi hui — kuch save nahi hua.)
+  const handleBeaconError = (data) => {
+    const field = $('beaconField');
+    const input = $('beaconCode');
+    // Server ka reason hi source of truth hai. Pehle ye check field-visibility
+    // par thi — par peek request net fail hone par field chhupa deta hai, aur
+    // tab BEACON wala error bhi quietely chhup jaata tha (student ko kuch
+    // pata nahi chalta tha). Ab reason dekhte hain, field ko best-effort
+    // dikhate hain.
+    if (data.reason !== 'beacon_wrong' && data.reason !== 'beacon_over') return false;
+    const wait = Math.max(5, Math.round((Number(data.retry_after_ms) || 45000) / 1000));
+    const msg = data.reason === 'beacon_over'
+      ? 'Class ka beacon time khatam ho gaya. Teacher se naya code maangein.'
+      : `Beacon code galat ya purana ho gaya. Board par naya code dekhein (wo ${wait} second me badlega) aur dobara submit karein.`;
+    errBox(msg);
+    toast('Beacon code galat — naya code daalein', 'warn', 9000);
+    // Field chhupi hui thi (peek request net fail hua tha) par server ne
+    // beacon_wrong bheja — yaani beacon ON hi hai. Isliye field chhupa kar
+    // rakhna student ko confuse karega; use dikha dete hain taaki wo retry
+    // kar sake. (Pehle yahan `return false` tha — student ko phir bhi koi
+    // message nahi milta tha.)
+    if (field) field.classList.remove('hide');
+    // Purana code saaf karke focus wapas — student ko wahi type karne na pade.
+    if (input) { input.value = ''; input.focus(); }
+    // Beacon time poora khatam: naye code ka wait karte hue bekaar dikhana
+    // behtar hai. SAATH hi peek-cache reset ZAROORI hai — warna teacher jab
+    // naya code dega, tab field khud se wapas nahi dikhegi (cache "done" hai),
+    // aur student ko lagga ki beacon band kar diya gaya. Isliye cache khaali
+    // kar dete hain taaki naye code par peek dobara chale.
+    if (data.reason === 'beacon_over') {
+      if (field) field.classList.add('hide');
+      beaconPeekCache = { code: '', needed: false, done: false };
+    }
+    return true;
+  };
+
   try {
     // 1. Fresh GPS fix (agar pehle nahi mila tha).
     if (!coords) {
@@ -669,6 +782,15 @@ async function confirmSubmit() {
       fix_timestamp: coords ? coords.fix_at || Date.now() : 0,
     });
     let result = await attemptSubmit(payload, 2);
+
+    // BEACON galat / khatam — server ne mark SAVE nahi kiya, isliye ye
+    // retryable hai. Pehle ye handler likha hi nahi gaya tha (define tha,
+    // call kabhi nahi hua) — matlab student ko raw "Beacon code galat" throw
+    // hota tha, field saaf nahi hota tha, aur wo 3 second tak confused rehta.
+    // Ab: message + field clear + focus wapas, taaki naya code daal sake.
+    if (result.reached && !result.data.success) {
+      if (handleBeaconError(result.data)) return;
+    }
 
     // Server ne kaha "pehle GPS se koshish karo" (Koshish X/5) — matlab mark abhi
     // SAVE NAHI hua aur teacher ki list me bhi nahi gaya. Student ko yaheen rok
