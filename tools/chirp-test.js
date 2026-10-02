@@ -12,7 +12,7 @@
 const CHIRP_TONE_MIN_HZ = 16500;
 const CHIRP_TONE_STEP_HZ = 240;
 const CHIRP_TONE_MS = 150;
-const CHIRP_GAP_MS = 40;
+const CHIRP_GAP_MS = 120;
 const CHIRP_LEAD_HZ = 16000;
 const CHIRP_LEAD_MS = 300;
 
@@ -79,6 +79,61 @@ const BEACON_CHANNELS = ["manual", "chirp", "qr"];
 function normalizeBeaconChannel(raw) {
   const v = String(raw || "").trim().toLowerCase();
   return BEACON_CHANNELS.includes(v) ? v : "manual";
+}
+
+// ---------------------------------------------------------------------------
+// CHIRP SEGMENTER (student.html se COPY — wahi logic, bina browser ke testable)
+// ---------------------------------------------------------------------------
+function createChirpSegmenter(p, opts) {
+  const o = opts || {};
+  const frameMs = Number(o.frame_ms) || 40;
+  const minToneMs = Number(o.min_tone_ms) || 80;
+  const minGapMs = Number(o.min_gap_ms) || Math.max(Math.round(frameMs * 1.5), 60);
+
+  let curHz = null;
+  let curMs = 0;
+  let silenceMs = 0;
+  const digits = [];
+
+  function closeTone() {
+    if (curHz !== null && curMs >= minToneMs) {
+      const d = chirpDigitForTone(curHz, p);
+      if (d !== null) digits.push(d);
+    }
+    curHz = null;
+    curMs = 0;
+  }
+
+  return {
+    push(peakHz) {
+      if (peakHz === null || peakHz === undefined) {
+        silenceMs += frameMs;
+        if (curHz !== null && silenceMs >= minGapMs) closeTone();
+        return;
+      }
+      silenceMs = 0;
+      if (curHz !== null && Math.abs(peakHz - curHz) < p.tone_step_hz / 2) {
+        curMs += frameMs;
+        return;
+      }
+      closeTone();
+      curHz = peakHz;
+      curMs = frameMs;
+    },
+    flush() {
+      closeTone();
+    },
+    digits,
+    get count() {
+      return digits.length;
+    },
+    get done() {
+      return digits.length >= 6;
+    },
+    get code() {
+      return digits.length >= 6 ? digits.slice(0, 6).join("") : null;
+    },
+  };
 }
 
 let pass = 0;
@@ -212,6 +267,111 @@ function check(label, condition) {
   check("junk -> safe default 'manual'", normalizeBeaconChannel("hacker<script>") === "manual");
   check("null -> 'manual'", normalizeBeaconChannel(null) === "manual");
   check("undefined -> 'manual'", normalizeBeaconChannel(undefined) === "manual");
+}
+
+// ---------------------------------------------------------------------------
+// 13) SEGMENTER — asli timeline simulate karke
+// ---------------------------------------------------------------------------
+// Ye sabse zaroori test hai. Pehle wale decoder me "dedupe by same frequency"
+// bug tha: do LAGATAAR same digit (jaise "55") me doosra digit skip ho jata tha
+// (code 5 digit ka ban jata) — aur ~41% codes me koi na koi bagal wala joda
+// same hota hai, isliye classroom me har teesra student fail hota.
+//
+// Yahan maine asli chirp ki TIMELINE banayi hai (lead + 6 tones + lead, har
+// tone 150ms, gap 120ms) aur 40ms frame par segmenter ko diya — bilkul jaise
+// asli phone karta hai. Timing constants se hi li jati hai (hardcode nahi),
+// taaki encoder badle to test bhi saath chale.
+function simulateChirp(code, opts) {
+  const spec = chirpSpecFor(code);
+  const digitsHz = spec.hz;
+  const o = opts || {};
+  const frameMs = o.frame_ms || 40;
+  const seg = createChirpSegmenter(
+    { tone_min_hz: CHIRP_TONE_MIN_HZ, tone_step_hz: CHIRP_TONE_STEP_HZ, lead_hz: CHIRP_LEAD_HZ },
+    { frame_ms: frameMs }
+  );
+  const slot = CHIRP_TONE_MS + CHIRP_GAP_MS; // ek tone + uska gap
+  const totalMs = spec.total_ms + 500; // closing lead bhi sun-ne ka waqt
+  for (let t = 0; t < totalMs; t += frameMs) {
+    let hz = null;
+    let tt = t;
+    if (tt < CHIRP_LEAD_MS) hz = CHIRP_LEAD_HZ; // opening lead
+    else {
+      tt -= CHIRP_LEAD_MS;
+      const idx = Math.floor(tt / slot);
+      const within = tt % slot;
+      if (idx >= 6) hz = CHIRP_LEAD_HZ; // closing lead
+      else if (within < CHIRP_TONE_MS) hz = digitsHz[idx];
+      // warna: gap -> null
+    }
+    seg.push(hz);
+    if (seg.done) break;
+  }
+  return seg;
+}
+
+{
+  // Sabse pehle wahi case jo pehle TOOTA tha: lagataar same digits.
+  const tricky = ["555555", "112233", "900009", "121212", "000000", "999999"];
+  let allOk = true;
+  const bad = [];
+  for (const c of tricky) {
+    const seg = simulateChirp(c);
+    if (seg.code !== c) { allOk = false; bad.push(`${c} -> ${seg.code}`); }
+  }
+  check(`lagataar same digit wale codes sahi decode hote hain (${tricky.join(", ")})${bad.length ? " | FAILED: " + bad.join(" ; ") : ""}`, allOk);
+}
+
+{
+  // 200 random codes — kyunki asli class me koi bhi code aa sakta hai.
+  let allOk = true;
+  let firstBad = "";
+  for (let i = 0; i < 200; i++) {
+    const code = String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
+    const seg = simulateChirp(code);
+    if (seg.code !== code) {
+      allOk = false;
+      if (!firstBad) firstBad = `${code} -> ${seg.code} (digits=${seg.count})`;
+      break;
+    }
+  }
+  check(`200 random codes segmenter se sahi nikalte hain${firstBad ? " | FAILED: " + firstBad : ""}`, allOk);
+}
+
+{
+  // Bade frame (slow phone) par bhi kaam karna chahiye — 60ms frames.
+  let allOk = true;
+  for (let i = 0; i < 40; i++) {
+    const code = String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
+    if (simulateChirp(code, { frame_ms: 60 }).code !== code) { allOk = false; break; }
+  }
+  check("60ms frame (slow phone / throttled tab) par bhi sahi decode", allOk);
+}
+
+{
+  // Lead marker digit NAHI banta — aur sirf lead ho to koi digit nahi.
+  const seg = createChirpSegmenter({ tone_min_hz: CHIRP_TONE_MIN_HZ, tone_step_hz: CHIRP_TONE_STEP_HZ, lead_hz: CHIRP_LEAD_HZ }, { frame_ms: 40 });
+  for (let t = 0; t < 1000; t += 40) seg.push(CHIRP_LEAD_HZ);
+  seg.flush();
+  check("sirf lead marker bajne par koi digit nahi banta", seg.count === 0);
+}
+
+{
+  // Ek-ada shor blip digit nahi banna chahiye (minToneMs se chhota).
+  const seg = createChirpSegmenter({ tone_min_hz: CHIRP_TONE_MIN_HZ, tone_step_hz: CHIRP_TONE_STEP_HZ, lead_hz: CHIRP_LEAD_HZ }, { frame_ms: 40 });
+  seg.push(chirpToneForDigit(7)); // sirf ek frame (~40ms) — shor
+  seg.push(null);
+  seg.push(null);
+  seg.push(null);
+  seg.flush();
+  check("ek frame ka shor blip digit nahi banta (min duration guard)", seg.count === 0);
+}
+
+{
+  // Poora frame drop hone par tone tootkar DOUBLE nahi ginna chahiye
+  // (gap detection 2 frame ka hai).
+  const seg = simulateChirp("345678");
+  check("asli chirp par exactly 6 digit (na kam na zyada)", seg.count === 6);
 }
 
 console.log(`\n${fail === 0 ? "ALL CHIRP TESTS PASSED" : `${fail} FAILED`} — pass=${pass} fail=${fail}`);

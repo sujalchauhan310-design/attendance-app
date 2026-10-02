@@ -64,11 +64,20 @@
       <input id="studentName" class="input" type="text" autocomplete="name" placeholder="e.g. Priya Sharma">
     </div>
 
+    <div class="field">
+      <label class="label">System</label>
+      <div class="seg" id="systemGroup" role="radiogroup" aria-label="System">
+        <label class="seg-opt"><input type="radio" name="system" value="Annual"><span>Annual</span></label>
+        <label class="seg-opt"><input type="radio" name="system" value="Semester"><span>Semester</span></label>
+      </div>
+      <p class="hint">System chunein — Class ki list usi hisaab se dikhegi.</p>
+    </div>
+
     <div class="field mb-0">
       <label class="label" for="className">Class</label>
-      <!-- Annual + Semester options ek hi list me. Teacher jaisa hi list — taaki
-           student apni class teacher ke dropdown se exactly match kare, warna
-           attendance match nahi hoga. -->
+      <!-- System ke hisaab se sirf usi ka optgroup dikhta hai (neeche JS
+           applySystemFilter). Teacher ki list se EXACTLY match hona zaroori
+           hai — warna attendance match nahi hoti. -->
       <select id="className" class="select">
         <option value="">Select your class</option>
         <optgroup label="Annual system" data-system="Annual">
@@ -95,14 +104,6 @@
     <div class="card-title">
       <h3>Class details</h3>
       <span class="chip" id="detailsHintChip">Teacher ke code se match karein</span>
-    </div>
-
-    <div class="field">
-      <label class="label">System</label>
-      <div class="seg" id="systemGroup" role="radiogroup" aria-label="System">
-        <label class="seg-opt"><input type="radio" name="system" value="Annual"><span>Annual</span></label>
-        <label class="seg-opt"><input type="radio" name="system" value="Semester"><span>Semester</span></label>
-      </div>
     </div>
 
     <div class="field">
@@ -363,11 +364,13 @@ enforceDigitsOnly($('code'), $('codeErr'));
 enforceDigitsOnly($('rollNo'), $('rollNoErr'));
 enforceDigitsOnly($('myRollNo'), $('myRollNoErr'));
 enforceDigitsOnly($('beaconCode'), $('beaconErr'));
+
 /* ---------- system-wise option filter (Annual / Semester) ----------
-   Teacher ka dropdown system ke hisaab se filter hota hai, to student ka bhi
-   hona chahiye — warna student un dono ki list se kuch aisa chunkar aage badh
-   jata hai jo teacher ke paas kabhi dikhta hi nahi, aur "attendance match nahi
-   hui" jaisi confusion banti hai (jabki galti list ki thi, code ki nahi). */
+   UI me System SABSE PEHLE hai. Uske baad Class aur Course Type ki list aati
+   hai — aur wahi list system ke hisaab se filter hoti hai. Teacher ka dropdown
+   bhi bilkul isi tarah filter hota hai, isliye student ke paas wahi options
+   hote hain jo teacher ke paas hain (warna "attendance match nahi hui" jaisi
+   confusion banti, jabki galti list ki hoti, code ki nahi). */
 const studentOptgroupCache = new Map();
 
 function filterSelectBySystem(selectEl, system) {
@@ -379,19 +382,20 @@ function filterSelectBySystem(selectEl, system) {
     );
   }
   const groups = studentOptgroupCache.get(selectEl.id);
+  // System chuna hi nahi -> dono dikhao (purana behaviour).
   const keep = system ? groups.filter((g) => g.getAttribute('data-system') === system) : groups;
   const placeholder = selectEl.querySelector('option[value=""]');
   selectEl.innerHTML = '';
   if (placeholder) selectEl.appendChild(placeholder.cloneNode(true));
   keep.forEach((g) => selectEl.appendChild(g.cloneNode(true)));
-  // Chuna hua option naye system ki list me nahi hai -> reset, warna browser
-  // chupke se value khaali kar deta hai aur student ko lagta hai selection theek hai.
+  // Chuna hua option nayi list me nahi hai -> reset, warna browser chupke se
+  // value khaali kar deta hai aur student ko lagta hai selection theek hai.
   if (selectEl.value && !Array.from(selectEl.options).some((o) => o.value === selectEl.value)) {
     selectEl.value = '';
   }
 }
 
-// System radio se current value ('' = kuch nahi chuna -> sab options dikhao).
+// System radio se current value ('' = kuch nahi chuna -> dono options).
 function currentSystem() {
   const checked = document.querySelector('input[name="system"]:checked');
   return checked ? checked.value : '';
@@ -415,7 +419,6 @@ function syncSystemFromClass() {
     applySystemFilter();
   }
 }
-
 /* ---------- beacon field auto-show ----------
    Student ko pata nahi hota ki teacher ka session beacon ON hai ya nahi. Har
    keystroke pe network call karna bhaari hai, isliye sirf tab PEEK karte hain
@@ -540,6 +543,86 @@ function stopChirpListen() {
 }
 
 
+// ---------------------------------------------------------------------------
+// CHIRP SEGMENTER (pure function — testable)
+// ---------------------------------------------------------------------------
+// Ye hissa sabse nazuk hai, isliye ise alag, PURE function rakha hai taaki
+// tools/chirp-test.js isko bina browser/mic ke test kar sake.
+//
+// BUG jo yahan pakda gaya: pehle dedupe sirf "pehle jaisi hi frequency" par
+// hota tha (`if same as lastHz -> skip`). Iska matlab do LAGATAAR same digit
+// wale code (jaise 55xxxx) me doosra digit chup-chaap skip ho jata tha — code
+// 5 digit ka ban jata tha aur student ka submit FAIL hota tha. Random 6-digit
+// code me kisi bhi bagal wale jode ke same hone ka chance 1/10 hai, 5 jode
+// hain — matlab ~41% codes is bug se tootte the!
+//
+// Sahi tarika: tone ko uski DURATION se segment karo —
+//   * tone ki frequency badal jaye  -> purana tone khatam, naya shuru
+//   * thodi der koi tone na mile    -> purana tone khatam (gap)
+//   * tone itna lamba chale (>= minToneMs) ki wo shor na ho -> digit banao
+// Isse "55" bhi theek milta hai (beech ka gap tone ko band karta hai), aur
+// ek-ada noise blip bhi digit nahi banta (minToneMs se chhota hota hai).
+function createChirpSegmenter(p, opts) {
+  const o = opts || {};
+  const frameMs = Number(o.frame_ms) || 40;
+  // Ek asli tone 150 ms ka hai. 80 ms se lamba chalne par hi use digit maante
+  // hain — isse ek frame ka shor ya speaker ka click digit nahi banta.
+  const minToneMs = Number(o.min_tone_ms) || 80;
+  // Gap 120 ms hai. Isse ~1.5 frame (60 ms) tak khaali rehne par hi tone band
+  // maante hain — ek-ada frame drop hone par tone tootkar double nahi ginta,
+  // par asli 120 ms gap pakda jata hai (jisse "55" jaise repeat sahi milte hain).
+  const minGapMs = Number(o.min_gap_ms) || Math.max(Math.round(frameMs * 1.5), 60);
+
+  let curHz = null; // abhi kaun sa tone sun rahe hain
+  let curMs = 0; // wo tone kitni der se chal raha hai
+  let silenceMs = 0;
+  const digits = [];
+
+  function closeTone() {
+    if (curHz !== null && curMs >= minToneMs) {
+      const d = chirpDigitFromHz(curHz, p);
+      // Lead marker (aur range se bahar ki koi cheez) digit nahi banta.
+      if (d !== null) digits.push(d);
+    }
+    curHz = null;
+    curMs = 0;
+  }
+
+  return {
+    // peakHz: strong tone mila to uski frequency, warna null.
+    push(peakHz) {
+      if (peakHz === null || peakHz === undefined) {
+        silenceMs += frameMs;
+        if (curHz !== null && silenceMs >= minGapMs) closeTone();
+        return;
+      }
+      silenceMs = 0;
+      if (curHz !== null && Math.abs(peakHz - curHz) < p.tone_step_hz / 2) {
+        curMs += frameMs; // wahi tone chal raha hai
+        return;
+      }
+      // Frequency badal gayi -> purana tone khatam, naya shuru.
+      closeTone();
+      curHz = peakHz;
+      curMs = frameMs;
+    },
+    // Chirp pura khatam hone par (closing lead tone ke baad) call karte hain.
+    flush() {
+      closeTone();
+    },
+    digits,
+    get count() {
+      return digits.length;
+    },
+    get done() {
+      return digits.length >= 6;
+    },
+    get code() {
+      return digits.length >= 6 ? digits.slice(0, 6).join("") : null;
+    },
+  };
+}
+
 async function listenForChirp() {
   if (chirpListening) return;
   const p = chirpParams;
@@ -580,27 +663,26 @@ async function listenForChirp() {
     ctx = new Ctor();
     const src = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
-    // 8192 = 48 kHz par ~5.9 Hz bin. 240 Hz ka gap aaram se alag dikhta hai.
-    analyser.fftSize = 8192;
+    // 2048 @ 48 kHz = ~43 ms ka window. Ye jaan-boojh kar CHHOTA hai:
+    // tone 150 ms ka hai aur gap 40 ms ka. Bada window (8192 = 170 ms) lene par
+    // ek hi reading me DO tones mix ho jate the — beech ka gap gayab ho jata,
+    // aur "55" jaise do lagataar same tone ek hi lamba tone ban jate the.
+    // 2048 par bin ~23 Hz chauda hai, tone gap 240 Hz — aaram se alag dikhta hai.
+    analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0; // smoothing se tone blur ho jata hai
     src.connect(analyser);
     const buf = new Float32Array(analyser.frequencyBinCount);
-
-    const digits = [];
-    let lastHz = null;
+    const segmenter = createChirpSegmenter(p, { frame_ms: 40 });
 
     timer = setInterval(() => {
       analyser.getFloatFrequencyData(buf);
       const peak = findTonePeak(buf, ctx.sampleRate, analyser.fftSize, p);
-      if (!peak) return; // koi tone nahi — bas aage sunte raho
-      // Lagataar same tone = ek hi beep ke kai frames. Ek hi baar ginte hain.
-      if (lastHz !== null && Math.abs(peak.hz - lastHz) < p.tone_step_hz / 2) return;
-      lastHz = peak.hz;
-      const d = chirpDigitFromHz(peak.hz, p);
-      if (d === null) return; // ye lead marker tha (digit range se bahar)
-      digits.push(d);
-      if (digits.length >= 6) {
-        const code = digits.join('');
+      // Segmenter ko har frame do — wo khud decide karta hai ki tone khatam
+      // hua ya chal raha hai (duration-based, isliye "55" jaisa repeat bhi
+      // sahi milta hai — dekho upar createChirpSegmenter ka comment).
+      segmenter.push(peak ? peak.hz : null);
+      if (segmenter.done) {
+        const code = segmenter.code;
         stopChirpListen();
         const input = $('beaconCode');
         if (input) input.value = code;
@@ -609,7 +691,7 @@ async function listenForChirp() {
         toast('Chirp se code mil gaya ✓', 'ok');
         return;
       }
-      setChirpListenStatus(`Sun raha hoon… ${digits.length}/6 digits mile`);
+      if (segmenter.count) setChirpListenStatus(`Sun raha hoon… ${segmenter.count}/6 digits mile`);
     }, 40);
 
     // 15 second me kuch nahi mila to chhod do — warna mic on reh jata hai aur
@@ -922,6 +1004,24 @@ async function requestLocationToken(p, fix) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// BURST SPREAD (120+ students ke liye)
+// ---------------------------------------------------------------------------
+// Ultrasonic chirp ka ek badside hai: 120 students ka phone EK HI waqt me chirp
+// sunta hai (2 second me), isliye sab log ek hi 2-3 second ke window me "Mark
+// attendance" dabate hain. Server par ek saath 120 POST aati hain aur har POST
+// kai DB query karti hai (duplicate check, device check, anti-proxy, save).
+// Free Render instance par ye burst timeout de sakta hai — aur student ko
+// "network error" dikhta hai jabki sach me sab theek tha.
+//
+// Ilaaj: har phone 0 se 3 second ka RANDOM wait karta hai. Student ko ye wait
+// pata bhi nahi chalta (button par "Marking…" spinner chalta rehta hai), par
+// 120 requests poore 3-second window me bikh jati hain — peak load ~40x kam.
+function spreadSubmitBurst() {
+  const waitMs = Math.floor(Math.random() * 3000);
+  return new Promise((resolve) => setTimeout(resolve, waitMs));
+}
+
 // Ek attempt: request bhejta hai, aur sirf pure network failure par dobara try
 // karta hai (real error jaise "already marked" dobara bhejne se badalta nahi).
 async function attemptSubmit(payload, retries) {
@@ -1015,6 +1115,9 @@ async function confirmSubmit() {
       accuracy: coords ? coords.accuracy : null,
       fix_timestamp: coords ? coords.fix_at || Date.now() : 0,
     });
+    // 120+ students ek saath chirp sunte hain, isliye submit bhi ek saath aata
+    // hai — burst spread karke server ko bachaate hain (upar detail me likha hai).
+    await spreadSubmitBurst();
     let result = await attemptSubmit(payload, 2);
 
     // BEACON galat / khatam — server ne mark SAVE nahi kiya, isliye ye
@@ -1201,6 +1304,9 @@ async function flushQueue() {
       continue;
     }
     // Queue replay bhi wahi do-step flow use karta hai: token → mark.
+    // Ek saath 120 offline entries replay hone par bhi burst na bane, isliye
+    // har entry se pehle thoda random wait.
+    await spreadSubmitBurst();
     const tok = await requestLocationToken(item, { lat: item.lat, lng: item.lng, accuracy: item.accuracy });
     if (!tok.ok && tok.data.offline) { remaining.push(item); continue; } // abhi bhi offline
     if (!tok.ok) {
@@ -1226,15 +1332,18 @@ setInterval(flushQueue, 25000); // safety net, agar 'online' event na aaye
 /* ----------------------------------------------------------------------
    BOOT — system-wise list filter + class se system auto-detect
    ---------------------------------------------------------------------- */
-// Page load par bhi ek baar filter lagao taaki purana localStorage selection
-// (jo dusre system ka ho) chupke se galat list me na chala jaye.
+// System radio badalne par Class + Course Type ki list turant badalti hai.
 document.querySelectorAll('input[name="system"]').forEach((radio) => {
   radio.addEventListener('change', applySystemFilter);
 });
+// Class chunne par system khud set ho jata hai (BA Sem 3 -> Semester), aur
+// tab list dobara filter hoti hai.
 if ($('className')) $('className').addEventListener('change', () => {
   syncSystemFromClass();
   applySystemFilter();
 });
+// Page load par ek baar chalao — saved values (agar hain) sahi system ki list
+// me hi lagne chahiye.
 applySystemFilter();
 syncSystemFromClass();
 

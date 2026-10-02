@@ -923,41 +923,95 @@ async function resolveReportRecipients({ class_name, subject, course_type }) {
 // MongoDB storage ka asli hisaab + "kitne din me full hoga" projection.
 // 500 students x 5 classes = 2500 marks/day par Atlas M0 (512 MB) kaise bharta
 // hai — ye number teacher ko seedha dashboard par dikhta hai.
+// Ek collection ka ASLI size. `db.stats()` sirf TOTAL deta hai, jisse pata nahi
+// chalta ki BHAR kaun raha hai. `$collStats` per-collection data deta hai —
+// isse teacher turant dekh sakta hai ki quota AuditLog kha raha hai ya
+// Attendance. Fail ho jaye (purana server / permission) to null, aur caller
+// purane global-average estimate par chala jata hai.
+async function collStatsOf(name) {
+  try {
+    const db = mongoose.connection.db;
+    const out = await db.collection(name).aggregate([{ $collStats: { storageStats: {} } }]).toArray();
+    const s = out && out[0] && out[0].storageStats;
+    if (!s) return null;
+    const count = Number(s.count) || 0;
+    const dataBytes = Number(s.size) || 0;
+    const indexBytes = Number(s.totalIndexSize) || 0;
+    return {
+      count,
+      data_bytes: dataBytes,
+      index_bytes: indexBytes,
+      total_bytes: dataBytes + indexBytes,
+      avg_doc_bytes: count ? Math.round(dataBytes / count) : 0,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
 async function getStorageStats() {
   if (mongoose.connection.readyState !== 1) return null;
   try {
     const dbStats = await mongoose.connection.db.stats();
     const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-    const [att, students, locks, sessions, mails, recentMarks] = await Promise.all([
+    const [att, students, locks, sessions, mails, recentMarks, recentAudits, attStats, auditStats] = await Promise.all([
       Attendance.estimatedDocumentCount(),
       Student.estimatedDocumentCount(),
       DeviceLock.estimatedDocumentCount(),
       ActiveCode.estimatedDocumentCount(),
       EmailSetting.estimatedDocumentCount(),
       Attendance.countDocuments({ createdAtDate: { $gte: since } }),
+      // 🔴 AuditLog bhi ginte hain. PEHLE ye yahan NAHI tha, aur wahi sabse bada
+      // grower hai (retention 730 din = 2 saal, jabki Attendance sirf 90 din).
+      // Isliye projection bahut optimistic dikhati thi — "safe" batati rehti
+      // aur DB chupke se bhar jata. Ab dono collections growth me shamil hain.
+      AuditLog.countDocuments({ atDate: { $gte: since } }),
+      // Per-collection asli size — pata chale ki quota kaun kha raha hai.
+      collStatsOf("attendances"),
+      collStatsOf("auditlogs"),
     ]);
     const dataSize = Number(dbStats.dataSize) || 0;
     const indexSize = Number(dbStats.indexSize) || 0;
     const objects = Number(dbStats.objects) || 0;
     const avgDocBytes = objects ? Math.round(dataSize / objects) : 0;
-    const docsPerDay = Math.round(recentMarks / 14);
     const quotaBytes = MONGO_QUOTA_MB * 1024 * 1024;
     const usedBytes = dataSize + indexSize;
     const remainingBytes = Math.max(0, quotaBytes - usedBytes);
-    const growPerDayBytes = docsPerDay * Math.max(avgDocBytes, 1);
+
+    // Growth me DONO collections, aur har ek ke apne doc-size se (Attendance ka
+    // doc AuditLog se ~2x bada hota hai — global average use karne se estimate
+    // muddled ho jata tha). $collStats fail ho to global average par fallback.
+    const marksPerDay = recentMarks / 14;
+    const auditsPerDay = recentAudits / 14;
+    const attDocBytes = attStats && attStats.avg_doc_bytes ? attStats.avg_doc_bytes : avgDocBytes;
+    const auditDocBytes = auditStats && auditStats.avg_doc_bytes ? auditStats.avg_doc_bytes : Math.max(160, Math.round(avgDocBytes * 0.6));
+    const growPerDayBytes = Math.round(
+      marksPerDay * Math.max(attDocBytes, 1) + auditsPerDay * Math.max(auditDocBytes, 1)
+    );
+    const docsPerDay = Math.round(marksPerDay + auditsPerDay);
     const daysLeft = growPerDayBytes > 0 ? Math.floor(remainingBytes / growPerDayBytes) : null;
+    const mb = (bytes) => Number((bytes / (1024 * 1024)).toFixed(2));
     return {
       quota_mb: MONGO_QUOTA_MB,
-      used_mb: Number((usedBytes / (1024 * 1024)).toFixed(2)),
-      data_mb: Number((dataSize / (1024 * 1024)).toFixed(2)),
-      index_mb: Number((indexSize / (1024 * 1024)).toFixed(2)),
+      used_mb: mb(usedBytes),
+      data_mb: mb(dataSize),
+      index_mb: mb(indexSize),
       used_percent: Number(((usedBytes / quotaBytes) * 100).toFixed(1)),
+      // Legacy alias — purana teacher page isi naam se padhta hai.
+      db_size_mb: mb(usedBytes),
       avg_doc_bytes: avgDocBytes,
       docs_per_day_estimate: docsPerDay,
+      marks_per_day_estimate: Math.round(marksPerDay * 10) / 10,
+      audits_per_day_estimate: Math.round(auditsPerDay * 10) / 10,
       days_left_estimate: daysLeft,
       projected_full_date:
         daysLeft === null ? null : new Date(Date.now() + daysLeft * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-      counts: { attendance: att, students, device_locks: locks, sessions, email_settings: mails },
+      // Per-collection asli size — "quota kaun kha raha hai" ka seedha jawab.
+      collections: {
+        attendance: attStats ? { ...attStats, total_mb: mb(attStats.total_bytes) } : null,
+        audit_log: auditStats ? { ...auditStats, total_mb: mb(auditStats.total_bytes) } : null,
+      },
+      counts: { attendance: att, students, device_locks: locks, sessions, email_settings: mails, audit_logs: await AuditLog.estimatedDocumentCount() },
     };
   } catch (e) {
     console.error("Storage stats failed:", e.message);
@@ -1415,7 +1469,15 @@ function beaconRequired(session) {
 const CHIRP_TONE_MIN_HZ = 16500;
 const CHIRP_TONE_STEP_HZ = 240;
 const CHIRP_TONE_MS = 150; // ek digit kitni der bajta hai
-const CHIRP_GAP_MS = 40; // tones ke beech gap — warna speaker "click" karta hai
+// Tones ke beech gap. Ye 120 ms jaan-boojh kar hai (pehle 40 ms tha — wo BUG tha).
+// Wajah: do LAGATAAR same digit wale code (jaise "55") me tone band karne ka
+// ek hi sahara gap hai. 40 ms gap itna chhota tha ki 40 ms ke analysis frame me
+// sirf EK frame usme padta tha — matlab silence kabhi 2 frame tak nahi pahunchta
+// tha, tone band nahi hota tha, aur "55" ek lamba tone ban kar EK digit ban jata
+// tha (code 5 digit ka → student ka submit fail). 120 ms gap me ~3 frame padte
+// hain, isliye tone bharosemand band hota hai. Poora chirp ab ~2.3s ka hai —
+// classroom ke liye theek hai.
+const CHIRP_GAP_MS = 120;
 const CHIRP_LEAD_HZ = 16000; // "ab shuru" marker (digit range se neeche, distinct)
 const CHIRP_LEAD_MS = 300;
 
@@ -3994,12 +4056,17 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
         });
       }
       beaconSlotUsed = beaconResult.slot;
-      audit(
-        "beacon.ok",
-        req,
-        `roll_no=${cleanRoll}`,
-        `${class_name}/${subject}/${course_type} slot=${beaconResult.slot}${beaconResult.stale ? " (stale-by-one)" : ""} via=${normalizeBeaconChannel(req.body.beacon_channel)}`
-      );
+      // Yahan pehle har student ke liye ek `audit("beacon.ok", ...)` likha jata
+      // tha. Wo PURA DUPLICATE tha — Attendance document par pehle se
+      // `beacon_verified` + `beacon_slot` + `beacon_channel` teeno save hote
+      // hain, isliye audit me dobara likhne se koi nayi information nahi milti.
+      // Nuksaan bada tha: AuditLog 730 din tak rehta hai, to 120 students x 5
+      // classes = 600 extra docs/ROZ sirf isi redundant line se — 2 saal me
+      // ~4.4 lakh docs (DB quota ka sabse bada kharcha). Audit log ka maqsad
+      // "teacher ne kya badla" hai; student ka mark hona uske Attendance
+      // record se hi pata chalta hai. (beacon.fail neeche rakha hai — wo
+      // failure hai, Attendance me kahin record nahi hota, isliye diagnostic
+      // value hai.)
     }
 
     // 1b. Location — anti-proxy ka core, par weak-net friendly.

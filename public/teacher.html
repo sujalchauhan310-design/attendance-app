@@ -54,11 +54,20 @@
   <section class="card">
     <div class="grid-2">
       <div class="field">
+        <label class="label" for="systemSelect">System</label>
+        <select id="systemSelect" class="select">
+          <option value="">Select system</option>
+          <option value="Annual">Annual</option>
+          <option value="Semester">Semester</option>
+        </select>
+      </div>
+      <div class="field">
         <label class="label" for="className">Course / Year</label>
-        <!-- Annual aur Semester ke options SAATH me ek hi list me hain. System
-             dropdown se is list ka koi link nahi — teacher jo chahega chun leta
-             hai. Annual wale pehle (purana behaviour bilkul same), Semester wale
-             uske baad. localStorage me purana class name safe rehta hai. -->
+        <!-- System ke hisaab se sirf usi ka optgroup dikhta hai (neeche JS
+             applySystemFilter). Annual chuna -> sirf Annual classes, Semester
+             chuna -> sirf Semester classes. Isse galti se galat system ka
+             class chun jane ka chance khatam. Kuch na chuna ho to dono dikhte
+             hain (purana behaviour). -->
         <select id="className" class="select">
           <option value="">Select class</option>
           <optgroup label="Annual system" data-system="Annual">
@@ -76,14 +85,6 @@
             <option>BCom Sem 5</option><option>BCom Sem 6</option><option>BCom Sem 7</option><option>BCom Sem 8</option>
             <option>MA Sem 1</option><option>MA Sem 2</option>
           </optgroup>
-        </select>
-      </div>
-      <div class="field">
-        <label class="label" for="systemSelect">System</label>
-        <select id="systemSelect" class="select">
-          <option value="">Select system</option>
-          <option value="Annual">Annual</option>
-          <option value="Semester">Semester</option>
         </select>
       </div>
       <div class="field">
@@ -711,6 +712,7 @@
       </div>
       <div id="opsStorageWarn" class="mt-2"></div>
       <div class="muted fs-xs mt-2" id="opsStorageStats"></div>
+      <div class="muted fs-xs mt-1" id="opsStorageBreakup"></div>
       <div id="opsPolicyNotes" class="mt-2"></div>
       <div class="row wrap mt-2" style="gap:8px;">
         <button type="button" class="btn btn-sm btn-ghost" onclick="loadDataPolicy()">↻ Reload policy</button>
@@ -1103,12 +1105,16 @@ let liveSessionMeta = null;
 
 /* ----------------------------------------------------------------------
    SYSTEM-WISE OPTION FILTER (Annual / Semester)
-   BUG jo tha: class aur course-type ke DONO optgroup hamesha dikhte the —
-   teacher "Semester" chunta tha par list me Annual ke course types (Theory,
-   Lab, ...) bhi waise hi pade rehte the (aur ulta bhi). Isse galti se galat
-   combo chun jata tha, aur us session ka data galat system ke saath report
-   me chala jata tha — jo baad me dhoondhna mushkil hota.
-   AB: sirf chune hue system ka optgroup dikhta hai.
+   UI me System dropdown SABSE PEHLE hai. Uske baad hi class aur course-type
+   ki list aati hai — aur wahi list system ke hisaab se filter hoti hai:
+     Annual chuna   -> sirf Annual classes + Annual course types
+     Semester chuna -> sirf Semester classes + Semester course types
+     Kuch nahi chuna-> dono (purana behaviour, isliye purani selection tootti
+                       nahi hai)
+   Kyun filter: pehle dono optgroups HAMESHA dikhte the, isliye teacher
+   "Semester" chunta tha par list me Annual ke course types (Theory, Lab...)
+   bhi pade rehte the (aur ulta bhi) — galti se galat combo chun jata tha, aur
+   wo session galat system ke saath report me chala jata tha.
    ---------------------------------------------------------------------- */
 // select.id -> uske saare [data-system] optgroups ki clone copies. Ek hi baar
 // DOM se padhte hain, phir har switch par inhe se list dobara banate hain
@@ -1125,16 +1131,15 @@ function filterSelectBySystem(selectEl, system) {
     );
   }
   const groups = teacherOptgroupCache.get(selectEl.id);
-  // System chuna hi nahi -> sab dikhao. Purana saved selection isse nahi tootta.
+  // System chuna hi nahi -> sab dikhao (purana behaviour).
   const keep = system ? groups.filter((g) => g.getAttribute('data-system') === system) : groups;
   const placeholder = selectEl.querySelector('option[value=""]');
   selectEl.innerHTML = '';
   if (placeholder) selectEl.appendChild(placeholder.cloneNode(true));
   keep.forEach((g) => selectEl.appendChild(g.cloneNode(true)));
-  // Annual "Theory" chuna tha aur ab Semester hai -> wo option list me nahi
-  // bacha. Reset karna zaroori hai: warna browser chupke se value khaali kar
-  // deta hai aur teacher ko lagta hai selection waise hi hai (jabki save
-  // hote waqt galat/blank jata hai).
+  // Annual "Theory" chuna tha aur ab Semester hai -> wo option nayi list me
+  // nahi bacha. Reset karna zaroori hai: warna browser chupke se value khaali
+  // kar deta hai aur teacher ko lagta hai selection waise hi hai.
   if (selectEl.value && !Array.from(selectEl.options).some((o) => o.value === selectEl.value)) {
     selectEl.value = '';
   }
@@ -3232,15 +3237,24 @@ function renderLivePoll(data, onlyNewer) {
   }));
 }
 
-// ---- Failure list rows (index par click karte hain — text ko JS string me
-// inject nahi karte, isliye koi naam quotes se nahi todega) ----
-function failRow(f, index) {
+// ---- Failure list rows ----
+// attempt_id se click karte hain, INDEX se NAHI. Ye asli bug tha: live poll har
+// 5 second me list re-render karta hai, aur usi waqt list badalte-badalte
+// index kisi DOOSRE student par jane lagta tha — matlab teacher "Present" dabata
+// aur GALAT student present ho jata tha. attempt_id stable hai (server deta
+// hai), isliye us par lookup karne se koi galat mark nahi lagta.
+// Text ko JS string me inject nahi karte (isliye koi naam quotes se nahi todega).
+function failRow(f) {
   const roll = esc(String(f.roll_no || '—'));
   const name = esc(String(f.student_name || ''));
   const reason = esc(String(f.reason_text || 'Location verify nahi ho payi'));
   const tries = Number(f.attempts) || 1;
   const meta = `${tries} baar try · ${esc(String(f.last_at_hhmm || '—'))}${f.device_short ? ' · device ' + esc(String(f.device_short)) : ''}`;
   const done = f.already_marked === true;
+  // attempt_id DB ka _id hai (24 hex chars) — safe to inject, par phir bhi
+  // allowlist kar dete hain taaki koi odd value JS to na kar de.
+  const key = esc(String(f.attempt_id || ''));
+  const canAct = !done && /^[A-Za-z0-9_-]+$/.test(String(f.attempt_id || ''));
   return `<div class="rec">
       <div class="top">
         <div>
@@ -3249,17 +3263,24 @@ function failRow(f, index) {
         </div>
         ${done ? '<span class="chip chip-ok">already present</span>' : ''}
       </div>
-      ${done ? '' : `<div class="acts">
-        <button type="button" class="btn btn-sm btn-ok" onclick="failMarkPresent(${index})">✅ Present mark karo</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="failIgnore(${index})">Ignore</button>
-      </div>`}
+      ${canAct ? `<div class="acts">
+        <button type="button" class="btn btn-sm btn-ok" onclick="failMarkPresent('${key}')">✅ Present mark karo</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="failIgnore('${key}')">Ignore</button>
+      </div>` : ''}
     </div>`;
+}
+
+// attempt_id -> entry. List badal jaye to bhi sahi entry milti hai.
+function findFailure(attemptId) {
+  const key = String(attemptId || '');
+  if (!key) return null;
+  return liveFailures.find((f) => String(f.attempt_id || '') === key) || null;
 }
 
 // "Present mark karo" — teacher ke naam se manual mark (audit log me jata hai),
 // aur us roll ke failure rows server par "resolved" ho jate hain.
-async function failMarkPresent(index) {
-  const f = liveFailures[index];
+async function failMarkPresent(attemptId) {
+  const f = findFailure(attemptId);
   const meta = liveSessionMeta || {};
   if (!f) { toast('Entry nahi mili — live list refresh karein.', 'warn'); return; }
   if (!f.roll_no) { toast('Is student ka roll number nahi mila — usse dobara mark karne ko kahein.', 'warn'); return; }
@@ -3299,9 +3320,9 @@ async function failMarkPresent(index) {
 }
 
 // "Ignore" — entry ko teacher ki list se hata do (galti se try kiya tha).
-async function failIgnore(index) {
-  const f = liveFailures[index];
-  if (!f) return;
+async function failIgnore(attemptId) {
+  const f = findFailure(attemptId);
+  if (!f) { toast('Entry nahi mili — live list refresh karein.', 'warn'); return; }
   const msg = liveEl('liveFailMsg');
   try {
     const res = await teacherFetch('/api/teacher/failures/ignore', {
@@ -3634,7 +3655,19 @@ async function loadDataPolicy() {
     }
     setText('opsStorageStats',
       `Average document ${storage.avg_doc_bytes != null ? storage.avg_doc_bytes + ' bytes' : '—'} · `
-      + `${storage.docs_per_day_estimate != null ? storage.docs_per_day_estimate : '—'} documents/din`);
+      + `${storage.docs_per_day_estimate != null ? storage.docs_per_day_estimate : '—'} documents/din`
+      + (storage.marks_per_day_estimate != null
+          ? ` (marks ${storage.marks_per_day_estimate} + audit ${storage.audits_per_day_estimate})`
+          : ''));
+
+    // Quota kaun kha raha hai — Attendance ya AuditLog? Ye sabse zaroori number
+    // hai kyunki AuditLog 730 din tak rehta hai (Attendance sirf 90), isliye
+    // sabse bada kharcha chupke se wahi ban jata hai.
+    const cols = storage.collections || {};
+    if (cols.attendance || cols.audit_log) {
+      const part = (label, c) => (c ? `${label} ${c.total_mb} MB (${c.count} docs)` : `${label} —`);
+      setText('opsStorageBreakup', `${part('Attendance', cols.attendance)} · ${part('AuditLog', cols.audit_log)}`);
+    }
 
     const notes = $('opsPolicyNotes');
     if (notes) {
