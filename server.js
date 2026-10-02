@@ -568,6 +568,12 @@ const attendanceSchema = new mongoose.Schema({
   // Beacon ka kaunsa slot use hua — audit ke liye (teacher ek baar me dekh
   // sakta hai ki saare students ek hi 45-second window me the ya nahi).
   beacon_slot: { type: Number, default: -1 },
+  // Proof kis channel se aaya: 'manual' (6 digit type kiya) | 'chirp' (ultrasonic
+  // sun kar) | 'qr' (scan kiya). Sirf audit/analytics — verification har case me
+  // wahi verifyBeaconCode() karta hai, isliye ye field security ko kamzor NAHI
+  // karti. Isse teacher dekh sakta hai ki class ne kaunsa tarika use kiya, aur
+  // agar koi "chirp" claim kare jo possible na ho to wo shak ka signal hai.
+  beacon_channel: { type: String, default: "" },
   // Exactly how the server verified presence (kept so a teacher can review and
   // spot anything suspicious later). distance_m/accuracy come from the one-time
   // location token, never straight from the client.
@@ -1384,6 +1390,112 @@ function verifyBeaconCode(secret, submitted, nowMs, slotMs) {
 // Beacon nahi hai ya band hai to student ko koi extra proof nahi dena hai.
 function beaconRequired(session) {
   return Boolean(session && session.beacon_enabled && session.beacon_secret);
+}
+
+// ---------------------------------------------------------------------------
+// ULTRASONIC CHIRP — wahi beacon code, par SOUND ke through
+// ---------------------------------------------------------------------------
+// Kyun: 120 students ke liye 6 digit TYPE karna slow hai. Chirp wahi code sound
+// me bhejta hai, phone sun kar khud bhar leta hai. Do bade fayde:
+//   1) SOUND DEEWAR SE BAHAR NAHI JAATI. GPS ko deewar se farak nahi padta
+//      (bahar wale ko bhi wahi number milta hai), isliye GPS dhoka de jata hai.
+//      Sound se "is room me hai" ka proof milta hai — ye physics hai, software
+//      claim nahi.
+//   2) INTERNET PAR RELAY mushkil hai: WhatsApp/Zoom Opus codec use karte hain
+//      jo SPEECH ke liye bana hai. Kam bitrate par Opus apni bandwidth khud kam
+//      kar deta hai (narrowband = 4 kHz tak), isliye 16-18 kHz ka ultrasonic
+//      band relay hote waqt kat jata hai.
+//
+// NAYA CRYPTO NAHI: chirp wahi beacon code bhejta hai, isliye verify bhi wahi
+// verifyBeaconCode() karta hai (slot rotate + 1-slot grace sab already hai).
+// ---------------------------------------------------------------------------
+// Tones 16.5k se shuru — 19k+ par sasta phone mic tezi se kaat deta hai,
+// isliye digit range ko neeche rakha. 240 Hz step = 10 digits, aur FFT me
+// tones ek dusre se aaram se alag dikhte hain.
+const CHIRP_TONE_MIN_HZ = 16500;
+const CHIRP_TONE_STEP_HZ = 240;
+const CHIRP_TONE_MS = 150; // ek digit kitni der bajta hai
+const CHIRP_GAP_MS = 40; // tones ke beech gap — warna speaker "click" karta hai
+const CHIRP_LEAD_HZ = 16000; // "ab shuru" marker (digit range se neeche, distinct)
+const CHIRP_LEAD_MS = 300;
+
+// Digit -> frequency. 0..9 -> 16500..18660 Hz.
+function chirpToneForDigit(digit, opts) {
+  const o = opts || {};
+  const min = Number.isFinite(o.min_hz) ? o.min_hz : CHIRP_TONE_MIN_HZ;
+  const step = Number.isFinite(o.step_hz) ? o.step_hz : CHIRP_TONE_STEP_HZ;
+  const d = Number(digit);
+  if (!Number.isInteger(d) || d < 0 || d > 9) return null;
+  return min + d * step;
+}
+
+// Frequency -> digit (decode side). Tolerance ke saath — mic ka reading thoda
+// idhar-udhar hota hai, isliye sabse kareebi tone choose karte hain.
+function chirpDigitForTone(hz, opts) {
+  const o = opts || {};
+  const min = Number.isFinite(o.min_hz) ? o.min_hz : CHIRP_TONE_MIN_HZ;
+  const step = Number.isFinite(o.step_hz) ? o.step_hz : CHIRP_TONE_STEP_HZ;
+  const n = Number(hz);
+  if (!Number.isFinite(n)) return null;
+  const d = Math.round((n - min) / step);
+  // Aadha step se zyada door = ye tone is scheme ka hi nahi (bahaar ki awaaz).
+  if (d < 0 || d > 9) return null;
+  if (Math.abs(n - (min + d * step)) > step / 2) return null;
+  return d;
+}
+
+// 6-digit code -> play karne layak sequence (lead marker + 6 tones).
+function chirpSequenceFor(code) {
+  const digits = String(code || "").replace(/\D/g, "");
+  if (digits.length !== 6) return null;
+  const tones = [{ hz: CHIRP_LEAD_HZ, ms: CHIRP_LEAD_MS, lead: true }];
+  for (const ch of digits) {
+    tones.push({ hz: chirpToneForDigit(ch), ms: CHIRP_TONE_MS, lead: false });
+  }
+  // Aakhir me wahi lead marker — student ko "khatam" pata chale, aur decoder
+  // dono taraf se boundary pakad kar behtar sync kar sake.
+  tones.push({ hz: CHIRP_LEAD_HZ, ms: CHIRP_LEAD_MS, lead: true });
+  return tones;
+}
+
+// Tones ki list -> code. Decoder (aur test) isi ka use karte hain.
+function chirpCodeFromTones(hzList) {
+  if (!Array.isArray(hzList) || hzList.length !== 6) return null;
+  let out = "";
+  for (const hz of hzList) {
+    const d = chirpDigitForTone(hz);
+    if (d === null) return null;
+    out += String(d);
+  }
+  return out;
+}
+
+// Client (teacher page) ko bhejne wala chirp payload — ek hi jagah se,
+// taaki teacher ka playback aur server ka decode kabhi out-of-sync na hon.
+function chirpSpecFor(code) {
+  const tones = chirpSequenceFor(code);
+  if (!tones) return null;
+  return {
+    lead_hz: CHIRP_LEAD_HZ,
+    lead_ms: CHIRP_LEAD_MS,
+    tone_ms: CHIRP_TONE_MS,
+    gap_ms: CHIRP_GAP_MS,
+    tone_min_hz: CHIRP_TONE_MIN_HZ,
+    tone_step_hz: CHIRP_TONE_STEP_HZ,
+    // Digits ki frequencies (lead marker ke bina) — decoder inhe dhoondta hai.
+    hz: tones.filter((t) => !t.lead).map((t) => t.hz),
+    // Poora sequence playback ke liye (lead + tones + lead).
+    sequence: tones,
+    total_ms: tones.reduce((sum, t) => sum + t.ms + CHIRP_GAP_MS, 0),
+  };
+}
+
+// Proof kis channel se aaya — audit/analytics ke liye. Allowlist rakhi hai
+// taaki client koi random string DB me na bhej de.
+const BEACON_CHANNELS = ["manual", "chirp", "qr"];
+function normalizeBeaconChannel(raw) {
+  const v = String(raw || "").trim().toLowerCase();
+  return BEACON_CHANNELS.includes(v) ? v : "manual";
 }
 
 // ---------------------------------------------------------------------------
@@ -2324,6 +2436,9 @@ app.get(["/api/teacher/session-beacon", "/api/teacher/beacon"], requireTeacherAu
       ends_at: beaconEnd,
       ms_left: Math.max(0, beaconEnd - now),
       duration_ms: session.beacon_duration_ms || 0,
+      // ULTRASONIC CHIRP: teacher page isi spec se sound bajata hai. Wahi code
+      // jo upar `beacon_code` me hai — naya proof nahi, sirf naya CHANNEL hai.
+      chirp: chirpSpecFor(beacon.code),
     });
   } catch (err) {
     console.error(err);
@@ -3669,7 +3784,24 @@ app.get("/api/student/beacon-check", studentLookupLimiter, async (req, res) => {
     const session = await ActiveCode.findOne({ code }).lean();
     // Code hi galat hai ya expire ho gaya → koi live class nahi, beacon OFF.
     if (!session || now > session.expires_at) return res.json({ beacon_enabled: false });
-    return res.json({ beacon_enabled: beaconRequired(session) });
+    const needed = beaconRequired(session);
+    return res.json({
+      beacon_enabled: needed,
+      // ULTRASONIC CHIRP ke constants — student page isi se sound decode karta
+      // hai. Server se bhejne ka faayda: agar server.js me tones badle to
+      // student page apne aap naye values use karega. Warna do jagah constants
+      // rakhne padte aur ek din chupke out-of-sync ho jate (chirp bajta rehta,
+      // decode kabhi na hota — classroom me debug karna sabse mushkil).
+      chirp: needed
+        ? {
+            tone_min_hz: CHIRP_TONE_MIN_HZ,
+            tone_step_hz: CHIRP_TONE_STEP_HZ,
+            tone_ms: CHIRP_TONE_MS,
+            lead_hz: CHIRP_LEAD_HZ,
+            lead_ms: CHIRP_LEAD_MS,
+          }
+        : null,
+    });
   } catch (err) {
     console.error(err);
     // Is route ka fail hona student ko block nahi karega — default OFF.
@@ -3866,7 +3998,7 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
         "beacon.ok",
         req,
         `roll_no=${cleanRoll}`,
-        `${class_name}/${subject}/${course_type} slot=${beaconResult.slot}${beaconResult.stale ? " (stale-by-one)" : ""}`
+        `${class_name}/${subject}/${course_type} slot=${beaconResult.slot}${beaconResult.stale ? " (stale-by-one)" : ""} via=${normalizeBeaconChannel(req.body.beacon_channel)}`
       );
     }
 
@@ -4159,6 +4291,9 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       // me ise "sab verify hue the" jaisa mat padhna chahiye.
       beacon_verified: beaconWasRequired && beaconSlotUsed >= 0,
       beacon_slot: beaconSlotUsed,
+      // Kis channel se proof aaya (manual/chirp/qr) — sirf audit. Verification
+      // upar wahi thi, isliye ye value security par asar nahi daalti.
+      beacon_channel: beaconWasRequired ? normalizeBeaconChannel(req.body.beacon_channel) : "",
       lat: location.lat,
       lng: location.lng,
       accuracy: location.accuracy,

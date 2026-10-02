@@ -61,13 +61,13 @@
              uske baad. localStorage me purana class name safe rehta hai. -->
         <select id="className" class="select">
           <option value="">Select class</option>
-          <optgroup label="Annual system">
+          <optgroup label="Annual system" data-system="Annual">
             <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
             <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
             <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
             <option>MA 1st</option><option>MA 2nd</option>
           </optgroup>
-          <optgroup label="Semester system">
+          <optgroup label="Semester system" data-system="Semester">
             <option>BA Sem 1</option><option>BA Sem 2</option><option>BA Sem 3</option><option>BA Sem 4</option>
             <option>BA Sem 5</option><option>BA Sem 6</option><option>BA Sem 7</option><option>BA Sem 8</option>
             <option>BSc Sem 1</option><option>BSc Sem 2</option><option>BSc Sem 3</option><option>BSc Sem 4</option>
@@ -104,7 +104,7 @@
              toota nahi. Annual wale extra options me se. -->
         <select id="courseTypeSelect" class="select">
           <option value="">Select course type</option>
-          <optgroup label="Semester system (NEP / CBCS)">
+          <optgroup label="Semester system (NEP / CBCS)" data-system="Semester">
             <option value="DSC">DSC — Discipline Specific Core</option>
             <option value="SEC">SEC — Skill Enhancement Course</option>
             <option value="GE">GE — Generic Elective</option>
@@ -112,7 +112,7 @@
             <option value="VAC">VAC — Value Added Course</option>
             <option value="MDC">MDC — Multi-Disciplinary Course</option>
           </optgroup>
-          <optgroup label="Annual system">
+          <optgroup label="Annual system" data-system="Annual">
             <option value="Theory">Theory</option>
             <option value="Practical">Practical</option>
             <option value="Lab">Lab</option>
@@ -265,6 +265,27 @@
           <div class="row mt-2" style="gap:8px;">
             <button type="button" class="btn btn-sm grow" onclick="openBeaconProjector()">📺 Projector mode</button>
             <button type="button" class="btn btn-sm btn-ghost grow" onclick="copyBeacon()">Copy beacon</button>
+          </div>
+
+          <!-- ================= ULTRASONIC CHIRP =================
+               Wahi beacon code, par SOUND ke through. Isse 120 students ko
+               6 digit type karne ki zaroorat nahi — phone khud sun kar bhar
+               leta hai, aur "is room me hai" ka proof milta hai (sound deewar
+               se bahar nahi jaati, GPS jaati hai). -->
+          <div class="divider"></div>
+          <div style="font-size:.8rem; font-weight:700; color:var(--info); letter-spacing:.04em;">🔊 CHIRP — students ka phone khud sun lega</div>
+          <div class="muted fs-sm mt-1" id="chirpHint">
+            Ye code ko sound me badal kar bajata hai (16.5–18.7 kHz, kaan ko sunai nahi deta).
+            Laptop/PA speaker ki volume poori rakhein aur screen ki taraf rakhein.
+          </div>
+          <div class="row mt-2" style="gap:8px;">
+            <button type="button" class="btn btn-sm grow" id="chirpBtn" onclick="playChirpNow()">🔊 Ek baar bajao</button>
+            <button type="button" class="btn btn-sm btn-ghost grow" id="chirpAutoBtn" onclick="toggleChirpAuto()">🔁 Auto (har 45s)</button>
+          </div>
+          <div class="muted fs-xs mt-1" id="chirpStatus">Taiyaar — jab code ready ho to bajayein.</div>
+          <div class="muted fs-xs mt-1">
+            Zaroori: <b>beech me kuch mat bolna</b> — awaaz chirp ko dabaa deti hai. Auto ON ho to
+            students ko sirf phone uthana hai, kuch type nahi karna.
           </div>
         </div>
 
@@ -1080,6 +1101,52 @@ let livePollBusy = false;
 let liveFailures = [];
 let liveSessionMeta = null;
 
+/* ----------------------------------------------------------------------
+   SYSTEM-WISE OPTION FILTER (Annual / Semester)
+   BUG jo tha: class aur course-type ke DONO optgroup hamesha dikhte the —
+   teacher "Semester" chunta tha par list me Annual ke course types (Theory,
+   Lab, ...) bhi waise hi pade rehte the (aur ulta bhi). Isse galti se galat
+   combo chun jata tha, aur us session ka data galat system ke saath report
+   me chala jata tha — jo baad me dhoondhna mushkil hota.
+   AB: sirf chune hue system ka optgroup dikhta hai.
+   ---------------------------------------------------------------------- */
+// select.id -> uske saare [data-system] optgroups ki clone copies. Ek hi baar
+// DOM se padhte hain, phir har switch par inhe se list dobara banate hain
+// (optgroup ko "hidden" karne se Safari/kuch Android browsers me options
+// dikhte rehte hain, isliye rebuild hi bharosemand tarika hai).
+const teacherOptgroupCache = new Map();
+
+function filterSelectBySystem(selectEl, system) {
+  if (!selectEl) return;
+  if (!teacherOptgroupCache.has(selectEl.id)) {
+    teacherOptgroupCache.set(
+      selectEl.id,
+      Array.from(selectEl.querySelectorAll('optgroup[data-system]')).map((g) => g.cloneNode(true))
+    );
+  }
+  const groups = teacherOptgroupCache.get(selectEl.id);
+  // System chuna hi nahi -> sab dikhao. Purana saved selection isse nahi tootta.
+  const keep = system ? groups.filter((g) => g.getAttribute('data-system') === system) : groups;
+  const placeholder = selectEl.querySelector('option[value=""]');
+  selectEl.innerHTML = '';
+  if (placeholder) selectEl.appendChild(placeholder.cloneNode(true));
+  keep.forEach((g) => selectEl.appendChild(g.cloneNode(true)));
+  // Annual "Theory" chuna tha aur ab Semester hai -> wo option list me nahi
+  // bacha. Reset karna zaroori hai: warna browser chupke se value khaali kar
+  // deta hai aur teacher ko lagta hai selection waise hi hai (jabki save
+  // hote waqt galat/blank jata hai).
+  if (selectEl.value && !Array.from(selectEl.options).some((o) => o.value === selectEl.value)) {
+    selectEl.value = '';
+  }
+}
+
+function applySystemFilter() {
+  const system = $('systemSelect') ? $('systemSelect').value : '';
+  filterSelectBySystem($('className'), system);
+  filterSelectBySystem($('courseTypeSelect'), system);
+}
+
+
 function saveSelection() {
   try {
     localStorage.setItem(SELECTION_KEY, JSON.stringify({
@@ -1102,10 +1169,14 @@ function restoreSelection() {
   try {
     const saved = JSON.parse(localStorage.getItem(SELECTION_KEY) || 'null');
     if (!saved) return;
+    // System PEHLE set karo, phir filter — warna saved course_type (jo dusre
+    // system ka ho sakta hai) list me na hone par chupke reset ho jata hai aur
+    // teacher ko lagta hai purani selection wapas aa gayi.
+    if (saved.system) $('systemSelect').value = saved.system;
+    applySystemFilter();
     if (saved.class_name) $('className').value = saved.class_name;
     if (saved.subject) $('subjectSelect').value = saved.subject;
     if (saved.course_type) $('courseTypeSelect').value = saved.course_type;
-    if (saved.system) $('systemSelect').value = saved.system;
     if (typeof saved.require_location === 'boolean') $('requireLocation').checked = saved.require_location;
     if (saved.expiry_minutes) $('expiryMinutes').value = saved.expiry_minutes;
     if (typeof saved.require_approval === 'boolean') $('requireApproval').checked = saved.require_approval;
@@ -1340,6 +1411,120 @@ let beaconOverWarned = false;
 let beaconMsUntilNext = BEACON_SLOT_MS_FALLBACK;
 let beaconFetchedAt = 0;
 
+/* ----------------------------------------------------------------------
+   ULTRASONIC CHIRP PLAYER (Web Audio)
+   Beacon ka code sound me bajata hai. Wahi code jo screen par hai, isliye
+   verification server par wahi verifyBeaconCode() karta hai — naya crypto
+   nahi, sirf naya channel.
+   Kyun: 120 students ko 6 digit type karna slow hai. Aur sound DEEWAR SE
+   BAHAR NAHI JAATI — isliye "is room me hai" ka proof milta hai, jo GPS
+   nahi de sakta (bahar wale ko bhi wahi GPS number milta hai). */
+let beaconChirpLive = null; // server se aaya hua spec (hz + sequence)
+let chirpAutoTimer = null;
+let chirpCtx = null; // AudioContext ek hi baar banao — baar-baar banane par Safari dhamaka karta hai
+
+function getChirpCtx() {
+  if (!chirpCtx) {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return null;
+    try { chirpCtx = new Ctor(); } catch (err) { return null; }
+  }
+  return chirpCtx;
+}
+
+function setChirpStatus(msg) {
+  const el = $('chirpStatus');
+  if (el) el.textContent = msg;
+}
+
+// Spec ke sequence ko beep-beep karke bajata hai. Hamesha ek hi AudioContext
+// use karte hain; suspended ho to resume (iOS par pehla play user-gesture ke
+// andar hi hota hai, isliye button click se kaam kar jata hai).
+async function playChirpSpec(spec) {
+  const ctx = getChirpCtx();
+  if (!ctx) return false;
+  if (ctx.state === 'suspended') {
+    try { await ctx.resume(); } catch (err) { /* neeche handle */ }
+  }
+  const seq = (spec && spec.sequence) || [];
+  if (!seq.length) return false;
+  let t = ctx.currentTime + 0.06; // thoda lead time — scheduler ko saans lene do
+  seq.forEach((tone) => {
+    const dur = Math.max(0.05, (Number(tone.ms) || 150) / 1000);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = Number(tone.hz) || 0;
+    // Envelope ZAROORI hai: seedha on/off karne par speaker "click" karta hai
+    // aur us click me broadband energy hoti hai — jo sasti mic par digit
+    // jaisa lag sakta hai. 12 ms ramp se wo problem nahi hoti.
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.85, t + 0.012);
+    gain.gain.setValueAtTime(0.85, t + Math.max(0.012, dur - 0.012));
+    gain.gain.linearRampToValueAtTime(0, t + dur);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+    t += dur + (Number(spec.gap_ms) || 40) / 1000;
+  });
+  return true;
+}
+
+async function playChirpNow() {
+  if (!beaconChirpLive) {
+    setChirpStatus('Chirp ready nahi hai — pehle code generate karein.');
+    toast('Pehle attendance code generate karein.', 'warn');
+    return;
+  }
+  const btn = $('chirpBtn');
+  if (btn) btn.disabled = true;
+  setChirpStatus('🔊 Baj raha hai… (students ke phone sun rahe hain)');
+  try {
+    const ok = await playChirpSpec(beaconChirpLive);
+    if (!ok) {
+      setChirpStatus('Baj nahi paya — browser ne audio block kiya. Ek baar screen par tap karein.');
+      toast('Audio block hua. Ek baar tap karke dobara try karein.', 'warn');
+      return;
+    }
+    const ms = beaconChirpLive.total_ms || 2000;
+    setChirpStatus(`✅ Baj gaya (${(ms / 1000).toFixed(1)}s). Code ${beaconSecretLive} bheja gaya.`);
+  } finally {
+    setTimeout(() => { if (btn) btn.disabled = false; }, 500);
+  }
+}
+
+// Auto: har 45 second (beacon slot ke saath) chirp bajata hai. Isse teacher
+// ko baar-baar button dabana nahi padta, aur jo student late aaya wo agle
+// chirp par khud pakad leta hai.
+function toggleChirpAuto() {
+  if (chirpAutoTimer) {
+    stopChirpAuto('Auto band kar diya.');
+    return;
+  }
+  if (!beaconChirpLive) {
+    toast('Pehle attendance code generate karein.', 'warn');
+    return;
+  }
+  const btn = $('chirpAutoBtn');
+  if (btn) { btn.textContent = '⏹ Auto band karo'; btn.classList.add('btn-ok'); }
+  setChirpStatus('🔁 Auto ON — har 45 second me khud bajega.');
+  playChirpNow();
+  chirpAutoTimer = setInterval(() => {
+    // Session band ho gaya to auto apne aap ruk jaye — warna screen band hone
+    // ke baad bhi bajta rehta hai (aur free Render instance ko jagata rehta hai).
+    if (beaconStopped || !beaconChirpLive) { stopChirpAuto('Session band — auto ruk gaya.'); return; }
+    playChirpNow();
+  }, BEACON_SLOT_MS_FALLBACK);
+}
+
+function stopChirpAuto(msg) {
+  if (chirpAutoTimer) { clearInterval(chirpAutoTimer); chirpAutoTimer = null; }
+  const btn = $('chirpAutoBtn');
+  if (btn) { btn.textContent = '🔁 Auto (har 45s)'; btn.classList.remove('btn-ok'); }
+  if (msg) setChirpStatus(msg);
+}
+
 // Beacon toggle ka note + duration dropdown ka visibility.
 function updateBeaconNote() {
   const on = $('requireBeacon').checked;
@@ -1358,6 +1543,10 @@ function stopBeaconLoop() {
   beaconActive = false;
   beaconSlot = -1;
   beaconSecretLive = '';
+  // Auto chirp bhi band — warna session khatam hone ke baad bhi speaker
+  // bajta rehta hai (aur teacher ko lagta hai beacon zinda hai).
+  stopChirpAuto('');
+  beaconChirpLive = null;
   closeBeaconProjector();
   if ($('beaconBlock')) $('beaconBlock').classList.add('hide');
 }
@@ -1403,6 +1592,10 @@ function renderBeacon(data) {
   beaconFetchedAt = Date.now();
   if ($('beaconBlock')) $('beaconBlock').classList.remove('hide');
   if ($('beaconCode')) $('beaconCode').textContent = beaconSecretLive || '------';
+  // Chirp spec (server se aata hai) — teacher page isi se sound bajata hai.
+  // Wahi code jo screen par hai, sirf sound me. Server ne `hz`/`sequence`
+  // diya hai taaki playback aur decode kabhi out-of-sync na hon.
+  beaconChirpLive = data.chirp || null;
   updateBeaconCountdown();
   // Beacon khatam hone par saaf message. Do alag cases hain, dono ko ek jaisa
   // message dene se teacher confuse hota tha:
@@ -3913,6 +4106,11 @@ function startAutoRefresh() {
     const el = $(id);
     if (el) el.addEventListener('change', saveSelection);
   });
+
+  // System badalne par class + course-type ki list turant badalni chahiye —
+  // warna Semester chunne ke baad bhi Annual ke options saamne rehte hain.
+  const systemEl = $('systemSelect');
+  if (systemEl) systemEl.addEventListener('change', applySystemFilter);
 
   const saved = getTeacherPassword();
   if (!saved) { showLogin(''); return; }

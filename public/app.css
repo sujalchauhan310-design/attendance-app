@@ -240,7 +240,8 @@ a { color: var(--gold); }
 .btn-info:hover { background: rgba(111, 176, 255, 0.2); }
 .btn-sm { padding: 7px 11px; min-height: 34px; font-size: 0.8rem; border-radius: 8px; }
 .btn-xs { padding: 4px 9px; min-height: 26px; font-size: 0.72rem; border-radius: 7px; }
-.nowrap { white-space: nowrap; }
+/* NOTE: `.nowrap` app.css me neeche pehle se defined hai (ek hi declaration
+   kaafi hai) — yahan dobara nahi likhte. */
 .btn-block { width: 100%; }
 .btn-row { display: flex; gap: 10px; }
 .btn-row > .btn { flex: 1 1 0; }

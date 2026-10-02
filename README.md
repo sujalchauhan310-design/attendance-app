@@ -114,6 +114,34 @@ isliye teacher ko us situation par ek clear warning milti hai.
 me Web Bluetooth API hi nahi hai). Isliye beacon ko **server-side rotating code** ke roop
 me banaya gaya — ye har device par chalta hai (Android/iPhone/laptop sab).
 
+### 🔊 Ultrasonic chirp — 120 students ke liye, bina koi hardware
+Beacon ka 6-digit code screen par hota hai, par **120 students** ke liye type karna slow hai.
+Chirp **wahi code sound me** bhejta hai (16.5–18.7 kHz — kaan ko sunai nahi deta):
+
+| Kya | Kaise |
+|---|---|
+| Teacher | "🔊 Ek baar bajao" ya "🔁 Auto (har 45s)" — laptop/PA speaker se beep-sequence |
+| Student | "🎤 Suno" — phone ka mic sun kar code khud bhar leta hai (`beacon_channel = chirp`) |
+| Crypto | **Naya nahi** — wahi `verifyBeaconCode()`, wahi slot rotation, wahi 1-slot grace |
+| Constants | Server `/api/student/beacon-check` se bhejta hai, taaki client/server out-of-sync na hon |
+
+**Yeh GPS se kyun behtar hai:**
+- **Sound deewar se bahar nahi jaati.** GPS deewar ke aar-paar same number deta hai (bahar
+  wale ko bhi), par 16 kHz ka sound doosre room me nahi pahunchta → "is room me hai" ka proof.
+- **Internet par relay mushkil hai.** WhatsApp/Zoom **Opus** codec speech ke liye bana hai aur
+  kam bitrate par apni bandwidth khud kam kar deta hai (narrowband = 4 kHz tak) → ultrasonic
+  band relay hote waqt kat jata hai.
+- **Rooted phone par bhi kaam karta hai** — ye physics hai, software claim nahi.
+
+**Noise ke liye:** classroom ka shor 100–4000 Hz me hota hai, 16–19 kHz band khaali rehta hai.
+Saath me mic **AGC/noise-suppression band** karke kholte hain (warna Chrome/Android 18 kHz ko
+"awaaz hi nahi" samajh kar dabaa dete hain), aur peak ko noise floor se **8 dB upar** hone par hi
+maante hain — isliye shor digit nahi banta. **Sabse bada fayda:** teacher ke phone ki jagah
+classroom ka **maujood PA/projector speaker** use karein — wo 10–20 guna loud hai aur free hai.
+
+**Fallback:** agar sasta phone mic 17 kHz+ nahi sun pata, student wahi 6-digit code **type** kar
+deta hai (`beacon_channel = manual`) — kuch bhi tootta nahi, sirf proof weaker hota hai.
+
 ### Smart approval (default ON) — teacher ka time bachane ke liye
 | Situation | Result |
 |---|---|
@@ -329,6 +357,7 @@ Render ka free instance ~15 min idle ke baad sota hai, isliye [cron-job.org](htt
 node tools/backup-attendance.js    # purana attendance data ka CSV backup (retention change se pehle!)
 node tools/approval-logic-test.js  # Smart approval logic (verified/fail/flag ke 8 case) + reason texts
 node tools/beacon-test.js          # Beacon core: slot rotation, 6-digit shape, grace slot, leak check (32 case)
+node tools/chirp-test.js           # Ultrasonic chirp codec: digit<->tone, 200 random code round-trip, drift/junk (39 case)
 node tools/leave-logic-test.js      # Leave + % maths (leave hatane par effective %, zero-denominator guard)
 node tools/pdf-smoke-test.js       # PDF checks: session, 30-din grid, 90-din month-grid, 120-din summary, student report
 node tools/boot-smoke-test.js      # DB ke bina server boot + JSON error handling check

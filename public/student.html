@@ -43,6 +43,12 @@
         maxlength="6" autocomplete="off" placeholder="000000" aria-describedby="beaconHint">
       <p class="hint" id="beaconHint">Teacher ke screen par dikhta hai. Ye har 45 second badalta hai — sirf class me baithe students hi dekh sakte hain.</p>
       <p id="beaconErr" class="field-error hide">Beacon code me sirf digits (0–9) chalte hain.</p>
+      <!-- ULTRASONIC CHIRP: teacher ka speaker 16.5–18.7 kHz ka beep-sequence
+           bajata hai (wahi code, sound me). Student ko sirf sun-na hai — 6 digit
+           type karne ki zaroorat nahi. Sound deewar se bahar nahi jaati, isliye
+           ye "is room me hai" ka asli proof deta hai (GPS nahi deta). -->
+      <button type="button" class="btn btn-block btn-info mt-2" id="chirpListenBtn" onclick="listenForChirp()">🎤 Suno — phone khud bhar dega</button>
+      <div class="muted fs-xs mt-1" id="chirpListenStatus"></div>
     </div>
 
     <div class="field">
@@ -65,13 +71,13 @@
            attendance match nahi hoga. -->
       <select id="className" class="select">
         <option value="">Select your class</option>
-        <optgroup label="Annual system">
+        <optgroup label="Annual system" data-system="Annual">
           <option>BA 1st</option><option>BA 2nd</option><option>BA 3rd</option>
           <option>BSc 1st</option><option>BSc 2nd</option><option>BSc 3rd</option>
           <option>BCom 1st</option><option>BCom 2nd</option><option>BCom 3rd</option>
           <option>MA 1st</option><option>MA 2nd</option>
         </optgroup>
-        <optgroup label="Semester system">
+        <optgroup label="Semester system" data-system="Semester">
           <option>BA Sem 1</option><option>BA Sem 2</option><option>BA Sem 3</option><option>BA Sem 4</option>
           <option>BA Sem 5</option><option>BA Sem 6</option><option>BA Sem 7</option><option>BA Sem 8</option>
           <option>BSc Sem 1</option><option>BSc Sem 2</option><option>BSc Sem 3</option><option>BSc Sem 4</option>
@@ -118,7 +124,7 @@
            class + subject + course_type + system sab same ho. -->
       <select id="courseType" class="select">
         <option value="">Select course type</option>
-        <optgroup label="Semester system (NEP / CBCS)">
+        <optgroup label="Semester system (NEP / CBCS)" data-system="Semester">
           <option value="DSC">DSC — Discipline Specific Core</option>
           <option value="SEC">SEC — Skill Enhancement Course</option>
           <option value="GE">GE — Generic Elective</option>
@@ -126,7 +132,7 @@
           <option value="VAC">VAC — Value Added Course</option>
           <option value="MDC">MDC — Multi-Disciplinary Course</option>
         </optgroup>
-        <optgroup label="Annual system">
+        <optgroup label="Annual system" data-system="Annual">
           <option value="Theory">Theory</option>
           <option value="Practical">Practical</option>
           <option value="Lab">Lab</option>
@@ -357,6 +363,58 @@ enforceDigitsOnly($('code'), $('codeErr'));
 enforceDigitsOnly($('rollNo'), $('rollNoErr'));
 enforceDigitsOnly($('myRollNo'), $('myRollNoErr'));
 enforceDigitsOnly($('beaconCode'), $('beaconErr'));
+/* ---------- system-wise option filter (Annual / Semester) ----------
+   Teacher ka dropdown system ke hisaab se filter hota hai, to student ka bhi
+   hona chahiye — warna student un dono ki list se kuch aisa chunkar aage badh
+   jata hai jo teacher ke paas kabhi dikhta hi nahi, aur "attendance match nahi
+   hui" jaisi confusion banti hai (jabki galti list ki thi, code ki nahi). */
+const studentOptgroupCache = new Map();
+
+function filterSelectBySystem(selectEl, system) {
+  if (!selectEl) return;
+  if (!studentOptgroupCache.has(selectEl.id)) {
+    studentOptgroupCache.set(
+      selectEl.id,
+      Array.from(selectEl.querySelectorAll('optgroup[data-system]')).map((g) => g.cloneNode(true))
+    );
+  }
+  const groups = studentOptgroupCache.get(selectEl.id);
+  const keep = system ? groups.filter((g) => g.getAttribute('data-system') === system) : groups;
+  const placeholder = selectEl.querySelector('option[value=""]');
+  selectEl.innerHTML = '';
+  if (placeholder) selectEl.appendChild(placeholder.cloneNode(true));
+  keep.forEach((g) => selectEl.appendChild(g.cloneNode(true)));
+  // Chuna hua option naye system ki list me nahi hai -> reset, warna browser
+  // chupke se value khaali kar deta hai aur student ko lagta hai selection theek hai.
+  if (selectEl.value && !Array.from(selectEl.options).some((o) => o.value === selectEl.value)) {
+    selectEl.value = '';
+  }
+}
+
+// System radio se current value ('' = kuch nahi chuna -> sab options dikhao).
+function currentSystem() {
+  const checked = document.querySelector('input[name="system"]:checked');
+  return checked ? checked.value : '';
+}
+
+function applySystemFilter() {
+  const system = currentSystem();
+  filterSelectBySystem($('className'), system);
+  filterSelectBySystem($('courseType'), system);
+}
+
+// Class chunne se system apne aap set ho jata hai — student ko dobara radio
+// dabane ki zaroorat nahi (aur galti se mismatched combo ka chance khatam).
+function syncSystemFromClass() {
+  const cls = $('className') ? $('className').value : '';
+  const inferred = /Sem\s*\d+/i.test(cls) ? 'Semester' : cls ? 'Annual' : '';
+  if (!inferred) return;
+  const radio = document.querySelector(`input[name="system"][value="${inferred}"]`);
+  if (radio && !radio.checked) {
+    radio.checked = true;
+    applySystemFilter();
+  }
+}
 
 /* ---------- beacon field auto-show ----------
    Student ko pata nahi hota ki teacher ka session beacon ON hai ya nahi. Har
@@ -366,6 +424,14 @@ enforceDigitsOnly($('beaconCode'), $('beaconErr'));
    type kar raha ho to har 1.2s se zyada nahi. */
 let beaconPeekCache = { code: '', needed: false, done: false };
 let beaconPeekBusy = false;
+// Server se aaye chirp constants (tone_min_hz/tone_step_hz/...). Beacon ON
+// hone par hi milte hain — inhi se mic ka sound decode hota hai.
+let chirpParams = null;
+
+function setChirpListenStatus(msg) {
+  const el = $('chirpListenStatus');
+  if (el) el.textContent = msg || '';
+}
 
 async function peekBeaconNeeded(code) {
   const clean = String(code || '').trim();
@@ -380,6 +446,12 @@ async function peekBeaconNeeded(code) {
     const data = await res.json().catch(() => ({}));
     const needed = res.ok && data.beacon_enabled === true;
     beaconPeekCache = { code: clean, needed, done: true };
+    // Chirp constants server se hi aate hain (single source of truth) — mic
+    // decoder inhi se kaam karta hai. Beacon OFF ho to null, aur "Suno" button
+    // bhi bekaar hai (bajane wala hi nahi hai).
+    chirpParams = needed ? data.chirp || null : null;
+    const listenBtn = $('chirpListenBtn');
+    if (listenBtn) listenBtn.classList.toggle('hide', !chirpParams);
     const field = $('beaconField');
     if (!field) return;
     field.classList.toggle('hide', !needed);
@@ -396,6 +468,164 @@ async function peekBeaconNeeded(code) {
     beaconPeekBusy = false;
   }
 }
+
+/* ---------- ULTRASONIC CHIRP LISTENER (student side) ----------
+   Teacher ke speaker se 16.5–18.7 kHz ka beep-sequence aata hai — WAHI beacon
+   code, sirf sound me. Student ko 6 digit type karne ki zaroorat nahi.
+
+   Kaam kaise karta hai:
+     1) Mic kholte hain AGC + noise-suppression BAND kar ke. Ye zaroori hai —
+        Chrome/Android ka noise suppressor "18 kHz to awaaz hi nahi hai"
+        samajh kar use dabaa deta hai, aur decode kabhi nahi hota.
+     2) AnalyserNode se har ~40 ms par spectrum lete hain.
+     3) 16.0–19.0 kHz band me sabse strong tone dhoondhte hain, aur noise floor
+        (2–6 kHz ka average) se kam se kam 8 dB upar hone par hi maante hain.
+        Isse classroom ka shor digit nahi banta.
+     4) Lagataar same tone ko ek hi baar ginte hain (dedupe), aur 6 digits
+        milte hi code ban jata hai. */
+let chirpListening = false;
+let chirpStopFn = null; // cleanup handle (mic stream + interval + audio ctx)
+// Proof kis channel se aaya — payload me jata hai (audit ke liye).
+let beaconProofChannel = 'manual';
+// Student ne khud type kiya to wapas 'manual'. (Chirp se aaya ho aur student
+// usi value ko chhed de — to usne effectively khud verify kiya, isliye
+// 'manual' hi sach hai.) Declaration ke baad hi register karte hain, warna
+// `let` ke TDZ me ye line dhamaka kar deti.
+$('beaconCode') && $('beaconCode').addEventListener('input', () => { beaconProofChannel = 'manual'; });
+
+// Frequency -> digit. Server ke bheje hue tone_min_hz/tone_step_hz par.
+function chirpDigitFromHz(hz, p) {
+  const d = Math.round((hz - p.tone_min_hz) / p.tone_step_hz);
+  if (d < 0 || d > 9) return null;
+  if (Math.abs(hz - (p.tone_min_hz + d * p.tone_step_hz)) > p.tone_step_hz / 2) return null;
+  return d;
+}
+
+// Spectrum se band ka peak + noise floor. Peak kaafi strong na ho to null —
+// warna background noise ko tone samajh liya jata aur galat code ban jata.
+function findTonePeak(freqDb, sampleRate, fftSize, p) {
+  const binHz = sampleRate / fftSize;
+  const loBin = Math.max(1, Math.floor((p.lead_hz - 150) / binHz));
+  const hiBin = Math.min(freqDb.length - 2, Math.ceil((p.tone_min_hz + 10 * p.tone_step_hz + 150) / binHz));
+  if (hiBin <= loBin) return null;
+  let peakBin = -1;
+  let peakDb = -Infinity;
+  for (let i = loBin; i <= hiBin; i++) {
+    if (freqDb[i] > peakDb) { peakDb = freqDb[i]; peakBin = i; }
+  }
+  if (peakBin < 0) return null;
+  // Noise floor = 2–6 kHz (speech band) ka average. Wahan hamesha kuch na kuch
+  // hota hai (fan, awaaz, khansi), isliye ye ek bharosemand "zameen" deta hai.
+  const nLo = Math.max(1, Math.floor(2000 / binHz));
+  const nHi = Math.min(freqDb.length - 1, Math.floor(6000 / binHz));
+  let sum = 0;
+  let n = 0;
+  for (let i = nLo; i <= nHi; i++) {
+    if (Number.isFinite(freqDb[i])) { sum += freqDb[i]; n++; }
+  }
+  const floorDb = n ? sum / n : -100;
+  // 8 dB ≈ 2.5x energy ka farak. Itna gap hone par hi bharosa karte hain.
+  if (!(peakDb > floorDb + 8)) return null;
+  return { hz: peakBin * binHz, db: peakDb };
+}
+
+function stopChirpListen() {
+  if (typeof chirpStopFn === 'function') {
+    try { chirpStopFn(); } catch (err) {}
+  }
+  chirpStopFn = null;
+  chirpListening = false;
+  const btn = $('chirpListenBtn');
+  if (btn) { btn.disabled = false; btn.textContent = '🎤 Suno — phone khud bhar dega'; }
+}
+
+
+async function listenForChirp() {
+  if (chirpListening) return;
+  const p = chirpParams;
+  if (!p) {
+    setChirpListenStatus('Pehle attendance code daalein — tab mic sun sakta hai.');
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setChirpListenStatus('Is browser me mic support nahi — code type kar dein.');
+    return;
+  }
+  chirpListening = true;
+  const btn = $('chirpListenBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '🎤 Sun raha hoon…'; }
+  setChirpListenStatus('Sun raha hoon… teacher se chirp bajane ko kahiye.');
+
+  let stream = null;
+  let ctx = null;
+  let timer = null;
+  let graceTimer = null;
+  // Har haal me safai — warna mic on reh jata (battery + privacy dono).
+  chirpStopFn = () => {
+    if (timer) clearInterval(timer);
+    if (graceTimer) clearTimeout(graceTimer);
+    if (ctx) { try { ctx.close(); } catch (err) {} }
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+  };
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      // AGC / noise-suppression / echo-cancel BAND — warna OS ultrasonic band
+      // ko "awaaz hi nahi" samajh kar kaat deta hai.
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
+      video: false,
+    });
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) { setChirpListenStatus('Audio support nahi — code type kar dein.'); stopChirpListen(); return; }
+    ctx = new Ctor();
+    const src = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    // 8192 = 48 kHz par ~5.9 Hz bin. 240 Hz ka gap aaram se alag dikhta hai.
+    analyser.fftSize = 8192;
+    analyser.smoothingTimeConstant = 0; // smoothing se tone blur ho jata hai
+    src.connect(analyser);
+    const buf = new Float32Array(analyser.frequencyBinCount);
+
+    const digits = [];
+    let lastHz = null;
+
+    timer = setInterval(() => {
+      analyser.getFloatFrequencyData(buf);
+      const peak = findTonePeak(buf, ctx.sampleRate, analyser.fftSize, p);
+      if (!peak) return; // koi tone nahi — bas aage sunte raho
+      // Lagataar same tone = ek hi beep ke kai frames. Ek hi baar ginte hain.
+      if (lastHz !== null && Math.abs(peak.hz - lastHz) < p.tone_step_hz / 2) return;
+      lastHz = peak.hz;
+      const d = chirpDigitFromHz(peak.hz, p);
+      if (d === null) return; // ye lead marker tha (digit range se bahar)
+      digits.push(d);
+      if (digits.length >= 6) {
+        const code = digits.join('');
+        stopChirpListen();
+        const input = $('beaconCode');
+        if (input) input.value = code;
+        beaconProofChannel = 'chirp';
+        setChirpListenStatus(`✅ Chirp se code mil gaya: ${code}. Ab "Mark attendance" dabayein.`);
+        toast('Chirp se code mil gaya ✓', 'ok');
+        return;
+      }
+      setChirpListenStatus(`Sun raha hoon… ${digits.length}/6 digits mile`);
+    }, 40);
+
+    // 15 second me kuch nahi mila to chhod do — warna mic on reh jata hai aur
+    // student ko lagta hai kuch ho raha hai.
+    graceTimer = setTimeout(() => {
+      if (chirpListening) {
+        stopChirpListen();
+        setChirpListenStatus('Chirp nahi sunai diya. Teacher se dobara bajane ko kahiye, ya code type kar dein.');
+      }
+    }, 15000);
+  } catch (err) {
+    stopChirpListen();
+    setChirpListenStatus('Mic ka permission nahi mila — code type kar dein (ya browser me mic allow karein).');
+  }
+}
+
 
 $('code').addEventListener('input', () => {
   const v = $('code').value.trim();
@@ -601,6 +831,10 @@ function gatherPayload() {
     // hain (empty string) — server "missing" ko "beacon_wrong" se alag
     // message de sakta hai, isliye student ko pata chale ki code bhool gaye.
     beacon_code: ($('beaconCode') && $('beaconCode').value.trim()) || '',
+    // Kis channel se beacon proof aaya — 'manual' (type kiya) ya 'chirp' (mic
+    // ne suna). Server sirf audit ke liye rakhta hai; verification dono case
+    // me wahi verifyBeaconCode() karta hai.
+    beacon_channel: beaconProofChannel,
     client_flags: clientHintFlags(),
   };
 }
@@ -988,6 +1222,21 @@ async function flushQueue() {
 
 window.addEventListener('online', flushQueue);
 setInterval(flushQueue, 25000); // safety net, agar 'online' event na aaye
+
+/* ----------------------------------------------------------------------
+   BOOT — system-wise list filter + class se system auto-detect
+   ---------------------------------------------------------------------- */
+// Page load par bhi ek baar filter lagao taaki purana localStorage selection
+// (jo dusre system ka ho) chupke se galat list me na chala jaye.
+document.querySelectorAll('input[name="system"]').forEach((radio) => {
+  radio.addEventListener('change', applySystemFilter);
+});
+if ($('className')) $('className').addEventListener('change', () => {
+  syncSystemFromClass();
+  applySystemFilter();
+});
+applySystemFilter();
+syncSystemFromClass();
 
 /* =====================================================================
    Teacher ko batao (weak net / GPS fail) + apna PDF download
