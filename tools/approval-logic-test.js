@@ -57,6 +57,72 @@ const cases = [
     input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: true, flags: ["", null] },
     expect: { status: "present", reason: "" },
   },
+
+  // ---- GPS ka naya role: presence = GPS YA beacon (koi ek kaafi) ----
+  // Ye case SABSE ZAROORI hai. Pehle GPS hi gate tha, isliye jis student ne
+  // chirp/code se sahi room-proof diya par classroom ka indoor GPS fail ho gaya,
+  // wo teacher ke approval queue me chala jata tha — 120 students me ye 20-40
+  // manual approvals banata tha.
+  {
+    name: "beacon verify + GPS fail -> PRESENT (beacon ka proof GPS se strong hai)",
+    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: false, beaconVerified: true, gpsConflict: false, flags: [] },
+    expect: { status: "present", reason: "" },
+  },
+  {
+    name: "beacon verify + GPS fail + GPS 1km+ door (relay shak) -> pending/flagged",
+    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: false, beaconVerified: true, gpsConflict: true, flags: ["beacon_gps_conflict"] },
+    expect: { status: "pending", reason: "flagged" },
+  },
+  {
+    name: "na GPS na beacon -> pending (koi proof nahi)",
+    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: false, beaconVerified: false, gpsConflict: false, flags: [] },
+    expect: { status: "pending", reason: "no_location_proof" },
+  },
+  {
+    name: "GPS verify + beacon OFF session (backward compat) -> present",
+    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: true, beaconVerified: false, gpsConflict: false, flags: [] },
+    expect: { status: "present", reason: "" },
+  },
+  {
+    name: "location OFF session + beacon verify -> present (ab proof to hai)",
+    input: { requireApproval: false, autoReview: true, locationRequired: false, locationVerified: false, beaconVerified: true, gpsConflict: false, flags: [] },
+    expect: { status: "present", reason: "" },
+  },
+  {
+    name: "approval mode ON + dono proof -> pending hi (approval mode sabse upar)",
+    input: { requireApproval: true, autoReview: true, locationRequired: true, locationVerified: true, beaconVerified: true, gpsConflict: false, flags: [] },
+    expect: { status: "pending", reason: "approval_mode" },
+  },
+  {
+    name: "beacon verify + GPS verify + koi flag nahi -> present",
+    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: true, beaconVerified: true, gpsConflict: false, flags: [] },
+    expect: { status: "present", reason: "" },
+  },
+  {
+    name: "beacon verify + GPS fail par koi dusra flag bhi ho -> pending/flagged",
+    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: false, beaconVerified: true, gpsConflict: false, flags: ["device_used_for_other_roll"] },
+    expect: { status: "pending", reason: "flagged" },
+  },
+  // GPS "weak tha" vs "bilkul gayab tha" ka farak — yahi relay hole tha.
+  // Weak (accuracy kam / stale / radius bahar) = genuine indoor student -> present.
+  {
+    name: "beacon verify + GPS WEAK (fix aaya par reject hua) -> present (genuine indoor)",
+    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: false, beaconVerified: true, gpsConflict: false, flags: [] },
+    expect: { status: "present", reason: "" },
+  },
+  // Gayab (lat/lng null) = location band karke jagah chhupana -> teacher review.
+  {
+    name: "beacon verify + GPS BILKUL gayab (relay shak) -> pending/flagged",
+    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: false, beaconVerified: true, gpsConflict: true, flags: ["beacon_only_no_gps"] },
+    expect: { status: "pending", reason: "flagged" },
+  },
+  // GPS verify + beacon verify + GPS "absent" flag galti se lag jaye to bhi
+  // present — kyunki GPS ne verify kar diya hai (flag bekaar hai).
+  {
+    name: "GPS verify + beacon verify -> present (gpsConflict ka koi asar nahi)",
+    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: true, beaconVerified: true, gpsConflict: true, flags: [] },
+    expect: { status: "present", reason: "" },
+  },
 ];
 
 let failures = 0;

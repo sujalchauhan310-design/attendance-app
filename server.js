@@ -211,6 +211,14 @@ const MAX_ACCURACY_METERS = Number(process.env.MAX_ACCURACY_METERS) || 60;
 // (distance + accuracy <= radius) — sirf reported point nahi.
 const GEOFENCE_STRICT_CIRCLE = boolWithDefault(process.env.GEOFENCE_STRICT_CIRCLE, true);
 
+// RELAY DETECTOR ke liye: beacon/chirp se presence proof mil gaya, PAR GPS
+// saaf-saaf bahut door bata raha hai. Sound ghar se nahi aa sakti, isliye
+// "chirp pass + GPS 1 km+ door" = shak (audio call par relay ho raha ho).
+// 1 km jaan-boojh kar hai: classroom ka indoor GPS aksar 100-300 m drift karta
+// hai, aur us drift par genuine student ko shak karna galat hoga. 1 km par koi
+// drift nahi hota — matlab student building me hi nahi hai.
+const GPS_CONFLICT_METERS = Number(process.env.GPS_CONFLICT_METERS) || 1000;
+
 // Verified location token kitni der valid rahega (client usi window me submit kare).
 const LOCATION_TOKEN_TTL_MS = (Number(process.env.LOCATION_TOKEN_TTL_SEC) || 150) * 1000;
 
@@ -1192,9 +1200,10 @@ function readGpsFix(body) {
 // ---------- MARK STATUS DECISION (pure function — unit-testable) ----------
 // Mark "present" hoga ya "pending", ye EK hi jagah decide hota hai.
 // tools/approval-logic-test.js isi function ko test karta hai.
+// PENDING me kaunse reasons ho sakte hain — teacher page inhi par text dikhata hai.
 const PENDING_REASON_TEXT = {
   approval_mode: "Approval mode ON — teacher approve karega",
-  no_location_proof: "Location proof nahi mili (GPS fail / net off)",
+  no_location_proof: "Location proof nahi mili (GPS fail / net off / beacon OFF)",
   location_check_off: "Is session me location check OFF tha",
   flagged: "Anti-proxy flag laga — teacher review kare",
 };
@@ -1287,17 +1296,46 @@ function computePercentages({ present, rawHeld, leaveDays }) {
   };
 }
 
-function decideMarkStatus({ requireApproval, autoReview, locationRequired, locationVerified, flags }) {
+// Presence ka faisla — EK hi jagah, taaki proxy ka darwaza ya genuine student
+// ka block, dono me se kuch bhi chupke se na ho.
+//
+// ZAROORI DESIGN CHANGE (GPS ka role):
+//   PEHLE: GPS hi presence ka GATE tha. Beacon (rotating code / ultrasonic
+//          chirp) verify hone par bhi, GPS fail hote hi mark PENDING ho jata tha.
+//   AB:    presence proof = GPS **YA** beacon. Dono me se koi EK kaafi hai.
+//
+// Kyun ye sahi hai: beacon ka proof GPS se **strong** hai —
+//   * Sound deewar se bahar nahi jaati, isliye "is room me hai" ka asli proof
+//     milta hai. GPS deewar ke aar-paar same number deta hai (150 m radius =
+//     poori building, room alag nahi kar sakta).
+//   * 120 students me classroom ka indoor GPS aksar fail/drift karta hai. Purane
+//     logic me aise har student teacher ke approval queue me chala jata tha —
+//     matlab ek class me 20-40 manual approvals, jo teacher ka waqt kha jata.
+//
+// Aur GPS ab "relay detector" ban jata hai (gpsConflict, neeche step 3):
+// chirp pass hua par GPS 1 km+ door bata raha hai = shak (audio call par relay).
+function decideMarkStatus({ requireApproval, autoReview, locationRequired, locationVerified, beaconVerified, gpsConflict, flags }) {
   const activeFlags = Array.isArray(flags) ? flags.filter(Boolean) : [];
   // 1) Teacher ne khud approval mode ON kiya -> sab pending.
   if (requireApproval === true) return { status: "pending", reason: "approval_mode" };
-  // 2) Location proof nahi mili (GPS fail / net off / is session me location off tha).
-  if (!locationVerified) {
+  // 2) PRESENCE PROOF = GPS YA beacon (koi ek kaafi).
+  const presenceProof = locationVerified === true || beaconVerified === true;
+  if (!presenceProof) {
     return { status: "pending", reason: locationRequired ? "no_location_proof" : "location_check_off" };
   }
-  // 3) Smart approval: location verify hui par koi flag laga hai -> pending.
+  // 3) RELAY SIGNAL: beacon pass hua par GPS saaf-saaf shak kar raha hai —
+  //    ya 1 km+ door bata raha hai, ya GPS ne kuch bheja hi nahi (location band).
+  //    Sound ghar se nahi aa sakti, isliye ye combination shak karta hai —
+  //    teacher se review karate hain. REJECT nahi karte: indoors GPS kabhi-kabhi
+  //    bahut bigadta hai, aur genuine student ko block karna zyada bura hai.
+  //    NOTE: "GPS weak tha" (accuracy kam / stale / radius thoda bahar) yahan
+  //    NAHI aata — wo genuinely indoor student hai aur present hi rehta hai.
+  if (beaconVerified === true && locationVerified !== true && gpsConflict === true) {
+    return { status: "pending", reason: "flagged" };
+  }
+  // 4) Smart approval: proof mili par koi flag laga hai -> pending.
   if (activeFlags.length && autoReview !== false) return { status: "pending", reason: "flagged" };
-  // 4) Sab theek — seedha present (teacher ko tap nahi karna padta).
+  // 5) Sab theek — seedha present (teacher ko tap nahi karna padta).
   return { status: "present", reason: "" };
 }
 
@@ -4087,6 +4125,8 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       lng: null,
       accuracy: null,
       distance_m: null,
+      // GPS ne "radius ke bahar" kaha to kitne door — relay detector ke liye.
+      gps_distance_m: null,
       verified: false,
       reason: locationRequired ? "no_gps" : "location_off",
       flags: [],
@@ -4131,6 +4171,9 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
           fix = { lat: inline.lat, lng: inline.lng, accuracy: inline.accuracy, distance: inline.distance };
         } else {
           location.reason = inline.code || location.reason;
+          // "outside_radius" par readGpsFix distance bhi deta hai — relay
+          // detector isi ko dekhta hai (beacon pass + GPS 1 km+ door = shak).
+          if (Number.isFinite(inline.distance)) location.gps_distance_m = Math.round(inline.distance);
           // Mock/fake location aur automation cheating hai, weak-net problem nahi
           // — inhe seedha block karo (bhejne wale app/devtools ke liye rasta band).
           if (inline.code === "mock_location") {
@@ -4162,6 +4205,16 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
           // Token ke hints/automation + abhi ke client hints (advisory).
           extraFlags: [...hintFlags, ...clientHints],
         });
+      } else if (beaconWasRequired && beaconSlotUsed >= 0) {
+        // BEACON VERIFY HO CHUKA HAI -> GPS fail hone par student ko "koshish"
+        // ke chakkar me MAT daalo.
+        // Pehle yahan bina shart ke koshish-gate chalta tha, isliye jis student
+        // ne chirp/code se sahi room-proof de diya tha, wo phir bhi
+        // "Location nahi mili — Koshish 1/5 ... window ke paas jao" dekhta tha
+        // (aur 5 baar!). Uska proof to already ho chuka tha — sirf GPS (jo is
+        // proof se KAMZOR hai) fail hua tha. Ab seedha aage badhne dete hain;
+        // decideMarkStatus beacon ko presence proof maan kar present kar dega.
+        location.flags = [...new Set([...clientHints])];
       } else {
         // Proof nahi mili: pehle student ko KOshish karne do — jab tak uske
         // attempts baaki hain, mark SAVE hi nahi hota (teacher ki list bharne se
@@ -4195,11 +4248,31 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
     }
 
     // 2. Status ka faisla PEHLE kar lete hain (duplicate/upgrade logic ko chahiye).
+    // Beacon verified = is session me beacon ON tha AUR student ne sahi code/chirp diya.
+    const beaconVerifiedNow = beaconWasRequired && beaconSlotUsed >= 0;
+    // RELAY SIGNAL — do alag shak wale case:
+    //  (a) GPS ne fix diya par 1 km+ door bataya -> relay (sound ghar se nahi aati)
+    //  (b) GPS ne fix diya HI NAHI (`no_location` = lat/lng null aaya) -> shak,
+    //      kyunki GPS band karke apni jagah chhupana relay ka aam tarika hai.
+    // ZAROORI FARAK: "GPS weak tha" (accuracy kam / stale / radius bahar) is list
+    // me NAHI hai — wo genuinely indoor student hai (WiFi/cell se 100-300 m ka
+    // fix aata hai). Usko block karna galat hoga, isliye wo present hi rahega.
+    // Sirf tab shak karte hain jab GPS ne kuch bheja hi na ho.
+    const gpsTooFar = Number.isFinite(location.gps_distance_m) && location.gps_distance_m > GPS_CONFLICT_METERS;
+    const gpsAbsent = location.verified !== true && location.reason === "no_location";
+    const gpsConflict = beaconVerifiedNow && (gpsTooFar || gpsAbsent);
+    if (gpsTooFar) {
+      location.flags = [...new Set([...(location.flags || []), "beacon_gps_conflict"])];
+    } else if (gpsAbsent) {
+      location.flags = [...new Set([...(location.flags || []), "beacon_only_no_gps"])];
+    }
     const decision = decideMarkStatus({
       requireApproval: activeCode.require_approval === true,
       autoReview: activeCode.auto_review !== false,
       locationRequired,
       locationVerified: location.verified,
+      beaconVerified: beaconVerifiedNow,
+      gpsConflict,
       flags: location.flags,
     });
     const status = decision.status;

@@ -125,7 +125,7 @@
            class + subject + course_type + system sab same ho. -->
       <select id="courseType" class="select">
         <option value="">Select course type</option>
-        <optgroup label="Semester system (NEP / CBCS)" data-system="Semester">
+        <optgroup label="Semester system (NEP / CBCS)">
           <option value="DSC">DSC — Discipline Specific Core</option>
           <option value="SEC">SEC — Skill Enhancement Course</option>
           <option value="GE">GE — Generic Elective</option>
@@ -133,7 +133,7 @@
           <option value="VAC">VAC — Value Added Course</option>
           <option value="MDC">MDC — Multi-Disciplinary Course</option>
         </optgroup>
-        <optgroup label="Annual system" data-system="Annual">
+        <optgroup label="Annual system">
           <option value="Theory">Theory</option>
           <option value="Practical">Practical</option>
           <option value="Lab">Lab</option>
@@ -403,8 +403,10 @@ function currentSystem() {
 
 function applySystemFilter() {
   const system = currentSystem();
+  // SIRF class filter hoti hai. Course Type filter NAHI karte — DSC/GE/SEC aur
+  // Theory/Lab/Elective dono ek hi list me saath rehte hain (teacher ke page
+  // jaisa hi), taaki valid course type kabhi chhupa na mile.
   filterSelectBySystem($('className'), system);
-  filterSelectBySystem($('courseType'), system);
 }
 
 // Class chunne se system apne aap set ho jata hai — student ko dobara radio
@@ -1174,7 +1176,11 @@ async function confirmSubmit() {
           reason === 'approval_mode'
             ? 'Aap class ke andar the. Teacher ke approve karne par ye count hogi.'
             : reason === 'flagged'
-              ? 'Aapki entry teacher ke Review tab me hai — wo confirm karenge to attendance count hogi.'
+              // Relay-shak wale case yahin aate hain. Student ko asli ilaaj
+              // batate hain: GPS ON rakhein — tab agali baar khud-ba-khud count
+              // hogi (teacher ko tap nahi karna padega). Ye 120 students me
+              // mass-pending rokne ke liye zaroori hai.
+              ? 'Aapki entry teacher ke Review tab me hai — wo confirm karenge to attendance count hogi. Agli baar turant count karane ke liye phone ka GPS/Location ON rakhein aur "Get location" dabayein (GPS band hone par system shak karta hai).'
               : 'Aapki location verify nahi ho payi (net/GPS), isliye entry teacher ke paas chali gayi hai. Wo present mark karenge to attendance count hogi.';
         showResult('warn', title, msg,
           [['Roll Number', p.roll_no], ['Name', p.name], ['Subject', p.subject], ['Course Type', p.course_type]]);

@@ -105,7 +105,7 @@
              toota nahi. Annual wale extra options me se. -->
         <select id="courseTypeSelect" class="select">
           <option value="">Select course type</option>
-          <optgroup label="Semester system (NEP / CBCS)" data-system="Semester">
+          <optgroup label="Semester system (NEP / CBCS)">
             <option value="DSC">DSC — Discipline Specific Core</option>
             <option value="SEC">SEC — Skill Enhancement Course</option>
             <option value="GE">GE — Generic Elective</option>
@@ -113,7 +113,7 @@
             <option value="VAC">VAC — Value Added Course</option>
             <option value="MDC">MDC — Multi-Disciplinary Course</option>
           </optgroup>
-          <optgroup label="Annual system" data-system="Annual">
+          <optgroup label="Annual system">
             <option value="Theory">Theory</option>
             <option value="Practical">Practical</option>
             <option value="Lab">Lab</option>
@@ -1147,8 +1147,11 @@ function filterSelectBySystem(selectEl, system) {
 
 function applySystemFilter() {
   const system = $('systemSelect') ? $('systemSelect').value : '';
+  // SIRF class filter hoti hai. Course Type JAAN-BOOJH kar filter NAHI karte:
+  // DSC/GE/SEC (semester) aur Theory/Lab/Elective (annual) ek hi list me saath
+  // rehte hain, taaki teacher ko koi valid course type kabhi chhupa na mile —
+  // college me dono system ke course types mix ho sakte hain.
   filterSelectBySystem($('className'), system);
-  filterSelectBySystem($('courseTypeSelect'), system);
 }
 
 
@@ -1958,6 +1961,15 @@ const FLAG_LABELS = {
   accuracy_poor: 'weak GPS accuracy',
   accuracy_missing: 'no accuracy reported',
   device_used_for_other_roll: 'same phone used for another roll number',
+  no_location_proof: 'GPS verify nahi hui (beacon ke bina)',
+  // Relay detector: beacon/chirp pass hua par GPS 1 km+ door bataya. Sound ghar
+  // se nahi aa sakti — matlab audio call par chirp relay ho raha ho sakta hai.
+  beacon_gps_conflict: 'beacon pass par GPS 1 km+ door (relay ka shak)',
+  // Beacon pass hua par GPS ne kuch bheja hi nahi (location band / permission
+  // denied). GPS band karke jagah chhupana relay ka aam tarika hai, isliye
+  // teacher review karata hai — jabki "GPS weak tha" wale students present
+  // hi rehte hain (wo genuinely indoor hote hain).
+  beacon_only_no_gps: 'beacon pass par GPS bilkul gayab (location band?)',
 };
 function flagText(flags) {
   return (flags || []).map((f) => FLAG_LABELS[f] || f).join(' · ');
