@@ -25,9 +25,17 @@ const cases = [
     expect: { status: "pending", reason: "no_location_proof" },
   },
   {
-    name: "session me location check OFF -> pending (proof hi nahi)",
-    input: { requireApproval: false, autoReview: true, locationRequired: false, locationVerified: false, flags: [] },
-    expect: { status: "pending", reason: "location_check_off" },
+    // NAYA DEFAULT: location check OFF hai (optional). GPS indoor aksar fail
+    // karta hai, isliye OFF hone par GPS ki wajah se koi pending NAHI — valid
+    // code + device-lock (aur beacon ON ho to wo) hi gate hai.
+    name: "session me location check OFF -> seedha present (GPS ki wajah se pending nahi)",
+    input: { requireApproval: false, autoReview: true, locationRequired: false, locationVerified: false, beaconVerified: false, gpsConflict: false, flags: [] },
+    expect: { status: "present", reason: "" },
+  },
+  {
+    name: "location OFF par bhi flag laga (shared coordinates) -> pending/flagged",
+    input: { requireApproval: false, autoReview: true, locationRequired: false, locationVerified: false, beaconVerified: false, gpsConflict: false, flags: ["shared_coordinates"] },
+    expect: { status: "pending", reason: "flagged" },
   },
   {
     name: "verified par flag laga (shared coordinates) -> pending",

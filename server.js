@@ -36,8 +36,8 @@
  *        CRON_SECRET        — locks down the two /api/check-and-send-* endpoints
  *        CLASSROOM_LAT / CLASSROOM_LNG / CLASSROOM_RADIUS_METERS
  *      Optional anti-proxy tuning:
- *        STRICT_LOCATION           (default true)  location check cannot be
- *                                  switched off from the teacher page
+ *        STRICT_LOCATION           (default false) when true, location check
+ *                                  cannot be switched off from the teacher page
  *        MAX_ACCURACY_METERS       (default 60)    reject vaguer GPS fixes
  *        GEOFENCE_STRICT_CIRCLE    (default true)  distance + accuracy <= radius
  *        LOCATION_TOKEN_TTL_SEC    (default 150)   token lifetime
@@ -196,11 +196,15 @@ const AUDIT_RETENTION_DAYS = Number(process.env.AUDIT_RETENTION_DAYS) || 730;
 // -----------------------------------------------------------------------
 // ANTI-PROXY SETTINGS (fake attendance rokne ke liye)
 // -----------------------------------------------------------------------
-// STRICT mode: attendance sirf tab mark hoti hai jab server ne khud verify kar
-// liya ho ki student classroom radius ke andar hai aur uska GPS fix bharosemand
-// hai. Purana "15 baar fail hone par chup-chaap accept kar lo" wala fallback
-// poori tarah HATA diya gaya hai — wahi proxy ka sabse bada darwaza tha.
-const STRICT_LOCATION = boolWithDefault(process.env.STRICT_LOCATION, true);
+// STRICT mode: ON hone par location check ko teacher page se OFF karna lock ho
+// jata hai (server par hamesha ON rehta hai). AB DEFAULT **OFF** hai.
+// Kyun: GPS indoor aksar fail ya 100-300 m drift karta hai, isliye class ke
+// ANDAR baithe genuine students bhi pending/flag me chale jate the. Ab location
+// OPTIONAL hai (default OFF) aur presence ka asli sahara **beacon** (rotating
+// code / chirp) hai. STRICT_LOCATION=true sirf tab rakhein jab har haal me GPS
+// zaroori ho. (Purana "15 baar fail hone par chup-chaap accept kar lo" wala
+// fallback pehle hi poora hata diya gaya tha — wahi proxy ka sabse bada darwaza tha.)
+const STRICT_LOCATION = boolWithDefault(process.env.STRICT_LOCATION, false);
 
 // GPS accuracy (metres) jitni hum maan sakte hain. Network/wifi based location
 // (cell tower / wifi) 1-3 km tak galat ho sakti hai, isliye badi accuracy ko
@@ -478,7 +482,7 @@ const activeCodeSchema = new mongoose.Schema({
   course_type: String, // DSC / SEC / GE / AEC / VAC / MDC — same subject under
                         // a different type is a different class, no clash
 system: { type: String, enum: ["Annual", "Semester"], default: "Annual" }, // Annual / Semester system
-require_location: {type: Boolean, default: true },
+require_location: {type: Boolean, default: false }, // GPS check OPTIONAL — default OFF (indoor GPS aksar fail karta hai)
 require_approval: { type: Boolean, default: false }, // teacher approves each mark (highest anti-proxy setting)
 // BEACON (rotating in-class secret). Browser me real Bluetooth beacon chal hi nahi
 // sakta (iOS Safari me Web Bluetooth API hi nahi hai), isliye beacon ko aise banaya
@@ -576,11 +580,12 @@ const attendanceSchema = new mongoose.Schema({
   // Beacon ka kaunsa slot use hua — audit ke liye (teacher ek baar me dekh
   // sakta hai ki saare students ek hi 45-second window me the ya nahi).
   beacon_slot: { type: Number, default: -1 },
-  // Proof kis channel se aaya: 'manual' (6 digit type kiya) | 'chirp' (ultrasonic
-  // sun kar) | 'qr' (scan kiya). Sirf audit/analytics — verification har case me
-  // wahi verifyBeaconCode() karta hai, isliye ye field security ko kamzor NAHI
-  // karti. Isse teacher dekh sakta hai ki class ne kaunsa tarika use kiya, aur
-  // agar koi "chirp" claim kare jo possible na ho to wo shak ka signal hai.
+  // Proof kis channel se aaya: 'manual' (6 digit type kiya) | 'chirp' (sound sun
+  // kar) | 'qr' (scan kiya) | 'relay' (kisi verified phone ke chirp se). Sirf
+  // audit/analytics — verification har case me wahi verifyBeaconCode() karta
+  // hai, isliye ye field security ko kamzor NAHI karti. Isse teacher dekh sakta
+  // hai ki class ne kaunsa tarika use kiya, aur agar koi "chirp" claim kare jo
+  // possible na ho to wo shak ka signal hai.
   beacon_channel: { type: String, default: "" },
   // Exactly how the server verified presence (kept so a teacher can review and
   // spot anything suspicious later). distance_m/accuracy come from the one-time
@@ -1318,10 +1323,18 @@ function decideMarkStatus({ requireApproval, autoReview, locationRequired, locat
   const activeFlags = Array.isArray(flags) ? flags.filter(Boolean) : [];
   // 1) Teacher ne khud approval mode ON kiya -> sab pending.
   if (requireApproval === true) return { status: "pending", reason: "approval_mode" };
-  // 2) PRESENCE PROOF = GPS YA beacon (koi ek kaafi).
-  const presenceProof = locationVerified === true || beaconVerified === true;
+  // 2) PRESENCE PROOF.
+  //    Location ON  -> GPS YA beacon (koi ek kaafi).
+  //    Location OFF -> teacher ne GPS check hata diya, isliye GPS ki wajah se koi
+  //                    pending NAHI. Presence ka sahara beacon hai (session me ON
+  //                    ho to); warna valid code + device-lock hi gate hai. Default
+  //                    ab OFF hai — indoor GPS fail hone par genuine students
+  //                    pending me nahi jate (wahi bug tha).
+  const presenceProof = locationRequired
+    ? (locationVerified === true || beaconVerified === true)
+    : true;
   if (!presenceProof) {
-    return { status: "pending", reason: locationRequired ? "no_location_proof" : "location_check_off" };
+    return { status: "pending", reason: "no_location_proof" };
   }
   // 3) RELAY SIGNAL: beacon pass hua par GPS saaf-saaf shak kar raha hai —
   //    ya 1 km+ door bata raha hai, ya GPS ne kuch bheja hi nahi (location band).
@@ -1600,11 +1613,64 @@ function chirpSpecFor(code) {
 }
 
 // Proof kis channel se aaya — audit/analytics ke liye. Allowlist rakhi hai
-// taaki client koi random string DB me na bhej de.
-const BEACON_CHANNELS = ["manual", "chirp", "qr"];
+// taaki client koi random string DB me na bhej de. 'relay' = code kisi aur
+// verified phone ke bajaye chirp se mila (on-demand relay, neeche).
+const BEACON_CHANNELS = ["manual", "chirp", "qr", "relay"];
 function normalizeBeaconChannel(raw) {
   const v = String(raw || "").trim().toLowerCase();
   return BEACON_CHANNELS.includes(v) ? v : "manual";
+}
+
+// ---------------------------------------------------------------------------
+// ON-DEMAND SINGLE RELAY (audio range extension)
+// ---------------------------------------------------------------------------
+// Problem: teacher ka chirp classroom ke peeche tak hamesha nahi pahunchta.
+// Solution: SIRF tab jab koi student sach me sun nahi paata ("Suno" dabaya par
+// kuch nahi mila), hum EK already-verified phone ko kehte hain ki wo wahi chirp
+// EK BAAR baja de. Ek waqt me ek hi phone bajta hai, isliye interference/chaos
+// nahi hota — aur relay sirf verified (beacon apni attendance bana chuka) phone
+// karta hai, isliye ghar baithe banda relay karwa nahi sakta.
+//
+// Sab kuch IN-MEMORY hai: ek relay request sirf ~25 second zinda rehta hai aur
+// server restart par apne aap khali ho jata hai (koi DB likhai nahi, koi quota
+// kharch nahi).
+const RELAY_REQUEST_TTL_MS = Math.max(5000, (Number(process.env.RELAY_REQUEST_TTL_SEC) || 25) * 1000);
+// sessionKey -> { requester, created_at, expires_at } (abhi ka pending request)
+const relayPending = new Map();
+
+// Session pehchaan — SIRF ek hi session ke students ek doosre ki madad karte hain.
+function relaySessionKey(class_name, subject, course_type, system) {
+  return [class_name, subject, course_type, system]
+    .map((v) => String(v || "").trim().toLowerCase())
+    .join("|");
+}
+
+// PURE: pending request abhi zinda hai ya nahi.
+function relayAlive(entry, nowMs) {
+  if (!entry) return false;
+  const expiresAt = Number(entry.expires_at) || 0;
+  return Number.isFinite(expiresAt) && expiresAt > nowMs;
+}
+
+// PURE decision: kya ye device abhi relay bajaye?
+//   entry    = relayPending ka record { requester, created_at, expires_at } ya undefined
+//   deviceId = jis phone ne relay-duty poocha
+// returns { play, reason }
+function relayPickDecision(entry, deviceId, nowMs, ttlMs) {
+  const ttl = Number(ttlMs) || RELAY_REQUEST_TTL_MS;
+  if (!entry) return { play: false, reason: "no_request" };
+  const expiresAt = Number(entry.expires_at) || (Number(entry.created_at) + ttl);
+  if (!Number.isFinite(expiresAt) || expiresAt <= nowMs) return { play: false, reason: "expired" };
+  // Apni hi request ko khud relay mat karo (student khud hi bajane lage — bekaar).
+  if (!deviceId || entry.requester === deviceId) return { play: false, reason: "self" };
+  return { play: true, reason: "" };
+}
+
+// Purane (expired) entries hata do taaki Map na bade.
+function pruneRelayPending(nowMs) {
+  for (const [key, entry] of relayPending) {
+    if (!relayAlive(entry, nowMs)) relayPending.delete(key);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2385,6 +2451,32 @@ const studentLookupLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// On-demand relay (neeche routes). Relay-request ek genuine blocker hai (student
+// sach me sun nahi paya) — par ek script se spam na ho, isliye bounded. Whole
+// class ek WiFi IP par ho sakti hai, isliye per-device+IP key.
+const relayRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  statusCode: 429,
+  message: { ok: false, reason: "rate_limited" },
+  standardHeaders: false,
+  legacyHeaders: false,
+  keyGenerator: combinedKey,
+});
+
+// Standby phones HAR 3 second relay-duty poll karte hain — 40 min ki class me
+// ek phone ~800 poll karta hai, isliye ye limiter generous hona chahiye warna
+// genuine standby phone hi cut ho jayega.
+const relayDutyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 2000,
+  statusCode: 200, // "kuch nahi" jawab — student ko error nahi dikhana
+  message: { play: false },
+  standardHeaders: false,
+  legacyHeaders: false,
+  keyGenerator: combinedKey,
+});
+
 // ---------- TEACHER ROUTES ----------
 
 // Generate a new attendance code for a class + subject + course type
@@ -2399,11 +2491,13 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       return res.status(400).json({ error: "system must be either Annual or Semester" });
     }
 
-    // Location check: teacher ise session ke liye off kar sakta hai — par sirf
-    // tab jab server owner ne allow kiya ho (ALLOW_TEACHER_LOCATION_OFF).
-    // OFF hone par us session ke SAARE marks approval ke liye pending jate hain
-    // (decideMarkStatus), isliye bina proof ke kuch chupke se count nahi hota.
-    const locationOn = ALLOW_TEACHER_LOCATION_OFF ? boolWithDefault(require_location, true) : true;
+    // Location check ab OPTIONAL hai aur DEFAULT OFF — GPS indoor aksar fail/drift
+    // karta hai, isliye class ke andar baithe students bhi pending me chale jate
+    // the. OFF hone par GPS ki wajah se koi pending NAHI hota (decideMarkStatus);
+    // presence ka sahara beacon (rotating code/chirp) hai. Teacher chahe to ON kar
+    // sakta hai — par sirf jab server owner ne allow kiya ho
+    // (ALLOW_TEACHER_LOCATION_OFF; default true).
+    const locationOn = ALLOW_TEACHER_LOCATION_OFF ? boolWithDefault(require_location, false) : true;
 
     // Optional shorter code window. A code that dies in 2 minutes is far less
     // useful to a student who is not in the room and got it on WhatsApp.
@@ -3896,6 +3990,10 @@ app.get("/api/student/beacon-check", studentLookupLimiter, async (req, res) => {
     const needed = beaconRequired(session);
     return res.json({
       beacon_enabled: needed,
+      // Location check is session me chahiye ya nahi — student page isse apna
+      // GPS wait skip kar sakta hai jab OFF ho (default ab OFF hai). Warna
+      // student bekaar 20+ second GPS ka intezaar karta tha.
+      location_required: session.require_location === true,
       // CHIRP ke constants — student page isi se sound decode karta
       // hai. Server se bhejne ka faayda: agar server.js me tones badle to
       // student page apne aap naye values use karega. Warna do jagah constants
@@ -3915,6 +4013,98 @@ app.get("/api/student/beacon-check", studentLookupLimiter, async (req, res) => {
     console.error(err);
     // Is route ka fail hona student ko block nahi karega — default OFF.
     res.json({ beacon_enabled: false });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// ON-DEMAND SINGLE RELAY — routes
+// ---------------------------------------------------------------------------
+// (1) REQUESTER: "maine Suno dabaya par kuch nahi mila" → ek relay request rakho.
+//     Ek session ke liye ek hi request zinda rehti hai (~25s).
+app.post("/api/student/relay-request", relayRequestLimiter, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const device_id = String(body.device_id || "").trim();
+    const code = String(body.code || "").trim();
+    const class_name = String(body.class_name || "").trim();
+    const subject = String(body.subject || "").trim();
+    const course_type = String(body.course_type || "").trim();
+    const system = normalizeSystem(body.system);
+    if (!device_id || !/^[0-9]{5}$/.test(code) || !class_name || !subject || !course_type || !system) {
+      return res.json({ ok: false, reason: "bad_request" });
+    }
+    const now = Date.now();
+    const activeCode = await ActiveCode.findOne({ class_name, subject, course_type, system: systemMatch(system) }).sort({ created_at: -1 });
+    // Relay sirf tab kaam ka hai jab beacon ON ho — warna code ka koi sound hi
+    // nahi hai bajane ko.
+    if (!activeCode || now > activeCode.expires_at || activeCode.code !== code || !beaconRequired(activeCode)) {
+      return res.json({ ok: false, reason: "no_beacon" });
+    }
+    pruneRelayPending(now);
+    const key = relaySessionKey(class_name, subject, course_type, system);
+    const existing = relayPending.get(key);
+    if (relayAlive(existing, now)) {
+      // Pehle se ek request zinda hai — dobara likhne ka koi matlab nahi.
+      return res.json({ ok: true, already: true, listen_ms: Math.max(0, Number(existing.expires_at) - now) });
+    }
+    relayPending.set(key, { requester: device_id, created_at: now, expires_at: now + RELAY_REQUEST_TTL_MS });
+    audit("relay.request", req, `device=${device_id.slice(0, 24)}`, `${class_name}/${subject}/${course_type}`);
+    return res.json({ ok: true, listen_ms: RELAY_REQUEST_TTL_MS });
+  } catch (err) {
+    console.error(err);
+    return res.json({ ok: false, reason: "error" });
+  }
+});
+
+// (2) STANDBY (already-verified phone): "koi madad maang raha hai?" → haan to
+//     wahi chirp EK BAAR bajao. Warna kuch nahi (play:false).
+app.get("/api/student/relay-duty", relayDutyLimiter, async (req, res) => {
+  try {
+    const device_id = String(req.query.device_id || "").trim();
+    const code = String(req.query.code || "").trim();
+    const class_name = String(req.query.class_name || "").trim();
+    const subject = String(req.query.subject || "").trim();
+    const course_type = String(req.query.course_type || "").trim();
+    const system = normalizeSystem(req.query.system);
+    if (!device_id || !/^[0-9]{5}$/.test(code) || !class_name || !subject || !course_type || !system) {
+      return res.json({ play: false });
+    }
+    const now = Date.now();
+    const key = relaySessionKey(class_name, subject, course_type, system);
+    // FAST PATH: koi relay request hi nahi → turant "kuch nahi". Ye sabse aam
+    // case hai (saare standby phone har kuch second poll karte hain), isliye
+    // yahaan koi DB query NAHI karte — warna free instance par bekaar load badhe.
+    const entry = relayPending.get(key);
+    if (!relayAlive(entry, now)) return res.json({ play: false });
+    const activeCode = await ActiveCode.findOne({ class_name, subject, course_type, system: systemMatch(system) }).sort({ created_at: -1 });
+    if (!activeCode || now > activeCode.expires_at || activeCode.code !== code || !beaconRequired(activeCode)) {
+      return res.json({ play: false });
+    }
+    const decision = relayPickDecision(entry, device_id, now);
+    if (!decision.play) return res.json({ play: false });
+    // CLAIM synchronously (await se PEHLE) — do standby phone ek saath poll
+    // karein to bhi sirf EK relay bajega. Warna dono ek hi request utha lete
+    // aur do phone saat-saat bajkar poori chirp kachra kar dete.
+    relayPending.delete(key);
+    // GATE: relay sirf wahi phone kar sakta hai jisne IS session me beacon se
+    // verify hokar apni attendance bana li ho (device-lock ki wajah se ye sirf
+    // usi asli student ka phone ho sakta hai). Isse koi bahar wala device
+    // relay-duty ko loop me hit kar ke live beacon code "harvest" nahi kar sakta.
+    // (Gate fail ho to request waste ho gayi — ye jaan-boojh kar fail-safe hai:
+    //  galti se EK relay kam ho jaye, par chaos kabhi na ho.)
+    const mine = await Attendance.findOne({
+      device_id, class_name, subject, course_type, system: systemMatch(system), date: todayDateString(), beacon_verified: true,
+    }).lean();
+    if (!mine) return res.json({ play: false });
+    // Relay ko TAZA code bhejte hain (jo student ne suna wo 1 slot purana ho sakta
+    // hai). Wahi deterministic beacon code, sirf sound me.
+    const spec = chirpSpecFor(currentBeacon(activeCode.beacon_secret, now).code);
+    if (!spec) return res.json({ play: false });
+    audit("relay.play", req, `device=${device_id.slice(0, 24)}`, `${class_name}/${subject}/${course_type}`);
+    return res.json({ play: true, chirp: spec });
+  } catch (err) {
+    console.error(err);
+    return res.json({ play: false });
   }
 });
 

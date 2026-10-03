@@ -75,7 +75,7 @@ function chirpSpecFor(code) {
   };
 }
 
-const BEACON_CHANNELS = ["manual", "chirp", "qr"];
+const BEACON_CHANNELS = ["manual", "chirp", "qr", "relay"];
 function normalizeBeaconChannel(raw) {
   const v = String(raw || "").trim().toLowerCase();
   return BEACON_CHANNELS.includes(v) ? v : "manual";
@@ -315,6 +315,7 @@ function check(label, condition) {
 // 12) beacon_channel allowlist — client random string DB me na bhej sake
 {
   check("'chirp' allowed", normalizeBeaconChannel("chirp") === "chirp");
+  check("'relay' allowed", normalizeBeaconChannel("relay") === "relay");
   check("'QR' (bada letter) -> 'qr'", normalizeBeaconChannel("QR") === "qr");
   check("' manual ' (space) -> 'manual'", normalizeBeaconChannel(" manual ") === "manual");
   check("junk -> safe default 'manual'", normalizeBeaconChannel("hacker<script>") === "manual");

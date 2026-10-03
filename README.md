@@ -57,7 +57,7 @@ Minimum env vars (Render → Environment tab):
 
 | Variable | Kaam | Default |
 |---|---|---|
-| `STRICT_LOCATION` | `true` = GPS check server owner ke bina band nahi ho sakta | `true` |
+| `STRICT_LOCATION` | `true` = GPS check server owner ke bina band nahi ho sakta (UI me lock ho jata hai). **Ab default `false`** — location optional hai | `false` |
 | `MAX_ACCURACY_METERS` | Isse dhundhla fix reject | 60 |
 | `MIN_REAL_ACCURACY_METERS` | Isse **zyada** precise fix = nakli (mock) → reject | 1 |
 | `MAX_FIX_AGE_SEC` | Iss se purana GPS fix reject (replay band) | 45 |
@@ -68,7 +68,7 @@ Minimum env vars (Render → Environment tab):
 | `ATTENDANCE_RETENTION_DAYS` | Attendance data kitne din rakhein | `90` |
 | `AUTO_REVIEW_FLAGGED` | Flag wali entry pending (smart approval ka hissa) | `true` |
 | `SMART_APPROVAL_DEFAULT` | Naya session Smart approval me khule (verified = seedha present, fail/flag = pending) | `true` |
-| `ALLOW_TEACHER_LOCATION_OFF` | Teacher page se location check OFF karne ki permission (false = hamesha ON, server control) | `true` |
+| `ALLOW_TEACHER_LOCATION_OFF` | Teacher page se location check ON/OFF karne ki permission (false = hamesha ON, server control). Location ab **default OFF** hai | `true` |
 | `BEACON_DEFAULT` | Naya session beacon (rotating code) ke saath khule — teacher toggle se badal sakta hai | `true` |
 | `SEND_PDF_DEFAULT` | Naya session PDF auto-email (teacher checkbox se badal sakta hai) | `true` |
 | `STUDENT_PDF_OPEN` | Student khud apna PDF download kar sake (roll number daal kar) | `true` |
@@ -152,14 +152,49 @@ Chirp **wahi code sound me** bhejta hai (**9.0–11.2 kHz**):
 **Fallback:** agar sasta phone mic 17 kHz+ nahi sun pata, student wahi 6-digit code **type** kar
 deta hai (`beacon_channel = manual`) — kuch bhi tootta nahi, sirf proof weaker hota hai.
 
+### 🔁 On-demand single relay — peeche baithe students ke liye
+
+Kabhi kabhi teacher ka chirp **classroom ke peeche tak** pahunch nahi pata (door, shor, kamzoor
+speaker). Iske liye ek **on-demand** relay hai — **poore class ka shor nahi**, sirf ek phone:
+
+| Kaun | Kya karta hai |
+|---|---|
+| Peeche wala student | \"🎤 Suno\" dabata hai → ~7 second me kuch nahi mila → app khud ek **relay request** rakhta hai (`beacon_channel = relay`) |
+| Verified student | Apni attendance ban jaane ke baad us phone par standby chalta hai — har 3s server se poochta hai \"koi madad maang raha hai?\" |
+| Server | Ek request ko **sirf ek** phone ko deta hai; wo phone **WAHI chirp EK BAAR** bajata hai |
+| Peeche wala student | Mic khula hone ki wajah se code **khud bhar** jata hai |
+
+**Kyun ye safe hai (aur chaos nahi hota):**
+
+- **Ek request = ek relay.** Request serve hote hi **in-memory me consume** ho jati hai (await se
+  pehle, atomic) — do phone ek saath poll karein to bhi sirf **EK** bajta hai.
+- **Sirf verified phone** relay kar sakta hai — jisne **is session me beacon se verify hokar apni
+  attendance bana li** ho. Isliye ghar baithe banda relay karwa nahi sakta, aur koi bahar wala
+  device relay-duty ko loop me hit kar ke live code \"harvest\" nahi kar sakta.
+- **Apni request khud relay nahi hoti** (`self`), aur request sirf ~25 second zinda rehti hai.
+- **Kuch bhi DB me save nahi hota** — ye sirf in-memory hai, server restart par khud saaf.
+- Band **9–11.2 kHz** wahi hai (phone-call band ke upar), isliye relay audio-call par leak nahi hota.
+
 ### Smart approval (default ON) — teacher ka time bachane ke liye
 | Situation | Result |
 |---|---|
 | Location verify hui **aur** koi flag nahi | **Seedha PRESENT** (teacher ko tap nahi karna padta) |
 | Location proof nahi mili (GPS fail / net off / offline queue) | **PENDING** → teacher ki "Location/net fail hue students" list me |
-| Session me location check OFF tha | **PENDING** (koi proof hi nahi hai) |
+| Session me location check OFF tha (**naya default**) | **Seedha PRESENT** — GPS ki wajah se koi pending nahi (presence ka sahara beacon/code) |
 | Koi anti-proxy flag laga (shared coordinates, ek device se do roll) | **PENDING** → Review tab |
 | Teacher ne khud "Approval mode" ON kiya | **SAARE** pending |
+
+> **📍 Location ab OPTIONAL hai — default OFF.** GPS indoor aksar fail ya 100–300 m drift karta
+> hai, isliye class ke **andar** baithe genuine students bhi pending/flag me chale jate the.
+> Ab default me GPS check **OFF** hai — presence ka asli sahara **beacon** (rotating code / chirp)
+> hai. Teacher chahe to session ke liye location **ON** kar sakta hai (tab GPS **ya** beacon —
+> dono me se ek kaafi hai). `STRICT_LOCATION=true` karne par location check lock ho jata hai
+> (teacher ise OFF nahi kar sakta)
+>
+> **Student page ab GPS sirf zaroorat par maangta hai** — page load par nahi. Code daalte hi
+> pata chal jata hai ki is session me location chahiye ya nahi; OFF ho to koi laal location
+> error nahi dikhta aur submit turant hota hai (pehle load par hi GPS fail hone se "Location
+> nahi mil paayi" dikh jata tha, jabki uska koi matlab nahi tha).
 
 Isliye normal din me 60 bacchon par tap nahi karna padta — sirf jinki genuinely dikkat hui unhi ko approve karna hota hai.
 **Cheating signals alag hain:** fake/mock location aur automation (devtools) ab bhi seedha **BLOCK** hote hain (pending nahi bante) — aur teacher ki list me reason ke saath dikhte hain.
@@ -333,6 +368,8 @@ GET    /api/student/lookup-name      → naam/class/major/email auto-fill
 POST   /api/student/location-token   → GPS verify → one-time token (purana rasta, ab optional)
 POST   /api/student/mark-attendance  → inline GPS fix + code + beacon_code; smart approval ke hisaab se present/pending
 GET    /api/student/beacon-check     → ?code= (is code wale session me beacon chahiye ya nahi — UI hint)
+POST   /api/student/relay-request    → peeche baithe student: \"relay karvao\" (ek request per session, ~25s TTL)
+GET    /api/student/relay-duty       → verified phone standby poll: \"koi madad maang raha hai?\" → haan to chirp spec
 GET    /api/student/my-attendance    → subject-wise % (sirf usi phone/roll ke liye)
 POST   /api/student/report-failure   → "teacher se approve karwao" (GPS/net fail ki entry teacher ke paas)
 GET    /api/student/my-report.pdf    → apna attendance PDF download (roll_no + system)
@@ -384,7 +421,7 @@ node tools/verify-pages.js         # teacher.html + student.html: JS syntax, dup
 2. Atlas → Network Access me `0.0.0.0/0` (ya Render ke IPs) allow karein.
 3. Render → Environment me `MONGODB_URI`, `TEACHER_PASSWORD`, `TEACHER_EMAIL`, `RESEND_API_KEY`, `CRON_SECRET`, `COLLEGE_NAME`, `CLASSROOM_LAT/LNG`, `ALLOW_START_WITHOUT_DB=true`, `MONGO_QUOTA_MB=2048`.
 4. Resend par apna domain verify karke `EMAIL_FROM` set karein (warna sirf apne hi email par bhej paayenge).
-5. Deploy → `/api/health` khol kar dekhein: `ok:true`, `db:"connected"`, `anti_proxy.strict_location: true`, `data_policy.student_retention_days: 365`.
+5. Deploy → `/api/health` khol kar dekhein: `ok:true`, `db:"connected"`, `anti_proxy.strict_location: false` (location optional), `data_policy.student_retention_days: 365`.
 6. Teacher page par sign in → ek test code bana kar mobile se mark karke poora flow check karein, phir **Register → delete** se test entry hata dein (audit log me record rahega).
 
 ## 12. Aage ke sujhav (Phase 2 — abhi nahi hua)

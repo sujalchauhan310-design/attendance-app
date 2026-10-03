@@ -50,6 +50,10 @@
            sasta speaker 20-40 dB gir jata tha aur code milta hi nahi tha). -->
       <button type="button" class="btn btn-block btn-info mt-2" id="chirpListenBtn" onclick="listenForChirp()">🎤 Suno — phone khud bhar dega</button>
       <div class="muted fs-xs mt-1" id="chirpListenStatus"></div>
+      <!-- RELAY: apni attendance ban jaane ke baad, is phone se hum ek peeche baithe
+           dost ki madad karte hain — wahi chirp EK BAAR bajakar. Ek waqt me ek hi
+           phone bajta hai (server chunta hai), isliye 120 phone ka shor nahi hota. -->
+      <div class="muted fs-xs mt-1 hide" id="relayStandbyStatus"></div>
     </div>
 
     <div class="field">
@@ -167,13 +171,13 @@
       <h3>Location check</h3>
       <span class="chip chip-gold" id="radiusChip">📍 Radius 150 m</span>
     </div>
-    <p class="card-sub">Aap class ke andar hain ya nahi — ye server khud verify karta hai. GPS ON rakhein.</p>
+    <p class="card-sub">Attendance ka proof server khud verify karta hai (beacon/code). GPS sirf tab chahiye jab is class me location check ON ho.</p>
 
-    <div class="presence busy" id="presence">
-      <div class="ring" id="presenceIcon">…</div>
+    <div class="presence warn" id="presence">
+      <div class="ring" id="presenceIcon">!</div>
       <div>
-        <div class="txt" id="presenceText">Location check ho rahi hai…</div>
-        <div class="sub" id="presenceSub">Weak network par isme thoda time lag sakta hai.</div>
+        <div class="txt" id="presenceText">Location check zaroorat par hoga</div>
+        <div class="sub" id="presenceSub">Code daalte hi pata chal jayega ki is class me GPS chahiye ya nahi.</div>
       </div>
     </div>
 
@@ -439,6 +443,10 @@ let beaconPeekBusy = false;
 // Server se aaye chirp constants (tone_min_hz/tone_step_hz/...). Beacon ON
 // hone par hi milte hain — inhi se mic ka sound decode hota hai.
 let chirpParams = null;
+// Is session me location check chahiye ya nahi — server beacon-check se batata
+// hai. Default true (safe): jab tak server saaf "OFF" na kahe, GPS ki koshish
+// karte hain. OFF hone par submit par GPS ka bekaar intezaar skip ho jata hai.
+let sessionLocationRequired = true;
 
 function setChirpListenStatus(msg) {
   const el = $('chirpListenStatus');
@@ -458,6 +466,17 @@ async function peekBeaconNeeded(code) {
     const data = await res.json().catch(() => ({}));
     const needed = res.ok && data.beacon_enabled === true;
     beaconPeekCache = { code: clean, needed, done: true };
+    // Location check chahiye ya nahi (session-level). Sirf res.ok par bharosa.
+    if (res.ok) {
+      sessionLocationRequired = data.location_required === true;
+      // Chahiye to AB GPS maango (load par nahi) — warna saaf batao ki nahi
+      // chahiye, taaki student ko bekaar ka laal location error na mile.
+      if (sessionLocationRequired) {
+        if (!coords && !locBusy) fetchLocation({});
+      } else {
+        setPresence('ok', 'Location ki zaroorat nahi', 'Is class me GPS check OFF hai — beacon/code se verify hoga.');
+      }
+    }
     // Chirp constants server se hi aate hain (single source of truth) — mic
     // decoder inhi se kaam karta hai. Beacon OFF ho to null, aur "Suno" button
     // bhi bekaar hai (bajane wala hi nahi hai).
@@ -709,10 +728,15 @@ async function listenForChirp() {
   let ctx = null;
   let timer = null;
   let graceTimer = null;
+  let relayTimer = null;
+  // Relay maange gaye the ya nahi — isse pata chalta hai proof 'chirp' se aaya
+  // ya 'relay' se (audit ke liye farak padta hai).
+  let relayRequested = false;
   // Har haal me safai — warna mic on reh jata (battery + privacy dono).
   chirpStopFn = () => {
     if (timer) clearInterval(timer);
     if (graceTimer) clearTimeout(graceTimer);
+    if (relayTimer) clearTimeout(relayTimer);
     if (ctx) { try { ctx.close(); } catch (err) {} }
     if (stream) stream.getTracks().forEach((t) => t.stop());
   };
@@ -767,13 +791,43 @@ async function listenForChirp() {
         stopChirpListen();
         const input = $('beaconCode');
         if (input) input.value = code;
-        beaconProofChannel = 'chirp';
-        setChirpListenStatus(`✅ Chirp se code mil gaya: ${code}. Ab "Mark attendance" dabayein.`);
-        toast('Chirp se code mil gaya ✓', 'ok');
+        beaconProofChannel = relayRequested ? 'relay' : 'chirp';
+        setChirpListenStatus(`✅ Code mil gaya: ${code}. Ab "Mark attendance" dabayein.`);
+        toast('Code mil gaya ✓', 'ok');
         return;
       }
       if (segmenter.count) setChirpListenStatus(`Sun raha hoon… ${segmenter.count}/6 digits mile`);
     }, 40);
+
+    // ~7 second tak kuch na mile to maan lete hain ki student peeche baitha hai
+    // (teacher ki awaaz tak nahi pahunch rahi). Hum ek already-verified dost se
+    // WAHI chirp EK BAAR bajwa dete hain — mic khula rehta hai, isliye jab relay
+    // bajta hai to code khud bhar jata hai. Ek waqt me ek hi phone bajta hai.
+    relayTimer = setTimeout(async () => {
+      if (!chirpListening || segmenter.count) return;
+      relayRequested = true;
+      setChirpListenStatus('Yahan awaaz kam hai — ek dost se relay karwa rahe hain…');
+      const r = await requestRelay({
+        code: $('code').value.trim(),
+        class_name: $('className') ? $('className').value.trim() : '',
+        subject: $('subject') ? $('subject').value.trim() : '',
+        course_type: $('courseType') ? $('courseType').value.trim() : '',
+        system: currentSystem(),
+      });
+      if (!chirpListening) return;
+      if (r.ok) {
+        setChirpListenStatus('Relay ka intezaar… dost ke phone se chirp aayega.');
+        // Relay ko mauka dene ke liye listening window thoda lamba kar do.
+        if (graceTimer) clearTimeout(graceTimer);
+        graceTimer = setTimeout(() => {
+          if (!chirpListening) return;
+          stopChirpListen();
+          setChirpListenStatus('Relay se bhi nahi mila. Teacher se dobara bajane ko kahiye, ya code type kar dein.');
+        }, 22000);
+      } else {
+        setChirpListenStatus('Relay available nahi — teacher se dobara bajane ko kahiye, ya code type kar dein.');
+      }
+    }, 7000);
 
     // 15 second me kuch nahi mila to chhod do — warna mic on reh jata hai aur
     // student ko lagta hai kuch ho raha hai.
@@ -788,6 +842,141 @@ async function listenForChirp() {
     setChirpListenStatus('Mic ka permission nahi mila — code type kar dein (ya browser me mic allow karein).');
   }
 }
+
+/* ---------- RELAY: chirp BAJANA (student side) ----------
+   Wahi 9.0-11.2 kHz sequence jo teacher bajata hai — par yahaan sirf tab jab
+   server kahe ki koi peeche baitha dost madad maang raha hai. Verification
+   server par hota hai; ye sirf AWAAZ hai, koi naya code nahi. */
+let chirpPlayCtx = null; // ek hi AudioContext (Safari baar-baar banane par dhamaka karta hai)
+function getChirpPlayCtx() {
+  if (!chirpPlayCtx) {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return null;
+    try { chirpPlayCtx = new Ctor(); } catch (err) { return null; }
+  }
+  return chirpPlayCtx;
+}
+// Submit tap ke ANDAR call karte hain — iOS/Chrome par pehla play user-gesture
+// ke bina block hota hai, aur baad me programmatic play chalta rahe.
+function unlockChirpAudio() {
+  const ctx = getChirpPlayCtx();
+  if (ctx && ctx.state === 'suspended') { try { ctx.resume(); } catch (err) {} }
+}
+async function playChirpSpec(spec) {
+  const ctx = getChirpPlayCtx();
+  if (!ctx) return false;
+  if (ctx.state === 'suspended') { try { await ctx.resume(); } catch (err) {} }
+  const seq = (spec && spec.sequence) || [];
+  if (!seq.length) return false;
+  let t = ctx.currentTime + 0.06;
+  seq.forEach((tone) => {
+    const dur = Math.max(0.05, (Number(tone.ms) || 150) / 1000);
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = Number(tone.hz) || 0;
+    // Envelope ZAROORI hai — seedha on/off par speaker "click" karta hai aur us
+    // broadband click ko sasti mic digit samajh sakti hai (teacher page jaisa).
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.85, t + 0.012);
+    gain.gain.setValueAtTime(0.85, t + Math.max(0.012, dur - 0.012));
+    gain.gain.linearRampToValueAtTime(0, t + dur);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+    t += dur + (Number(spec.gap_ms) || 40) / 1000;
+  });
+  return true;
+}
+
+// Requester: server se ek relay request rakhte hain (peeche baitha student).
+async function requestRelay(p) {
+  try {
+    const res = await fetch('/api/student/relay-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_id,
+        code: p.code,
+        class_name: p.class_name,
+        subject: p.subject,
+        course_type: p.course_type,
+        system: p.system,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok && data.ok === true };
+  } catch (err) {
+    return { ok: false };
+  }
+}
+
+/* ---------- RELAY STANDBY (verified phone ki madad) ----------
+   Apni attendance ban gayi — ab agar koi peeche wala sun nahi pa raha, to
+   server humein bolega aur hum WAHI chirp EK BAAR bajayenge. Poll sirf tab
+   chalta hai jab page aage ho (background me bajana bekaar). */
+let relayStandbyTimer = null;
+let relayStandbyInfo = null;
+let relayWakeLock = null;
+let relayPlaying = false;
+
+function setRelayStandbyStatus(msg) {
+  const el = $('relayStandbyStatus');
+  if (el) { el.textContent = msg || ''; el.classList.toggle('hide', !msg); }
+}
+
+async function startRelayStandby(info) {
+  if (!info || !info.code || !info.class_name || !info.subject || !info.course_type) return;
+  stopRelayStandby(); // purana (kisi aur session ka) standby hata do
+  relayStandbyInfo = info;
+  // Screen on rakhne ki koshish (best-effort) — screen band = audio suspend.
+  try {
+    if (navigator.wakeLock && navigator.wakeLock.request) relayWakeLock = await navigator.wakeLock.request('screen');
+  } catch (err) { /* best-effort */ }
+  const tick = async () => {
+    const s = relayStandbyInfo;
+    if (!s || relayPlaying || document.hidden) return;
+    try {
+      const q = new URLSearchParams({
+        device_id, code: s.code, class_name: s.class_name, subject: s.subject,
+        course_type: s.course_type, system: s.system || '',
+      });
+      const res = await fetch('/api/student/relay-duty?' + q.toString(), { headers: { Accept: 'application/json' } });
+      const data = await res.json().catch(() => ({}));
+      if (!relayStandbyInfo) return;
+      if (data && data.play && data.chirp) {
+        relayPlaying = true;
+        setRelayStandbyStatus('🔊 Kisi dost ki madad kar rahe hain…');
+        const ok = await playChirpSpec(data.chirp);
+        await new Promise((r) => setTimeout(r, 2500));
+        relayPlaying = false;
+        setRelayStandbyStatus(ok ? '✅ Madad ho gayi — aap taiyaar ho.' : '⚠️ Awaz baj nahi payi (phone ki volume check karein).');
+      }
+    } catch (err) { /* net blip — agla tick */ }
+  };
+  relayStandbyTimer = setInterval(tick, 4000);
+  // 10 minute baad khud band — class ke baad phone pe relay chalta rehna bekaar.
+  setTimeout(() => { if (relayStandbyInfo === info) stopRelayStandby(); }, 10 * 60 * 1000);
+  setRelayStandbyStatus('✅ Aapki attendance ban gayi — dost ki madad ke liye taiyaar (page khula rakhein).');
+  tick();
+}
+
+function stopRelayStandby() {
+  if (relayStandbyTimer) { clearInterval(relayStandbyTimer); relayStandbyTimer = null; }
+  relayStandbyInfo = null;
+  relayPlaying = false;
+  try { if (relayWakeLock) { relayWakeLock.release(); relayWakeLock = null; } } catch (err) {}
+  setRelayStandbyStatus('');
+}
+
+// Screen wapas aane par wake-lock dobara maangte hain (OS use release kar deta hai).
+document.addEventListener('visibilitychange', () => {
+  if (!relayStandbyInfo) return;
+  if (document.visibilityState === 'visible' && navigator.wakeLock && navigator.wakeLock.request) {
+    navigator.wakeLock.request('screen').then((wl) => { relayWakeLock = wl; }).catch(() => {});
+  }
+});
 
 
 $('code').addEventListener('input', () => {
@@ -920,8 +1109,12 @@ async function fetchLocation(opts) {
   return coords;
 }
 
-// Pehli load par khud hi ek fix lene ki koshish (student ko extra tap na karna pade).
-fetchLocation();
+// Pehli load par GPS ka intezaar NAHI karte. Location ab default OFF hai, isliye
+// bina zaroorat maangna bekaar tha (aur fail hone par student ko laal "Location
+// nahi mil paayi" error dikhta tha — jabki GPS ki zaroorat hi nahi thi). GPS
+// sirf tab maangte hain jab beacon-check bataye ki is session me location chahiye
+// (wo code daalte hi pata chal jata hai — dekho peekBeaconNeeded).
+setPresence('warn', 'Location check zaroorat par hoga', 'Code daalte hi pata chal jayega ki is class me GPS chahiye ya nahi.');
 
 /* ---------- roll number → roster auto-fill + lock ---------- */
 $('rollNo').addEventListener('input', () => {
@@ -1044,7 +1237,9 @@ function openConfirm() {
   ].map(([k, v]) => `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>`).join('');
 
   $('confirmErr').classList.add('hide');
-  $('confirmLoc').innerHTML = coords
+  $('confirmLoc').innerHTML = !sessionLocationRequired
+    ? `<div class="presence ok"><div class="ring">✓</div><div><div class="txt">Location ki zaroorat nahi</div><div class="sub">Is class me GPS check OFF hai — beacon/code se verify hoga.</div></div></div>`
+    : coords
     ? `<div class="presence warn"><div class="ring">!</div><div><div class="txt">GPS fix ready</div><div class="sub">Accuracy ≈ ${esc(coords.accuracy)} m · submit par server class ke andar hone ki check karega</div></div></div>`
     : `<div class="presence bad"><div class="ring">✕</div><div><div class="txt">Location abhi nahi mili</div><div class="sub">Submit dabane par hum ek baar phir koshish karenge.</div></div></div>`;
 
@@ -1125,6 +1320,10 @@ async function attemptSubmit(payload, retries) {
 let submitting = false;
 async function confirmSubmit() {
   if (submitting) return; // double-tap guard
+  // Sound bajane ke liye iOS/Chrome ko ek user-gesture chahiye. Ye Submit ka tap
+  // wahi gesture hai — yahin AudioContext unlock kar lete hain, taaki baad me
+  // relay (agar dena pade) browser block kiye bina baj sake.
+  unlockChirpAudio();
   const p = gatherPayload();
   const btn = $('confirmBtn');
   const errEl = $('confirmErr');
@@ -1178,8 +1377,10 @@ async function confirmSubmit() {
   };
 
   try {
-    // 1. Fresh GPS fix (agar pehle nahi mila tha).
-    if (!coords) {
+    // 1. Fresh GPS fix — SIRF jab session me location chahiye (default ab OFF).
+    //    OFF hone par GPS ka intezaar bilkul nahi karte, mark seedha jaata hai
+    //    (yahi bug fix hai — indoor GPS fail hone par bhi pending nahi).
+    if (!coords && sessionLocationRequired) {
       btn.innerHTML = '<span class="spinner"></span> Getting location…';
       await fetchLocation({});
     }
@@ -1245,6 +1446,18 @@ async function confirmSubmit() {
 
     if (result.data.success) {
       closeConfirm();
+      // Beacon session me, apni attendance ban jaane ke baad is phone se ek
+      // peeche baithe dost ki madad ho sakti hai (on-demand relay). Server
+      // batayega kab, aur ek waqt me ek hi phone bajta hai.
+      if (chirpParams) {
+        startRelayStandby({
+          code: p.code,
+          class_name: p.class_name,
+          subject: p.subject,
+          course_type: p.course_type,
+          system: p.system,
+        });
+      }
       if (result.data.pending) {
         const reason = result.data.pending_reason || '';
         const title =

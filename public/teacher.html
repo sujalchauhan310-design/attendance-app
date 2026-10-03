@@ -214,8 +214,8 @@
 
         <div class="stack" style="gap:10px;">
           <div class="switch-row">
-            <div><div class="t">📍 Location check</div><div class="d" id="locSwitchNote">ON — server GPS verify karega</div></div>
-            <label class="switch"><input type="checkbox" id="requireLocation" checked onchange="saveSelection()"><i></i></label>
+            <div><div class="t">📍 Location check</div><div class="d" id="locSwitchNote">OFF — GPS optional (beacon hi kaafi hai)</div></div>
+            <label class="switch"><input type="checkbox" id="requireLocation" onchange="saveSelection()"><i></i></label>
           </div>
           <div class="switch-row">
             <div><div class="t">✅ Approval mode</div><div class="d">Har mark aapke approve karne par count hoga</div></div>
@@ -1355,9 +1355,9 @@ async function refreshSessionStatus(sessionId) {
 
   $('locSwitchNote').textContent = data.require_location
     ? (data.allow_location_off
-        ? 'ON — aap ise OFF kar sakte hain (OFF par saare marks approve par)'
+        ? 'ON — GPS verify hoga (aap ise OFF kar sakte hain)'
         : 'ON — server ne lock kiya hai (ALLOW_TEACHER_LOCATION_OFF=false)')
-    : 'OFF — is session ke saare marks aapke approve par count honge';
+    : 'OFF — GPS optional (class ke andar baithe students pending me nahi jayenge)';
 
   sessionTotalMs = Math.max(1000, (data.expires_at || 0) - (data.created_at || 0));
   expiryTimestamp = Date.now() + (data.seconds_left || 0) * 1000;
@@ -1715,7 +1715,7 @@ function openGenerateConfirm() {
     ['Subject', c.subject],
     ['Course type', c.course_type],
     ['Code window', $('expiryMinutes').value + ' minute'],
-    ['Location check', $('requireLocation').checked ? 'ON (verified)' : 'OFF — risky'],
+    ['Location check', $('requireLocation').checked ? 'ON (GPS verified)' : 'OFF (sirf code + beacon — default)'],
     ['Approval mode', $('requireApproval').checked ? 'ON (aapko approve karna hoga)' : 'OFF'],
     ['PDF email', $('autoSendPdf').checked ? 'ON' : 'OFF'],
     ['Live beacon', $('requireBeacon').checked ? `ON — ${$('beaconMinutes').value} minute, har 45s code badlega` : 'OFF (sirf GPS)'],
@@ -1763,7 +1763,7 @@ async function confirmGenerate() {
     await refreshSessionStatus(data.session_id);
     saveActiveSession({ code: data.code, session_id: data.session_id, class_name: data.class_name, subject: data.subject, course_type: data.course_type, system: data.system });
     await loadSessions(data.session_id);
-    $('requireLocation').checked = data.require_location !== false;
+    $('requireLocation').checked = data.require_location === true;
     msg.innerHTML = alertOk(`Code ${data.code} ban gaya — ${Math.round((data.expires_in_seconds || 0) / 60)} minute ke liye.`);
     toast('Code: ' + data.code, 'ok');
   } catch (err) {
