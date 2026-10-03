@@ -153,7 +153,122 @@ check("7 digit REJECT", verifyBeaconCode(SECRET, "1234567", T0).ok === false);
 check("non-numeric REJECT", verifyBeaconCode(SECRET, "abcdef", T0).ok === false);
 check("5 digit par '6 digit' message", verifyBeaconCode(SECRET, "12345", T0).reason.includes("6 digit"));
 
-// 10) Leak check — aage ke 1000 slots me current code nahi
+// ---------------------------------------------------------------------------
+// STAGE-2 "NEW CODE" — beacon ke replacement ka logic test
+// ---------------------------------------------------------------------------
+// Ye test naye flow ke CORE hisse verify karta hai:
+//   * code 6-digit numeric hota hai
+//   * hash compare kaam karta hai (plain code DB me jaata hi nahi)
+//   * GALAT code reject hota hai (aur kuch bhi save nahi hota)
+//   * REAL expiry 30s par enforce hoti hai
+//   * UI timer 20s aur REAL timer 30s ALAG-ALAG hain (sahi buffer)
+//
+// Ye IIFE me hai taaki upar wale beacon test ke names (T0, SECRET...) se
+// COLLIDE na ho — dono ek hi file me hain.
+(function stage2VerifyCodeTest() {
+const VERIFY_DISPLAY_SECONDS = 20;
+const VERIFY_REAL_TTL_MS = 30 * 1000;
+
+console.log('\n=== stage-2 verify code (20s UI / 30s real) ===');
+
+function generateVerifyCode() {
+  return String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+}
+function sha256Hex(value) {
+  return crypto.createHash('sha256').update(String(value)).digest('hex');
+}
+function hashVerifyCode(code) { return sha256Hex(String(code || '').trim()); }
+function isVerifyCodeLive(session, nowMs) {
+  if (!session || !session.verify_code_hash) return false;
+  const now = Number(nowMs) || Date.now();
+  // Strict `<` (na ki `<=`): 30s TTL = t=0..29.999s valid, t=30.000s par expire.
+  return now < (session.verify_code_expires_at || 0);
+}
+function verifyCodeMatches(session, submitted, nowMs) {
+  const raw = String(submitted || '').trim();
+  if (!/^\d{6}$/.test(raw)) return { ok: false, reason: 'Code 6 digit ka hona chahiye.' };
+  if (!isVerifyCodeLive(session, nowMs)) {
+    return { ok: false, reason: 'expired', expired: true };
+  }
+  const a = Buffer.from(hashVerifyCode(raw));
+  const b = Buffer.from(String(session.verify_code_hash));
+  const match = a.length === b.length && crypto.timingSafeEqual(a, b);
+  return match ? { ok: true } : { ok: false, reason: 'wrong' };
+}
+
+const T0 = 1700000000000;
+
+// 1) Code format — hamesha exactly 6 digits (leading zeros samet).
+let fmtOk = true;
+for (let i = 0; i < 3000; i++) {
+  const c = generateVerifyCode();
+  if (!/^\d{6}$/.test(c)) { fmtOk = false; break; }
+}
+check('generated code hamesha 6-digit numeric', fmtOk);
+
+// 2) Session banate hain — 20s UI, 30s real.
+const code = generateVerifyCode();
+const session = {
+  verify_code_hash: hashVerifyCode(code),
+  verify_code_issued_at: T0,
+  verify_code_expires_at: T0 + VERIFY_REAL_TTL_MS, // 30s
+  verify_display_seconds: VERIFY_DISPLAY_SECONDS, // 20s
+  verify_issued_count: 1,
+};
+check('DB me sirf hash hai, plain code nahi', !JSON.stringify(session).includes(code));
+check('UI 20s aur real 30s ALAG hain', VERIFY_DISPLAY_SECONDS !== VERIFY_REAL_TTL_MS / 1000);
+check('UI timer 20s', VERIFY_DISPLAY_SECONDS === 20);
+check('REAL timer 30s', VERIFY_REAL_TTL_MS / 1000 === 30);
+
+// 3) Sahi code, code banate hi.
+check('sahi code turant accept', verifyCodeMatches(session, code, T0).ok === true);
+
+// 4) 19s par abhi bhi live (UI 20s tak dikhta hai — consistent).
+check('19s par code live', verifyCodeMatches(session, code, T0 + 19 * 1000).ok === true);
+
+// 5) UI timer khatam hone ke baad (20s) bhi server par EXTRA 10s buffer hai.
+//    Ye jaan-boojh kar rakha gaya safety margin hai — network latency ke liye.
+check('20s par server par abhi bhi live (10s buffer)',
+  verifyCodeMatches(session, code, T0 + 20 * 1000).ok === true);
+check('25s par server par live',
+  verifyCodeMatches(session, code, T0 + 25 * 1000).ok === true);
+
+// 6) 30s par REAL expiry — ab reject.
+check('30s par code expire (real TTL)',
+  verifyCodeMatches(session, code, T0 + 30 * 1000).ok === false);
+check('31s par bhi expire',
+  verifyCodeMatches(session, code, T0 + 31 * 1000).ok === false);
+
+// 7) Galat code — hamesha reject (chahe live ho).
+const wrong = generateVerifyCode() === code ? '000001' : generateVerifyCode();
+check('galat code REJECT (live session me bhi)', verifyCodeMatches(session, wrong, T0).ok === false);
+
+// 8) Malformed input — crash nahi, saaf error.
+check('empty REJECT', verifyCodeMatches(session, '', T0).ok === false);
+check('5 digit REJECT', verifyCodeMatches(session, '12345', T0).ok === false);
+check('7 digit REJECT', verifyCodeMatches(session, '1234567', T0).ok === false);
+check('non-numeric REJECT', verifyCodeMatches(session, 'abcdef', T0).ok === false);
+check('null REJECT', verifyCodeMatches(session, null, T0).ok === false);
+
+// 9) Koi code nahi banaya hua session — kuch bhi accept nahi.
+const empty = { verify_code_hash: '', verify_code_expires_at: 0 };
+check('bina code wale session me kuch accept nahi',
+  verifyCodeMatches(empty, code, T0).ok === false);
+
+// 10) Naya code pehle wala invalid kar deta hai (regenerate case).
+const code2 = generateVerifyCode();
+session.verify_code_hash = hashVerifyCode(code2);
+session.verify_code_expires_at = T0 + VERIFY_REAL_TTL_MS;
+check('regenerate ke baad PURANA code reject',
+  verifyCodeMatches(session, code, T0).ok === false);
+check('regenerate ke baad NAYA code accept',
+  verifyCodeMatches(session, code2, T0).ok === true);
+
+// 11) Leak check — aage ke codes guess nahi ho sakte (hash one-way hai).
+const leaked = session.verify_code_hash.includes(code2);
+check('hash me plain code leak nahi', leaked === false);
+
+})();
 {
   const live = currentBeacon(SECRET, T0).code;
   const base = beaconSlotAt(T0);

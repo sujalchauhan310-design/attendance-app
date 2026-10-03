@@ -11,6 +11,47 @@
      extra domains (fonts.googleapis.com + fonts.gstatic.com) page ko slow kar
      dete the. System fonts (app.css me fallback chain) turant load hote hain. -->
 <link rel="stylesheet" href="app.css">
+<style>
+/* =========================================================================
+   STEP-REVEAL ANIMATIONS — naya lightweight design
+   -------------------------------------------------------------------------
+   Ye POORA lightweight hai: sirf 4 chhote CSS keyframes + 2 rules. Koi
+   animation library (GSAP/Framer/AOS), koi external font, koi extra file
+   NAHI — isliye website ka size practically 0 bytes se badha hai.
+
+   Flow: step 1 (sirf code) -> step 2 (details form) -> step 3 (new code).
+   JS `revealStep()` inhe `display:none` se `display:block` + animation
+   chalu karke laata hai. Har step halka sa upar se slide hokar fade-in hota
+   hai, aur ek soft glow pulse deta hai — modern dikhta hai par heavy nahi.
+
+   `prefers-reduced-motion` respect karte hain: jise animation ki
+   zaroorat nahi, uske liye animation band kar dete hain (accessibility).
+   ========================================================================= */
+@keyframes stepIn {
+  from { opacity: 0; transform: translateY(18px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+/* Naye code wale section par ek halka sa "glow" pulse — code aa raha hai. */
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 10px 30px rgba(217, 180, 85, 0.08); }
+  50%      { box-shadow: 0 12px 42px rgba(55, 211, 153, 0.22); }
+}
+.step-reveal {
+  animation: stepIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* Sirf step-3 (new code) par glow pulse — baaki steps plain fade hain. */
+#stepVerify.step-reveal {
+  border-color: rgba(55, 211, 153, 0.5);
+  animation: stepIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both,
+             glowPulse 2.4s ease-in-out 0.45s infinite;
+}
+/* Accessibility: animation-hat pasand karne walon ke liye band. */
+@media (prefers-reduced-motion: reduce) {
+  .step-reveal, #stepVerify.step-reveal {
+    animation: none !important;
+  }
+}
+</style>
 </head>
 <body>
 <div class="app">
@@ -33,29 +74,20 @@
       <p id="codeErr" class="field-error hide">Code me sirf digits (0–9) chalte hain.</p>
     </div>
 
-    <!-- BEACON: teacher ka board/projector par dikhta hai ROTATING code. Ye
-         attendance code se alag hai aur har 45 second badalta hai — isliye
-         ghar bait ke purana code kaam nahi karta. Field tab dikhegi jab
-         teacher ka session beacon ON rakhta hai (peek se pata chalta hai). -->
-    <div class="field hide" id="beaconField">
-      <label class="label" for="beaconCode">📡 Beacon code (board par rotating)</label>
-      <input id="beaconCode" class="code-input" type="text" inputmode="numeric" pattern="[0-9]*"
-        maxlength="6" autocomplete="off" placeholder="000000" aria-describedby="beaconHint">
-      <p class="hint" id="beaconHint">Teacher ke screen par dikhta hai. Ye har 45 second badalta hai — sirf class me baithe students hi dekh sakte hain.</p>
-      <p id="beaconErr" class="field-error hide">Beacon code me sirf digits (0–9) chalte hain.</p>
-      <!-- CHIRP: teacher ka speaker 9.0–11.2 kHz ka beep-sequence bajata hai
-           (wahi code, sound me). Student ko sirf sun-na hai — 6 digit type
-           karne ki zaroorat nahi. Band jaan-boojh kar audible hai taaki HAR
-           phone/laptop ka speaker + mic ise handle kare (ultrasound par kai
-           sasta speaker 20-40 dB gir jata tha aur code milta hi nahi tha). -->
-      <button type="button" class="btn btn-block btn-info mt-2" id="chirpListenBtn" onclick="listenForChirp()">🎤 Suno — phone khud bhar dega</button>
-      <div class="muted fs-xs mt-1" id="chirpListenStatus"></div>
-      <!-- RELAY: apni attendance ban jaane ke baad, is phone se hum ek peeche baithe
-           dost ki madad karte hain — wahi chirp EK BAAR bajakar. Ek waqt me ek hi
-           phone bajta hai (server chunta hai), isliye 120 phone ka shor nahi hota. -->
-      <div class="muted fs-xs mt-1 hide" id="relayStandbyStatus"></div>
-    </div>
+    <!-- ============ STEP-REVEAL ANIMATION (beacon ka replacement) ============
+         Naya design: teeno step ek-ek karke reveal hote hain, har step par
+         halka sa fade + slide + glow. Ye POORA lightweight hai — sirf CSS
+         keyframes (koi library nahi, koi extra file nahi), isliye website ka
+         size practically 0 bytes se badha hai (comments ke ilawa).
 
+         Sequence:
+           Step 1: sirf CODE input (details chhupi hain)
+           Step 2: code milte hi DETAILS form animate hokar aata hai
+           Step 3: confirm karne par NAYA CODE ka section/pop-up aata hai
+         Har step ka wrapper `.step-reveal` class se control hota hai, aur JS
+         sirf `revealStep(n)` se class toggle karta hai. -->
+    <!-- STEP 2 wrapper: details form. Initially hidden (step 1 = sirf code). -->
+    <div class="step-reveal" id="stepDetails" style="display:none;">
     <div class="field">
       <label class="label" for="rollNo">Roll Number</label>
       <input id="rollNo" class="input" type="text" inputmode="numeric" pattern="[0-9]*"
@@ -102,10 +134,13 @@
         </optgroup>
       </select>
     </div>
+  </div><!-- /stepDetails -->
   </section>
 
   <!-- ================= STEP 2 — subject details ================= -->
-  <section class="card">
+  <!-- Ye bhi stepDetails ke andar nahi hai, par ek alag reveal class par hai
+       jise JS step-2 ke saath hi chhata hai (studentDetails). -->
+  <section class="card step-reveal" id="stepSubject" style="display:none;">
     <div class="card-title">
       <h3>Class details</h3>
       <span class="chip" id="detailsHintChip">Teacher ke code se match karein</span>
@@ -166,12 +201,15 @@
   </section>
 
   <!-- ================= STEP 3 — location ================= -->
+  <!-- Location card + submit button dono step-2 ke saath reveal hote hain
+       (student ne pehle code + details bhar liye). -->
+  <div class="step-reveal" id="stepAction" style="display:none;">
   <section class="card">
     <div class="card-title">
       <h3>Location check</h3>
       <span class="chip chip-gold" id="radiusChip">📍 Radius 150 m</span>
     </div>
-    <p class="card-sub">Attendance ka proof server khud verify karta hai (beacon/code). GPS sirf tab chahiye jab is class me location check ON ho.</p>
+    <p class="card-sub">Attendance ka proof server khud verify karta hai. GPS sirf tab chahiye jab is class me location check ON ho.</p>
 
     <div class="presence warn" id="presence">
       <div class="ring" id="presenceIcon">!</div>
@@ -207,6 +245,37 @@
   <button id="submitBtn" type="button" class="btn btn-primary btn-block mt-2" onclick="openConfirm()">
     Mark Attendance
   </button>
+  </div><!-- /stepAction -->
+
+  <!-- ================= STEP 3 — NEW CODE (beacon ka replacement) =========
+       Ye section tab aata hai jab teacher ne "Generate New Code" dabaya
+       hota hai. Usi waqt ek pop-up (modal) bhi khulta hai jisme student
+       ye code daalta hai. Sahi code = attendance approve.
+       Ye BHI step-3 reveal animation se aata hai (slide + fade). -->
+  <section class="card accent step-reveal" id="stepVerify" style="display:none;">
+    <div class="card-title">
+      <h3>🔐 Teacher ka naya code</h3>
+      <span class="chip chip-ok" id="verifyChip">Waiting</span>
+    </div>
+    <p class="card-sub" id="verifySub">
+      Teacher ne confirm kar liya hai ki sab aa gaye hain. Ab unke board par
+      dikhne wala 6-digit code yahan daalein — aapki attendance approve ho jayegi.
+    </p>
+
+    <div class="field mb-0">
+      <label class="label" for="verifyCodeInput">New code (6 digits)</label>
+      <input id="verifyCodeInput" class="code-input" type="text" inputmode="numeric"
+        pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="000000"
+        aria-describedby="verifyHint">
+      <p class="hint" id="verifyHint">Teacher ka board/projector par dikhta hai. Sirf digits (0–9).</p>
+      <p id="verifyErr" class="field-error hide"></p>
+    </div>
+
+    <button type="button" class="btn btn-ok btn-block mt-2" id="verifySubmitBtn" onclick="submitVerifyCode()">
+      ✓ Verify aur attendance approve karo
+    </button>
+    <p class="muted fs-xs mt-1" id="verifyTimerNote"></p>
+  </section>
 
   <div id="queueStatus" class="mt-2"></div>
   <div id="failedBox" class="mt-2"></div>
@@ -264,6 +333,36 @@
     <div class="sheet-foot">
       <button type="button" class="btn btn-ghost" onclick="closeConfirm()">Cancel</button>
       <button type="button" class="btn btn-primary" id="confirmBtn" onclick="confirmSubmit()">Yes, mark me present</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= NEW CODE pop-up (stage-2) =================
+     Ye pop-up tab khulta hai jab teacher ne "Generate New Code" dabaya
+     hota hai. Purane beacon wale flow ki tarah TEACHER side par koi popup
+     nahi aata — ab student ke phone par aata hai, aur student yahi code
+     daalta hai. Sahi code = attendance approve. -->
+<div class="modal" id="verifyModal" role="dialog" aria-modal="true" aria-labelledby="verifyTitle">
+  <div class="sheet">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head">
+      <div>
+        <h2 id="verifyTitle">🔐 Teacher ka naya code</h2>
+        <p class="muted fs-sm mt-1">Board par dikhne wala 6-digit code daalein — attendance turant approve ho jayegi.</p>
+      </div>
+      <button type="button" class="sheet-close" onclick="closeVerifyModal()" aria-label="Close">✕</button>
+    </div>
+
+    <div class="field mb-0">
+      <label class="label" for="verifyCodeModalInput">New code</label>
+      <input id="verifyCodeModalInput" class="code-input" type="text" inputmode="numeric"
+        pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="000000">
+      <p id="verifyModalErr" class="field-error hide"></p>
+    </div>
+
+    <div class="sheet-foot">
+      <button type="button" class="btn btn-ghost" onclick="closeVerifyModal()">Baad me</button>
+      <button type="button" class="btn btn-ok" id="verifyModalSubmitBtn" onclick="submitVerifyCode()">Verify</button>
     </div>
   </div>
 </div>
@@ -368,7 +467,38 @@ function enforceDigitsOnly(inputEl, errEl) {
 enforceDigitsOnly($('code'), $('codeErr'));
 enforceDigitsOnly($('rollNo'), $('rollNoErr'));
 enforceDigitsOnly($('myRollNo'), $('myRollNoErr'));
-enforceDigitsOnly($('beaconCode'), $('beaconErr'));
+// Naye "New Code" ke dono inputs (pop-up + section) — sirf digits.
+enforceDigitsOnly($('verifyCodeModalInput'), $('verifyModalErr'));
+enforceDigitsOnly($('verifyCodeInput'), $('verifyErr'));
+
+// ---- STEP-REVEAL TRIGGER ----
+// Attendance code input par listener. Jaise hi code 5-digit ho jaata hai:
+//   1. Step-2 (details + subject + location/submit) animate hokar aata hai,
+//   2. Server se ek halka peek hota hai (location chahiye ya nahi).
+// Ye SAHI sequence hai jo user ne maanga tha: "pehle sirf code, phir details".
+$('code').addEventListener('input', function () {
+  const v = this.value.trim();
+  if (/^[0-9]{5}$/.test(v)) {
+    revealDetailsOnce();
+    peekSession(v);
+  } else {
+    // Code khaali/purna hata diya -> details phir se chhupa do, taaki student
+    // galat code par aage nahi badhe.
+    detailsRevealed = false;
+    hideSteps(['stepDetails', 'stepSubject', 'stepAction']);
+  }
+});
+
+// Ek chhota helper: diye gaye step wrappers ko turant chhupa deta hai
+// (animation ke bina — user ne code mita diya hai, to fade-out ka wait nahi).
+function hideSteps(ids) {
+  ids.forEach(function (id) {
+    const el = $(id);
+    if (!el) return;
+    el.classList.remove('step-reveal');
+    el.style.display = 'none';
+  });
+}
 
 /* ---------- system-wise option filter (Annual / Semester) ----------
    UI me System SABSE PEHLE hai. Uske baad Class aur Course Type ki list aati
@@ -432,563 +562,257 @@ function syncSystemFromClass() {
     applySystemFilter();
   }
 }
-/* ---------- beacon field auto-show ----------
-   Student ko pata nahi hota ki teacher ka session beacon ON hai ya nahi. Har
-   keystroke pe network call karna bhaari hai, isliye sirf tab PEEK karte hain
-   jab attendance code 5-digit ho jaaye (matlab user ne poora code type kar liya).
-   Result cache hota hai — ek code par ek hi request, aur student jaldi-jaldi
-   type kar raha ho to har 1.2s se zyada nahi. */
-let beaconPeekCache = { code: '', needed: false, done: false };
-let beaconPeekBusy = false;
-// Server se aaye chirp constants (tone_min_hz/tone_step_hz/...). Beacon ON
-// hone par hi milte hain — inhi se mic ka sound decode hota hai.
-let chirpParams = null;
-// Is session me location check chahiye ya nahi — server beacon-check se batata
-// hai. Default true (safe): jab tak server saaf "OFF" na kahe, GPS ki koshish
-// karte hain. OFF hone par submit par GPS ka bekaar intezaar skip ho jata hai.
-let sessionLocationRequired = true;
+/* =====================================================================
+   STAGE-2 "NEW CODE" — beacon + chirp + relay ka poora replacement
+   ---------------------------------------------------------------------
+   Naya flow (student side):
+     Step 1: sirf CODE input dikhta hai.
+     Step 2: 5-digit code milte hi DETAILS form animate hokar aata hai.
+     Step 3: "Mark Attendance" dabane par entry teacher ke PENDING list me
+             jaati hai. Teacher sab confirm hone par "Generate New Code"
+             dabata hai, aur student ke phone par POP-UP khulta hai.
+     Step 4: student naya 6-digit code daalta hai -> attendance APPROVE.
 
-function setChirpListenStatus(msg) {
-  const el = $('chirpListenStatus');
-  if (el) el.textContent = msg || '';
+   ---- Animation sequence ----
+   revealStep() neeche diye gaye wrappers ko `display:none` se laata hai aur
+   unpe halka slide+fade animation chalaata hai. Ye CSS-only hai (head me
+   <style>), koi library nahi — website lightweight rehti hai.
+
+   ---- 20s (teacher UI) vs 30s (real server TTL) ----
+   Student ke yahan timer UI nahi hai; student sirf code daalta hai. Asli
+   validity server par hoti hai (30s). Student ko koi countdown nahi
+   dikhaya jaata — kyunki use na pata ki teacher ne kitne der pehle code
+   banaya. Server galat/expired code par saaf error de deta hai.
+   ===================================================================== */
+
+// ---- STEP REVEAL (animation trigger) ----
+// Yahan se decide hota hai kaunsa step kab dikhega.
+// `stepDetails` / `stepSubject` / `stepAction` ko code 5-digit hone par
+// dikhate hain, aur `stepVerify` ko naya code aane par.
+function showReveal(id) {
+  const el = $(id);
+  if (!el || el.style.display !== 'none') return;
+  // Pehle `display:none` hatate hain, phir animation class add karte hain.
+  // CSS ke `stepIn` keyframes `both` fill-mode use karte hain, isliye
+  // animation shuru se proper opacity 0 se hoti hai (flicker nahi hota).
+  el.style.display = '';
+  el.classList.add('step-reveal');
+  // Chhota reflow force — browser ko ek frame lagta hai taaki animation
+  // add hone ke baad shuru se chale (warna kabhi-kabhi skip ho jaati hai).
+  void el.offsetWidth;
 }
 
-async function peekBeaconNeeded(code) {
+// Details + submit + location — sab ek saath (step 2). Sirf ek baar call
+// hota hai (5-digit code milte hi). Student pehle se code bhar raha hai,
+// isliye jab wo pura hota hai hum aage badh jaate hain.
+let detailsRevealed = false;
+function revealDetailsOnce() {
+  if (detailsRevealed) return;
+  detailsRevealed = true;
+  showReveal('stepDetails');
+  showReveal('stepSubject');
+  showReveal('stepAction');
+  // Location check chahiye to yahin se GPS maang lete hain (load par nahi),
+  // taaki step-2 reveal hone hi student ko loading dikhe.
+  maybeFetchLocation();
+}
+
+// ---- Session location requirement ----
+// Server se batata hai is class me GPS chahiye ya nahi. Default true (safe):
+// jab tak server saaf "OFF" na kahe, GPS ki koshish karte hain.
+// (coords / locBusy ka asli declaration niche location section me hai.)
+let sessionLocationRequired = true;
+
+// Attendance code 5-digit ho jaaye to details reveal + server se peek.
+// Har keystroke par network call nahi — sirf jab poora 5-digit code ho.
+let peekCache = { code: '', done: false };
+let peekBusy = false;
+async function peekSession(code) {
   const clean = String(code || '').trim();
   if (!/^[0-9]{5}$/.test(clean)) return;
-  if (beaconPeekCache.code === clean && beaconPeekCache.done) return;
-  if (beaconPeekBusy) return;
-  beaconPeekBusy = true;
+  if (peekCache.code === clean && peekCache.done) return;
+  if (peekBusy) return;
+  peekBusy = true;
   try {
-    const res = await fetch('/api/student/beacon-check?code=' + encodeURIComponent(clean), {
+    const res = await fetch('/api/student/verify-status?code=' + encodeURIComponent(clean), {
       headers: { Accept: 'application/json' },
     });
     const data = await res.json().catch(() => ({}));
-    const needed = res.ok && data.beacon_enabled === true;
-    beaconPeekCache = { code: clean, needed, done: true };
-    // Location check chahiye ya nahi (session-level). Sirf res.ok par bharosa.
+    peekCache = { code: clean, done: true };
     if (res.ok) {
+      // Location check chahiye ya nahi (session-level). Sirf res.ok par bharosa.
       sessionLocationRequired = data.location_required === true;
-      // Chahiye to AB GPS maango (load par nahi) — warna saaf batao ki nahi
-      // chahiye, taaki student ko bekaar ka laal location error na mile.
-      if (sessionLocationRequired) {
-        if (!coords && !locBusy) fetchLocation({});
-      } else {
-        setPresence('ok', 'Location ki zaroorat nahi', 'Is class me GPS check OFF hai — beacon/code se verify hoga.');
+      maybeFetchLocation();
+      if (!sessionLocationRequired) {
+        setPresence('ok', 'Location ki zaroorat nahi', 'Is class me GPS check OFF hai — code se verify hoga.');
       }
     }
-    // Chirp constants server se hi aate hain (single source of truth) — mic
-    // decoder inhi se kaam karta hai. Beacon OFF ho to null, aur "Suno" button
-    // bhi bekaar hai (bajane wala hi nahi hai).
-    chirpParams = needed ? data.chirp || null : null;
-    const listenBtn = $('chirpListenBtn');
-    if (listenBtn) listenBtn.classList.toggle('hide', !chirpParams);
-    const field = $('beaconField');
-    if (!field) return;
-    field.classList.toggle('hide', !needed);
-    if (needed) {
-      // Field abhi khula hai to focus le jao — student ko ek step kam karte hain.
-      const input = $('beaconCode');
-      if (input && !input.value && document.activeElement !== input) input.focus();
-    }
   } catch (err) {
-    // Net fail = beacon OFF mat maano. Field chhupa rahega aur server ka apna
-    // error message student ko bata dega (better than blocking on a guess).
-    beaconPeekCache = { code: clean, needed: false, done: true };
+    // Net fail = kuch assume nahi karte; default (location required) hi rehta
+    // hai, aur server apne error message se bata dega. Student block nahi hota.
+    peekCache = { code: clean, done: true };
   } finally {
-    beaconPeekBusy = false;
+    peekBusy = false;
   }
 }
 
-/* ---------- CHIRP LISTENER (student side) ----------
-   Teacher ke speaker se 9.0–11.2 kHz ka beep-sequence aata hai — WAHI beacon
-   code, sirf sound me. Student ko 6 digit type karne ki zaroorat nahi.
-
-   Band JAAN-BOOJH KAR audible hai (pehle 16.5–18.7 kHz tha): 12 kHz tak
-   lagbhag SAARE phone/laptop speaker + mic flat hote hain, isliye "Suno" har
-   phone par chalta hai. Ultrasound me kai sasta laptop speaker 20-40 dB gir
-   jata tha aur code milta hi nahi tha.
-
-   Kaam kaise karta hai:
-     1) Mic kholte hain AGC + noise-suppression BAND kar ke (warna OS tone band
-        ko "awaaz hi nahi" samajh kar kaat deta hai) aur 48 kHz sampleRate
-        maangte hain (16 kHz mic par 9-11 kHz Nyquist ke bahar chala jata).
-     2) AnalyserNode se har ~40 ms par spectrum lete hain.
-     3) Server ke bataye band me sabse strong tone dhoondhte hain, aur noise
-        floor (2–6 kHz ka average) se kam se kam 8 dB upar hone par hi maante
-        hain. Isse classroom ka shor digit nahi banta.
-     4) Digits sirf opening aur closing LEAD marker ke BEECH ginte hain — isse
-        mic-on click / koi bhi stray tone code ko khiska nahi sakta.
-     5) 6 digits milte hi code ban jata hai. */
-let chirpListening = false;
-let chirpStopFn = null; // cleanup handle (mic stream + interval + audio ctx)
-// Proof kis channel se aaya — payload me jata hai (audit ke liye).
-let beaconProofChannel = 'manual';
-// Student ne khud type kiya to wapas 'manual'. (Chirp se aaya ho aur student
-// usi value ko chhed de — to usne effectively khud verify kiya, isliye
-// 'manual' hi sach hai.) Declaration ke baad hi register karte hain, warna
-// `let` ke TDZ me ye line dhamaka kar deti.
-$('beaconCode') && $('beaconCode').addEventListener('input', () => { beaconProofChannel = 'manual'; });
-
-// Frequency -> digit. Server ke bheje hue tone_min_hz/tone_step_hz par.
-function chirpDigitFromHz(hz, p) {
-  const d = Math.round((hz - p.tone_min_hz) / p.tone_step_hz);
-  if (d < 0 || d > 9) return null;
-  if (Math.abs(hz - (p.tone_min_hz + d * p.tone_step_hz)) > p.tone_step_hz / 2) return null;
-  return d;
+// Location tab chahiye tabhi GPS maango (saaf, jaldi).
+function maybeFetchLocation() {
+  if (sessionLocationRequired && !coords && !locBusy) fetchLocation({});
 }
 
-// Spectrum se band ka peak + noise floor. Peak kaafi strong na ho to null —
-// warna background noise ko tone samajh liya jata aur galat code ban jata.
-function findTonePeak(freqDb, sampleRate, fftSize, p) {
-  const binHz = sampleRate / fftSize;
-  const loBin = Math.max(1, Math.floor((p.lead_hz - 150) / binHz));
-  const hiBin = Math.min(freqDb.length - 2, Math.ceil((p.tone_min_hz + 10 * p.tone_step_hz + 150) / binHz));
-  if (hiBin <= loBin) return null;
-  let peakBin = -1;
-  let peakDb = -Infinity;
-  for (let i = loBin; i <= hiBin; i++) {
-    if (freqDb[i] > peakDb) { peakDb = freqDb[i]; peakBin = i; }
-  }
-  if (peakBin < 0) return null;
-  // Noise floor = 2–6 kHz (speech band) ka average. Wahan hamesha kuch na kuch
-  // hota hai (fan, awaaz, khansi), isliye ye ek bharosemand "zameen" deta hai.
-  const nLo = Math.max(1, Math.floor(2000 / binHz));
-  const nHi = Math.min(freqDb.length - 1, Math.floor(6000 / binHz));
-  let sum = 0;
-  let n = 0;
-  for (let i = nLo; i <= nHi; i++) {
-    if (Number.isFinite(freqDb[i])) { sum += freqDb[i]; n++; }
-  }
-  const floorDb = n ? sum / n : -100;
-  // 8 dB ≈ 2.5x energy ka farak. Itna gap hone par hi bharosa karte hain.
-  if (!(peakDb > floorDb + 8)) return null;
-  return { hz: peakBin * binHz, db: peakDb };
+/* =====================================================================
+   STEP 3 — NAYA CODE: pop-up + submit
+   ---------------------------------------------------------------------
+   Teacher "Generate New Code" dabata hai -> server 6-digit code banata hai
+   (UI par 20s, server par 30s valid). Student ke phone par POP-UP khulta hai.
+   Student code daalta hai; sahi ho to uski PENDING attendance APPROVE ho
+   jaati hai (server Attendance.status "pending" -> "present").
+
+   Student ko koi countdown NAHI dikhaya jaata — requirement me nahi kaha
+   gaya, aur zaroorat bhi nahi: student ko nahi pata teacher ne code kab
+   banaya. Server galat/expired code par saaf error deta hai, aur student
+   dobara try kar sakta hai (teacher naya code bana sakta hai).
+   ===================================================================== */
+
+// Naya code aa gaya -> step-3 section animate hokar aaye + pop-up khule.
+function onVerifyCodeReady() {
+  showReveal('stepVerify');
+  const chip = $('verifyChip');
+  if (chip) { chip.textContent = 'Ready'; chip.className = 'chip chip-ok'; }
+  openVerifyModal();
 }
 
-function stopChirpListen() {
-  if (typeof chirpStopFn === 'function') {
-    try { chirpStopFn(); } catch (err) {}
-  }
-  chirpStopFn = null;
-  chirpListening = false;
-  const btn = $('chirpListenBtn');
-  if (btn) { btn.disabled = false; btn.textContent = '🎤 Suno — phone khud bhar dega'; }
+function openVerifyModal() {
+  if (!$('verifyModal')) return;
+  openModal('verifyModal');
+  // Focus input par — student turant type kar sake.
+  setTimeout(() => {
+    const input = $('verifyCodeModalInput');
+    if (input) input.focus();
+  }, 260);
 }
 
-
-// ---------------------------------------------------------------------------
-// CHIRP SEGMENTER (pure function — testable)
-// ---------------------------------------------------------------------------
-// Ye hissa sabse nazuk hai, isliye ise alag, PURE function rakha hai taaki
-// tools/chirp-test.js isko bina browser/mic ke test kar sake.
-//
-// BUG jo yahan pakda gaya: pehle dedupe sirf "pehle jaisi hi frequency" par
-// hota tha (`if same as lastHz -> skip`). Iska matlab do LAGATAAR same digit
-// wale code (jaise 55xxxx) me doosra digit chup-chaap skip ho jata tha — code
-// 5 digit ka ban jata tha aur student ka submit FAIL hota tha. Random 6-digit
-// code me kisi bhi bagal wale jode ke same hone ka chance 1/10 hai, 5 jode
-// hain — matlab ~41% codes is bug se tootte the!
-//
-// Sahi tarika: tone ko uski DURATION se segment karo —
-//   * tone ki frequency badal jaye  -> purana tone khatam, naya shuru
-//   * thodi der koi tone na mile    -> purana tone khatam (gap)
-//   * tone itna lamba chale (>= minToneMs) ki wo shor na ho -> digit banao
-// Isse "55" bhi theek milta hai (beech ka gap tone ko band karta hai), aur
-// ek-ada noise blip bhi digit nahi banta (minToneMs se chhota hota hai).
-function createChirpSegmenter(p, opts) {
-  const o = opts || {};
-  const frameMs = Number(o.frame_ms) || 40;
-  // Ek asli tone 150 ms ka hai. 80 ms se lamba chalne par hi use digit maante
-  // hain — isse ek frame ka shor ya speaker ka click digit nahi banta.
-  const minToneMs = Number(o.min_tone_ms) || 80;
-  // Gap 120 ms hai. Isse ~1.5 frame (60 ms) tak khaali rehne par hi tone band
-  // maante hain — ek-ada frame drop hone par tone tootkar double nahi ginta,
-  // par asli 120 ms gap pakda jata hai (jisse "55" jaise repeat sahi milte hain).
-  const minGapMs = Number(o.min_gap_ms) || Math.max(Math.round(frameMs * 1.5), 60);
-  // Lead marker (8400 Hz) se code ka FRAME banta hai. Aadha step = 120 Hz,
-  // par 150 Hz dheel rakhi hai — ye digit 0 (9000 Hz) se 600 Hz (2.5 step) door
-  // rehta hai, isliye kisi asli digit ko galti se lead nahi samajhta.
-  const leadTol = Number(o.lead_tol_hz) || Math.max(Math.round(p.tone_step_hz / 2), 150);
-
-  let curHz = null; // abhi kaun sa tone sun rahe hain
-  let curMs = 0; // wo tone kitni der se chal raha hai
-  let silenceMs = 0;
-  // ---- FRAMING (asli BUG ka fix) ----
-  // Server code ko do lead markers ke BEECH bajata hai (lead ... 6 digits ...
-  // lead). Pehle ye segmenter lead ko sirf "digit nahi" maan kar chhod deta tha,
-  // boundary ka koi faayda nahi leta tha. Isse mic-on ka click / speaker pop /
-  // classroom ka koi bhi tone band ke aas-paas code me GHUSS jata tha aur saare
-  // digits ek-ek khiska deta tha: student ko 6 digit to milte the, par code
-  // teacher ke screen wale se ALAG. Ab digits sirf opening aur closing lead ke
-  // beech ginte hain, isliye aisa shift ho hi nahi sakta.
-  let armed = false; // opening lead mil gaya -> ab digits ginti hain
-  let closed = false; // closing lead mil gaya -> is chirp ka code pura
-  let inLead = false; // abhi lead tone ke andar hain (300 ms lamba hota hai)
-  const digits = [];
-
-  function isLead(hz) {
-    return Number.isFinite(hz) && Math.abs(hz - p.lead_hz) <= leadTol;
+function closeVerifyModal() {
+  closeModal('verifyModal');
+  // Pop-up band karne par bhi step-3 section khula rahe — student chahe to
+  // scroll karke wahi code wahin daal sakta hai.
+  const sectionInput = $('verifyCodeInput');
+  if (sectionInput && $('stepVerify')) {
+    setTimeout(() => sectionInput.focus(), 260);
   }
-
-  function closeTone() {
-    if (curHz !== null && curMs >= minToneMs && armed && !closed) {
-      const d = chirpDigitFromHz(curHz, p);
-      // Lead marker (aur range se bahar ki koi cheez) digit nahi banta.
-      if (d !== null) digits.push(d);
-    }
-    curHz = null;
-    curMs = 0;
-  }
-
-  // Lead ke frames bhi "chup" hain — par tone ko band kar dete hain, warna lead
-  // khud ek lamba tone ban kar agle digit ko nigal jata.
-  function onSilence() {
-    silenceMs += frameMs;
-    if (curHz !== null && silenceMs >= minGapMs) closeTone();
-  }
-
-  return {
-    // peakHz: strong tone mila to uski frequency, warna null.
-    push(peakHz) {
-      if (isLead(peakHz)) {
-        // Lead 300 ms chalta hai — marker SIRF shuruaat par ginte hain.
-        if (!inLead) {
-          inLead = true;
-          closeTone(); // adhoora tone (aakhri digit) flush ho jaye
-          if (armed) {
-            closed = true; // opening ke baad aaya lead = closing marker
-            armed = false;
-          } else if (!closed) {
-            armed = true; // pehla lead = opening marker
-            digits.length = 0;
-          }
-          silenceMs = 0;
-        }
-        return; // lead ke baaki frames chup-chaap ignore
-      }
-      inLead = false;
-
-      if (peakHz === null || peakHz === undefined) {
-        onSilence();
-        return;
-      }
-      // Opening lead se PEHLE ka kuch bhi (mic click / shor) ignore karo, aur
-      // closing lead ke BAAD ka bhi — digit sirf dono lead ke beech me ginte hain.
-      if (!armed || closed) return;
-      // Range se bahar ki frequency bhi silence hi hai.
-      if (chirpDigitFromHz(peakHz, p) === null) {
-        onSilence();
-        return;
-      }
-      silenceMs = 0;
-      if (curHz !== null && Math.abs(peakHz - curHz) < p.tone_step_hz / 2) {
-        curMs += frameMs; // wahi tone chal raha hai
-        return;
-      }
-      // Frequency badal gayi -> purana tone khatam, naya shuru.
-      closeTone();
-      curHz = peakHz;
-      curMs = frameMs;
-    },
-    // Chirp pura khatam hone par (closing lead tone ke baad) call karte hain.
-    flush() {
-      closeTone();
-    },
-    digits,
-    get count() {
-      return digits.length;
-    },
-    get done() {
-      return digits.length >= 6;
-    },
-    get code() {
-      return digits.length >= 6 ? digits.slice(0, 6).join("") : null;
-    },
-  };
 }
 
-async function listenForChirp() {
-  if (chirpListening) return;
-  const p = chirpParams;
-  if (!p) {
-    setChirpListenStatus('Pehle attendance code daalein — tab mic sun sakta hai.');
+// Student naya code submit karta hai (pop-up ya section — dono se).
+async function submitVerifyCode() {
+  const btn = $('verifyModalSubmitBtn');
+  const errEl = $('verifyModalErr');
+  const modalInput = $('verifyCodeModalInput');
+  const sectionInput = $('verifyCodeInput');
+
+  // Value pop-up input se, warna section input se.
+  const entered = String((modalInput && modalInput.value) || (sectionInput && sectionInput.value) || '').trim();
+  if (!/^[0-9]{6}$/.test(entered)) {
+    showVerifyError('Naya code exactly 6 digit ka hona chahiye.');
     return;
   }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    setChirpListenStatus('Is browser me mic support nahi — code type kar dein.');
-    return;
-  }
-  chirpListening = true;
-  const btn = $('chirpListenBtn');
-  if (btn) { btn.disabled = true; btn.textContent = '🎤 Sun raha hoon…'; }
-  setChirpListenStatus('Sun raha hoon… teacher se chirp bajane ko kahiye.');
 
-  let stream = null;
-  let ctx = null;
-  let timer = null;
-  let graceTimer = null;
-  let relayTimer = null;
-  // Relay maange gaye the ya nahi — isse pata chalta hai proof 'chirp' se aaya
-  // ya 'relay' se (audit ke liye farak padta hai).
-  let relayRequested = false;
-  // Har haal me safai — warna mic on reh jata (battery + privacy dono).
-  chirpStopFn = () => {
-    if (timer) clearInterval(timer);
-    if (graceTimer) clearTimeout(graceTimer);
-    if (relayTimer) clearTimeout(relayTimer);
-    if (ctx) { try { ctx.close(); } catch (err) {} }
-    if (stream) stream.getTracks().forEach((t) => t.stop());
-  };
+  const code = String($('code').value.trim());
+  const roll = String($('rollNo').value.trim());
+  const device_id = getDeviceId();
+
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Checking…'; }
+  const sectionBtn = $('verifySubmitBtn');
+  if (sectionBtn) { sectionBtn.disabled = true; sectionBtn.innerHTML = '<span class="spinner"></span> Checking…'; }
 
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      // AGC / noise-suppression / echo-cancel BAND — warna OS tone band ko
-      // "awaaz hi nahi" samajh kar kaat deta hai.
-      // sampleRate 48k: agar browser mic ko 16 kHz par khol de to 9-11 kHz band
-      // Nyquist (8 kHz) ke bahar chala jata aur decode namumkin ho jata.
-      audio: {
-        echoCancellation: false, noiseSuppression: false, autoGainControl: false,
-        channelCount: 1, sampleRate: 48000,
-      },
-      video: false,
-    });
-    const Ctor = window.AudioContext || window.webkitAudioContext;
-    if (!Ctor) { setChirpListenStatus('Audio support nahi — code type kar dein.'); stopChirpListen(); return; }
-    // 48 kHz wala context mangte hain (ye hint hai, guarantee nahi).
-    try { ctx = new Ctor({ sampleRate: 48000 }); } catch (err) { ctx = new Ctor(); }
-    // Agar ye phone/browser is band ko handle hi nahi kar sakta (mic 16 kHz par
-    // khul gaya), to saaf message do — 15 second chup-chaap intezaar karne se
-    // behtar hai ki student turant code type kar le.
-    const topHz = p.tone_min_hz + 9 * p.tone_step_hz;
-    if (!(ctx.sampleRate > 2 * topHz)) {
-      stopChirpListen();
-      setChirpListenStatus(`Is phone par sound decode support nahi (mic ${Math.round(ctx.sampleRate / 1000)} kHz) — code type kar dein.`);
-      return;
-    }
-    const src = ctx.createMediaStreamSource(stream);
-    const analyser = ctx.createAnalyser();
-    // 2048 @ 48 kHz = ~43 ms ka window. Ye jaan-boojh kar CHHOTA hai:
-    // tone 180 ms ka hai aur gap 140 ms ka. Bada window (8192 = 170 ms) lene par
-    // ek hi reading me DO tones mix ho jate the — beech ka gap gayab ho jata,
-    // aur "55" jaise do lagataar same tone ek hi lamba tone ban jate the.
-    // 2048 par bin ~23 Hz chauda hai, tone gap 240 Hz — aaram se alag dikhta hai.
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0; // smoothing se tone blur ho jata hai
-    src.connect(analyser);
-    const buf = new Float32Array(analyser.frequencyBinCount);
-    const segmenter = createChirpSegmenter(p, { frame_ms: 40 });
-
-    timer = setInterval(() => {
-      analyser.getFloatFrequencyData(buf);
-      const peak = findTonePeak(buf, ctx.sampleRate, analyser.fftSize, p);
-      // Segmenter ko har frame do — wo khud decide karta hai ki tone khatam
-      // hua ya chal raha hai (duration-based, isliye "55" jaisa repeat bhi
-      // sahi milta hai — dekho upar createChirpSegmenter ka comment).
-      segmenter.push(peak ? peak.hz : null);
-      if (segmenter.done) {
-        const code = segmenter.code;
-        stopChirpListen();
-        const input = $('beaconCode');
-        if (input) input.value = code;
-        beaconProofChannel = relayRequested ? 'relay' : 'chirp';
-        setChirpListenStatus(`✅ Code mil gaya: ${code}. Ab "Mark attendance" dabayein.`);
-        toast('Code mil gaya ✓', 'ok');
-        return;
-      }
-      if (segmenter.count) setChirpListenStatus(`Sun raha hoon… ${segmenter.count}/6 digits mile`);
-    }, 40);
-
-    // ~7 second tak kuch na mile to maan lete hain ki student peeche baitha hai
-    // (teacher ki awaaz tak nahi pahunch rahi). Hum ek already-verified dost se
-    // WAHI chirp EK BAAR bajwa dete hain — mic khula rehta hai, isliye jab relay
-    // bajta hai to code khud bhar jata hai. Ek waqt me ek hi phone bajta hai.
-    relayTimer = setTimeout(async () => {
-      if (!chirpListening || segmenter.count) return;
-      relayRequested = true;
-      setChirpListenStatus('Yahan awaaz kam hai — ek dost se relay karwa rahe hain…');
-      const r = await requestRelay({
-        code: $('code').value.trim(),
-        class_name: $('className') ? $('className').value.trim() : '',
-        subject: $('subject') ? $('subject').value.trim() : '',
-        course_type: $('courseType') ? $('courseType').value.trim() : '',
-        system: currentSystem(),
-      });
-      if (!chirpListening) return;
-      if (r.ok) {
-        setChirpListenStatus('Relay ka intezaar… dost ke phone se chirp aayega.');
-        // Relay ko mauka dene ke liye listening window thoda lamba kar do.
-        if (graceTimer) clearTimeout(graceTimer);
-        graceTimer = setTimeout(() => {
-          if (!chirpListening) return;
-          stopChirpListen();
-          setChirpListenStatus('Relay se bhi nahi mila. Teacher se dobara bajane ko kahiye, ya code type kar dein.');
-        }, 22000);
-      } else {
-        setChirpListenStatus('Relay available nahi — teacher se dobara bajane ko kahiye, ya code type kar dein.');
-      }
-    }, 7000);
-
-    // 15 second me kuch nahi mila to chhod do — warna mic on reh jata hai aur
-    // student ko lagta hai kuch ho raha hai.
-    graceTimer = setTimeout(() => {
-      if (chirpListening) {
-        stopChirpListen();
-        setChirpListenStatus('Chirp nahi sunai diya. Teacher se dobara bajane ko kahiye, ya code type kar dein.');
-      }
-    }, 15000);
-  } catch (err) {
-    stopChirpListen();
-    setChirpListenStatus('Mic ka permission nahi mila — code type kar dein (ya browser me mic allow karein).');
-  }
-}
-
-/* ---------- RELAY: chirp BAJANA (student side) ----------
-   Wahi 9.0-11.2 kHz sequence jo teacher bajata hai — par yahaan sirf tab jab
-   server kahe ki koi peeche baitha dost madad maang raha hai. Verification
-   server par hota hai; ye sirf AWAAZ hai, koi naya code nahi. */
-let chirpPlayCtx = null; // ek hi AudioContext (Safari baar-baar banane par dhamaka karta hai)
-function getChirpPlayCtx() {
-  if (!chirpPlayCtx) {
-    const Ctor = window.AudioContext || window.webkitAudioContext;
-    if (!Ctor) return null;
-    try { chirpPlayCtx = new Ctor(); } catch (err) { return null; }
-  }
-  return chirpPlayCtx;
-}
-// Submit tap ke ANDAR call karte hain — iOS/Chrome par pehla play user-gesture
-// ke bina block hota hai, aur baad me programmatic play chalta rahe.
-function unlockChirpAudio() {
-  const ctx = getChirpPlayCtx();
-  if (ctx && ctx.state === 'suspended') { try { ctx.resume(); } catch (err) {} }
-}
-async function playChirpSpec(spec) {
-  const ctx = getChirpPlayCtx();
-  if (!ctx) return false;
-  if (ctx.state === 'suspended') { try { await ctx.resume(); } catch (err) {} }
-  const seq = (spec && spec.sequence) || [];
-  if (!seq.length) return false;
-  let t = ctx.currentTime + 0.06;
-  seq.forEach((tone) => {
-    const dur = Math.max(0.05, (Number(tone.ms) || 150) / 1000);
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = Number(tone.hz) || 0;
-    // Envelope ZAROORI hai — seedha on/off par speaker "click" karta hai aur us
-    // broadband click ko sasti mic digit samajh sakti hai (teacher page jaisa).
-    gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(0.85, t + 0.012);
-    gain.gain.setValueAtTime(0.85, t + Math.max(0.012, dur - 0.012));
-    gain.gain.linearRampToValueAtTime(0, t + dur);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(t);
-    osc.stop(t + dur + 0.02);
-    t += dur + (Number(spec.gap_ms) || 40) / 1000;
-  });
-  return true;
-}
-
-// Requester: server se ek relay request rakhte hain (peeche baitha student).
-async function requestRelay(p) {
-  try {
-    const res = await fetch('/api/student/relay-request', {
+    const res = await fetch('/api/student/verify-code', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        device_id,
-        code: p.code,
-        class_name: p.class_name,
-        subject: p.subject,
-        course_type: p.course_type,
-        system: p.system,
-      }),
+      body: JSON.stringify({ code, roll_no: roll, verify_code: entered, device_id }),
     });
     const data = await res.json().catch(() => ({}));
-    return { ok: res.ok && data.ok === true };
+    if (!res.ok || !data.success) {
+      showVerifyError(data.error || 'Code verify nahi hua.');
+      // Galat code: input saaf karke focus wapas (student naya try kare).
+      if (modalInput) { modalInput.value = ''; modalInput.focus(); }
+      if (sectionInput) sectionInput.value = '';
+      return;
+    }
+    onVerifyApproved(entered, Number(data.approved) || 0);
   } catch (err) {
-    return { ok: false };
+    showVerifyError('Internet nahi hai. Dobara try karein.');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Verify'; }
+    if (sectionBtn) { sectionBtn.disabled = false; sectionBtn.textContent = '✓ Verify aur attendance approve karo'; }
   }
 }
 
-/* ---------- RELAY STANDBY (verified phone ki madad) ----------
-   Apni attendance ban gayi — ab agar koi peeche wala sun nahi pa raha, to
-   server humein bolega aur hum WAHI chirp EK BAAR bajayenge. Poll sirf tab
-   chalta hai jab page aage ho (background me bajana bekaar). */
-let relayStandbyTimer = null;
-let relayStandbyInfo = null;
-let relayWakeLock = null;
-let relayPlaying = false;
-
-function setRelayStandbyStatus(msg) {
-  const el = $('relayStandbyStatus');
-  if (el) { el.textContent = msg || ''; el.classList.toggle('hide', !msg); }
+// Error dono jagah (pop-up + section) dikhata hai, aur dono se saaf karta hai.
+function showVerifyError(msg) {
+  const errEl = $('verifyModalErr');
+  if (errEl) { errEl.textContent = msg; errEl.classList.remove('hide'); }
+  const serr = $('verifyErr');
+  if (serr) { serr.textContent = msg; serr.classList.remove('hide'); }
 }
 
-async function startRelayStandby(info) {
-  if (!info || !info.code || !info.class_name || !info.subject || !info.course_type) return;
-  stopRelayStandby(); // purana (kisi aur session ka) standby hata do
-  relayStandbyInfo = info;
-  // Screen on rakhne ki koshish (best-effort) — screen band = audio suspend.
-  try {
-    if (navigator.wakeLock && navigator.wakeLock.request) relayWakeLock = await navigator.wakeLock.request('screen');
-  } catch (err) { /* best-effort */ }
+// ---- Sahi code mila -> attendance approve ----
+function onVerifyApproved(entered, approved) {
+  closeModal('verifyModal');
+  const sectionInput = $('verifyCodeInput');
+  if (sectionInput) sectionInput.value = '';
+  const roll = String($('rollNo').value.trim());
+
+  showResult('ok', 'Attendance approved! 🎉',
+    approved > 0
+      ? 'Aapka naya code sahi tha — attendance count ho gayi hai.'
+      : 'Aapki attendance pehle se count me thi. Code sahi tha!',
+    [['Roll Number', roll], ['Verified code', entered], ['Approved entries', String(approved)]]);
+  toast('Attendance approved ✓', 'ok');
+
+  // Chip "done", section ko update — double-submit avoid.
+  const chip = $('verifyChip');
+  if (chip) { chip.textContent = 'Approved'; chip.className = 'chip chip-ok'; }
+  const sub = $('verifySub');
+  if (sub) sub.textContent = 'Code verify ho gaya — aapki attendance count ho gayi hai.';
+  const note = $('verifyTimerNote');
+  if (note) note.textContent = '';
+}
+
+/* ---- Poll: teacher ne naya code banaya ya nahi? ----
+   Ye halka poll student ke phone par chalta hai jab tak code nahi aata.
+   Server sirf boolean (`verify_needed`) bhejta hai — CODE kabhi nahi, warna
+   koi valid attendance code rakh kar poll karte reh kar code nikal le sakta.
+   Ye bhi purane "beacon peek" ki jagah hai. */
+let verifyPollTimer = null;
+async function startVerifyPoll() {
+  if (verifyPollTimer) return;
   const tick = async () => {
-    const s = relayStandbyInfo;
-    if (!s || relayPlaying || document.hidden) return;
+    if (document.hidden) return;
+    const code = String($('code').value.trim());
+    if (!/^[0-9]{5}$/.test(code)) return;
     try {
-      const q = new URLSearchParams({
-        device_id, code: s.code, class_name: s.class_name, subject: s.subject,
-        course_type: s.course_type, system: s.system || '',
+      const res = await fetch('/api/student/verify-status?code=' + encodeURIComponent(code), {
+        headers: { Accept: 'application/json' },
       });
-      const res = await fetch('/api/student/relay-duty?' + q.toString(), { headers: { Accept: 'application/json' } });
       const data = await res.json().catch(() => ({}));
-      if (!relayStandbyInfo) return;
-      if (data && data.play && data.chirp) {
-        relayPlaying = true;
-        setRelayStandbyStatus('🔊 Kisi dost ki madad kar rahe hain…');
-        const ok = await playChirpSpec(data.chirp);
-        await new Promise((r) => setTimeout(r, 2500));
-        relayPlaying = false;
-        setRelayStandbyStatus(ok ? '✅ Madad ho gayi — aap taiyaar ho.' : '⚠️ Awaz baj nahi payi (phone ki volume check karein).');
+      if (res.ok && data.verify_needed) {
+        // Naya code aa gaya -> pop-up. Poll band.
+        stopVerifyPoll();
+        onVerifyCodeReady();
       }
-    } catch (err) { /* net blip — agla tick */ }
+    } catch (err) {
+      // Net fail par chup-chaap agli tick ka intezaar — student block nahi hota.
+    }
   };
-  relayStandbyTimer = setInterval(tick, 4000);
-  // 10 minute baad khud band — class ke baad phone pe relay chalta rehna bekaar.
-  setTimeout(() => { if (relayStandbyInfo === info) stopRelayStandby(); }, 10 * 60 * 1000);
-  setRelayStandbyStatus('✅ Aapki attendance ban gayi — dost ki madad ke liye taiyaar (page khula rakhein).');
+  // Turant ek check, phir har 3s.
   tick();
+  verifyPollTimer = setInterval(tick, 3000);
 }
-
-function stopRelayStandby() {
-  if (relayStandbyTimer) { clearInterval(relayStandbyTimer); relayStandbyTimer = null; }
-  relayStandbyInfo = null;
-  relayPlaying = false;
-  try { if (relayWakeLock) { relayWakeLock.release(); relayWakeLock = null; } } catch (err) {}
-  setRelayStandbyStatus('');
+function stopVerifyPoll() {
+  if (verifyPollTimer) clearInterval(verifyPollTimer);
+  verifyPollTimer = null;
 }
-
-// Screen wapas aane par wake-lock dobara maangte hain (OS use release kar deta hai).
-document.addEventListener('visibilitychange', () => {
-  if (!relayStandbyInfo) return;
-  if (document.visibilityState === 'visible' && navigator.wakeLock && navigator.wakeLock.request) {
-    navigator.wakeLock.request('screen').then((wl) => { relayWakeLock = wl; }).catch(() => {});
-  }
-});
-
-
-$('code').addEventListener('input', () => {
-  const v = $('code').value.trim();
-  if (v.length === 5) peekBeaconNeeded(v);
-  // Code badal gaya to purana peek result bekaar — naya code dobara check hoga.
-  else if (beaconPeekCache.code !== v) {
-    beaconPeekCache = { code: v, needed: false, done: false };
-    $('beaconField') && $('beaconField').classList.add('hide');
-  }
-});
-
 /* ---------- platform help (iOS vs Android steps) ---------- */
 function detectPlatform() {
   const ua = navigator.userAgent || '';
@@ -1113,7 +937,7 @@ async function fetchLocation(opts) {
 // bina zaroorat maangna bekaar tha (aur fail hone par student ko laal "Location
 // nahi mil paayi" error dikhta tha — jabki GPS ki zaroorat hi nahi thi). GPS
 // sirf tab maangte hain jab beacon-check bataye ki is session me location chahiye
-// (wo code daalte hi pata chal jata hai — dekho peekBeaconNeeded).
+// (wo code daalte hi pata chal jata hai — dekho peekSession).
 setPresence('warn', 'Location check zaroorat par hoga', 'Code daalte hi pata chal jayega ki is class me GPS chahiye ya nahi.');
 
 /* ---------- roll number → roster auto-fill + lock ---------- */
@@ -1183,14 +1007,6 @@ function gatherPayload() {
     course_type: $('courseType').value.trim(),
     major_subject: $('majorSubject').value.trim(),
     code: $('code').value.trim(),
-    // Beacon ON session me ye zaroori hai. Field hide ho tab bhi bhej dete
-    // hain (empty string) — server "missing" ko "beacon_wrong" se alag
-    // message de sakta hai, isliye student ko pata chale ki code bhool gaye.
-    beacon_code: ($('beaconCode') && $('beaconCode').value.trim()) || '',
-    // Kis channel se beacon proof aaya — 'manual' (type kiya) ya 'chirp' (mic
-    // ne suna). Server sirf audit ke liye rakhta hai; verification dono case
-    // me wahi verifyBeaconCode() karta hai.
-    beacon_channel: beaconProofChannel,
     client_flags: clientHintFlags(),
   };
 }
@@ -1203,14 +1019,9 @@ function validatePayload(p) {
   if (!p.system) return 'Annual ya Semester chunein.';
   if (!p.subject) return 'Subject chunein.';
   if (!p.course_type) return 'Course type chunein.';
-  // Beacon field tab dikhegi jab teacher ka session beacon ON rakhta hai.
-  // Sirf tab mandatory — beacon OFF session me ise chhodna theek hai.
-  const beaconEl = $('beaconCode');
-  if (beaconEl && !$('beaconField').classList.contains('hide')) {
-    if (!/^[0-9]{6}$/.test(p.beacon_code)) {
-      return 'Board par dikha 6-digit BEACON code bhi daalein — bina iske attendance nahi banegi.';
-    }
-  }
+  // Beacon ka koi field nahi — naya "New Code" step-3 me aata hai (pop-up),
+  // aur wo sirf tab aata hai jab teacher code banata hai. Yahan iski zaroorat
+  // nahi: pehle "Mark Attendance" se pending entry ban jaati hai.
   return null;
 }
 
@@ -1320,10 +1131,6 @@ async function attemptSubmit(payload, retries) {
 let submitting = false;
 async function confirmSubmit() {
   if (submitting) return; // double-tap guard
-  // Sound bajane ke liye iOS/Chrome ko ek user-gesture chahiye. Ye Submit ka tap
-  // wahi gesture hai — yahin AudioContext unlock kar lete hain, taaki baad me
-  // relay (agar dena pade) browser block kiye bina baj sake.
-  unlockChirpAudio();
   const p = gatherPayload();
   const btn = $('confirmBtn');
   const errEl = $('confirmErr');
@@ -1337,44 +1144,10 @@ async function confirmSubmit() {
   btn.innerHTML = '<span class="spinner"></span> Checking location…';
   errEl.classList.add('hide');
 
-  // BEACON galat: server ne mana kar diya (student class me nahi hai). Ye
-  // RETRYABLE hai (code 45s me naya ho jayega), isliye student ko naya code
-  // dekhkar dobara bhejne ko kehte hain — teacher ke approve ka wait karne ki
-  // zaroorat NAHI hai. (Attendance delete/pending nahi hui — kuch save nahi hua.)
-  const handleBeaconError = (data) => {
-    const field = $('beaconField');
-    const input = $('beaconCode');
-    // Server ka reason hi source of truth hai. Pehle ye check field-visibility
-    // par thi — par peek request net fail hone par field chhupa deta hai, aur
-    // tab BEACON wala error bhi quietely chhup jaata tha (student ko kuch
-    // pata nahi chalta tha). Ab reason dekhte hain, field ko best-effort
-    // dikhate hain.
-    if (data.reason !== 'beacon_wrong' && data.reason !== 'beacon_over') return false;
-    const wait = Math.max(5, Math.round((Number(data.retry_after_ms) || 45000) / 1000));
-    const msg = data.reason === 'beacon_over'
-      ? 'Class ka beacon time khatam ho gaya. Teacher se naya code maangein.'
-      : `Beacon code galat ya purana ho gaya. Board par naya code dekhein (wo ${wait} second me badlega) aur dobara submit karein.`;
-    errBox(msg);
-    toast('Beacon code galat — naya code daalein', 'warn', 9000);
-    // Field chhupi hui thi (peek request net fail hua tha) par server ne
-    // beacon_wrong bheja — yaani beacon ON hi hai. Isliye field chhupa kar
-    // rakhna student ko confuse karega; use dikha dete hain taaki wo retry
-    // kar sake. (Pehle yahan `return false` tha — student ko phir bhi koi
-    // message nahi milta tha.)
-    if (field) field.classList.remove('hide');
-    // Purana code saaf karke focus wapas — student ko wahi type karne na pade.
-    if (input) { input.value = ''; input.focus(); }
-    // Beacon time poora khatam: naye code ka wait karte hue bekaar dikhana
-    // behtar hai. SAATH hi peek-cache reset ZAROORI hai — warna teacher jab
-    // naya code dega, tab field khud se wapas nahi dikhegi (cache "done" hai),
-    // aur student ko lagga ki beacon band kar diya gaya. Isliye cache khaali
-    // kar dete hain taaki naye code par peek dobara chale.
-    if (data.reason === 'beacon_over') {
-      if (field) field.classList.add('hide');
-      beaconPeekCache = { code: '', needed: false, done: false };
-    }
-    return true;
-  };
+  // BEACON ERROR HANDLER REMOVED. Purane beacon flow me galat/expired beacon
+  // code par ye retryable error aata tha. Ab beacon nahi hai, isliye iski
+  // zaroorat nahi — naya "New Code" flow apna alag handle rakhta hai
+  // (submitVerifyCode + showVerifyError).
 
   try {
     // 1. Fresh GPS fix — SIRF jab session me location chahiye (default ab OFF).
@@ -1402,14 +1175,9 @@ async function confirmSubmit() {
     await spreadSubmitBurst();
     let result = await attemptSubmit(payload, 2);
 
-    // BEACON galat / khatam — server ne mark SAVE nahi kiya, isliye ye
-    // retryable hai. Pehle ye handler likha hi nahi gaya tha (define tha,
-    // call kabhi nahi hua) — matlab student ko raw "Beacon code galat" throw
-    // hota tha, field saaf nahi hota tha, aur wo 3 second tak confused rehta.
-    // Ab: message + field clear + focus wapas, taaki naya code daal sake.
-    if (result.reached && !result.data.success) {
-      if (handleBeaconError(result.data)) return;
-    }
+    // BEACON galat/khatam ka handler hata diya — naye flow me beacon jaisa
+    // koi hard-fail step nahi hai. Neeche ke "need_location" branch aur
+    // normal error handling hi ab kaam karte hain.
 
     // Server ne kaha "pehle GPS se koshish karo" (Koshish X/5) — matlab mark abhi
     // SAVE NAHI hua aur teacher ki list me bhi nahi gaya. Student ko yaheen rok
@@ -1446,37 +1214,26 @@ async function confirmSubmit() {
 
     if (result.data.success) {
       closeConfirm();
-      // Beacon session me, apni attendance ban jaane ke baad is phone se ek
-      // peeche baithe dost ki madad ho sakti hai (on-demand relay). Server
-      // batayega kab, aur ek waqt me ek hi phone bajta hai.
-      if (chirpParams) {
-        startRelayStandby({
-          code: p.code,
-          class_name: p.class_name,
-          subject: p.subject,
-          course_type: p.course_type,
-          system: p.system,
-        });
-      }
       if (result.data.pending) {
         const reason = result.data.pending_reason || '';
         const title =
-          reason === 'approval_mode' ? 'Location verified — approval pending' :
           reason === 'flagged' ? 'Teacher ke review par hai' :
-          'Teacher se approve karwao';
+          'Confirm ho gaya ✓';
         const msg =
-          reason === 'approval_mode'
-            ? 'Aap class ke andar the. Teacher ke approve karne par ye count hogi.'
-            : reason === 'flagged'
-              // Relay-shak wale case yahin aate hain. Student ko asli ilaaj
-              // batate hain: GPS ON rakhein — tab agali baar khud-ba-khud count
-              // hogi (teacher ko tap nahi karna padega). Ye 120 students me
-              // mass-pending rokne ke liye zaroori hai.
-              ? 'Aapki entry teacher ke Review tab me hai — wo confirm karenge to attendance count hogi. Agli baar turant count karane ke liye phone ka GPS/Location ON rakhein aur "Get location" dabayein (GPS band hone par system shak karta hai).'
-              : 'Aapki location verify nahi ho payi (net/GPS), isliye entry teacher ke paas chali gayi hai. Wo present mark karenge to attendance count hogi.';
-        showResult('warn', title, msg,
+          reason === 'flagged'
+            ? 'Aapki entry teacher ke Review tab me hai — wo confirm karenge to attendance count hogi.'
+            // Naye stage-2 flow ka MAIN message: student ka kaam ho gaya. Ab
+            // teacher sab confirm hone par "Generate New Code" dabayega, aur
+            // student ke phone par pop-up aayega. Usme code daalne par
+            // attendance approve ho jayegi.
+            : 'Aapki entry teacher ke paas pahunch gayi hai. Teacher jab sab students ke confirm hone par naya code banayenge, aapke phone par ek pop-up aayega — usme 6-digit code daalein, attendance approve ho jayegi.';
+        showResult('ok', title, msg,
           [['Roll Number', p.roll_no], ['Name', p.name], ['Subject', p.subject], ['Course Type', p.course_type]]);
-        toast(title, 'warn');
+        toast(title, 'ok');
+        // IMPORTANT: Naya code aane tak poll CHALU rakhte hain. Ye 3s par
+        // /api/student/verify-status hit karta hai aur jab teacher code banata
+        // hai, pop-up khul jaata hai. Tabhi poll band hota hai.
+        startVerifyPoll();
       } else {
         showResult('ok', 'Attendance marked!', 'Aapki attendance record ho gayi hai.',
           [['Roll Number', p.roll_no], ['Name', p.name], ['Class', p.class_name],

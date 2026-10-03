@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+?<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -188,33 +188,13 @@
           <p class="hint">Chhota window = code WhatsApp par share hokar bahar use hone ka mauka kam.</p>
         </div>
 
-        <!-- BEACON: attendance code to constant hota hai (WhatsApp par chal jata
-             hai). Beacon ek ROTATING code hai jo har 45s badalta hai aur sirf
-             teacher ke screen/projector par dikhta hai. Isi se pata chalta hai ki
-             student ABHI class me hai — ghar bait ke koi purana code nahi de
-             sakta. Beacon ON karne par students ko ye 6-character code type
-             karna padega. -->
-        <div class="field">
-          <div class="switch-row">
-            <div><div class="t">📡 Live beacon (rotating code)</div><div class="d" id="beaconSwitchNote">ON — students ko rotating code type karna hoga</div></div>
-            <label class="switch"><input type="checkbox" id="requireBeacon" checked onchange="updateBeaconNote()"><i></i></label>
-          </div>
-          <div id="beaconDurationWrap" class="mt-2">
-            <label class="label" for="beaconMinutes">Beacon kitni der chalega</label>
-            <select id="beaconMinutes" class="select">
-              <option value="40">40 minute</option>
-              <option value="45" selected>45 minute (default — ek period)</option>
-              <option value="50">50 minute</option>
-              <option value="60">60 minute (double period)</option>
-              <option value="90">90 minute (long lab)</option>
-            </select>
-            <p class="hint">Beacon time attendance code se thoda LAMBA rakhein — warna class khatam hone par students mark hi nahi kar payenge. <a href="#" onclick="beaconHelp(); return false;">Kaise kaam karta hai?</a></p>
-          </div>
-        </div>
-
+        <!-- BEACON REMOVED. Uski jagah stage-2 "New Code" flow hai — neeche
+             code card me "Generate New Code" button. Wahan teacher sab
+             students confirm hone ke baad ek 6-digit code banata hai jo
+             students ke phone par pop-up me aati hai. -->
         <div class="stack" style="gap:10px;">
           <div class="switch-row">
-            <div><div class="t">📍 Location check</div><div class="d" id="locSwitchNote">OFF — GPS optional (beacon hi kaafi hai)</div></div>
+            <div><div class="t">📍 Location check</div><div class="d" id="locSwitchNote">OFF — GPS optional (code + naya code kaafi hai)</div></div>
             <label class="switch"><input type="checkbox" id="requireLocation" onchange="saveSelection()"><i></i></label>
           </div>
           <div class="switch-row">
@@ -248,46 +228,47 @@
           <div class="muted fs-sm mt-1" id="codeCombo"></div>
         </div>
 
-        <!-- BEACON projector block: teacher ise projector/board par chala
-             sakta hai. Har 45 second me code badal jata hai, isliye purana code
-             screenshot karke ghar se use nahi ho sakta. -->
-        <div id="beaconBlock" class="hide" style="margin-top:14px; padding:14px; border:1px solid rgba(111,176,255,.35); border-radius:12px; background:rgba(111,176,255,.06);">
-          <div class="row between" style="align-items:center;">
-            <div>
-              <div style="font-size:.8rem; font-weight:700; color:var(--info); letter-spacing:.04em;">📡 LIVE BEACON — students ye code type karein</div>
-              <div class="muted fs-sm mt-1" id="beaconHint">Har 45 second me badalta hai. Ye screen projector par dikhayein.</div>
+        <!-- ============ STAGE-2: NEW CODE (beacon ka replacement) ============
+             Flow: students "Confirm" dabate hain -> unki entry teacher ke
+             pending list me chali jaati hai. Jab SAB students confirm ho
+             jaate hain, tab ye panel active hota hai aur teacher
+             "Generate New Code" dabata hai. Ek 6-digit code banti hai jo
+             students ke phone par pop-up me aati hai.
+
+             TIMER (20s vs 30s — dhyan se padhein):
+               * Neeche ka ring/text UI par sirf 20 SECOND dikhata hai.
+               * Asli code server par 30 SECOND valid rehta hai.
+             Dono alag values server se aati hain (verify_display_seconds /
+             verify_real_seconds), isliye frontend me koi hard-coded number
+             nahi hai. Server hi source of truth hai. -->
+        <div id="verifyPanel" class="hide" style="margin-top:14px; padding:14px; border:1px solid rgba(55,211,153,.35); border-radius:12px; background:rgba(55,211,153,.06);">
+          <div class="row between" style="align-items:center; gap:10px;">
+            <div class="grow">
+              <div style="font-size:.8rem; font-weight:700; color:var(--ok); letter-spacing:.04em;">🔐 STEP 2 — NEW CODE</div>
+              <div class="muted fs-sm mt-1" id="verifyHint">Sab students confirm hone ka intezaar hai…</div>
             </div>
-            <div class="mono" id="beaconCode" style="font-size:2.1rem; letter-spacing:.3em; font-weight:700; color:var(--info); min-width:170px; text-align:center;">------</div>
-          </div>
-          <div class="row between mt-2" style="gap:8px;">
-            <div class="progress grow" style="margin:0;"><i id="beaconBar" style="width:100%; background:var(--info);"></i></div>
-            <span class="muted fs-sm nowrap" id="beaconCountdown">--s</span>
-          </div>
-          <div class="row mt-2" style="gap:8px;">
-            <button type="button" class="btn btn-sm grow" onclick="openBeaconProjector()">📺 Projector mode</button>
-            <button type="button" class="btn btn-sm btn-ghost grow" onclick="copyBeacon()">Copy beacon</button>
+            <div class="ring-wrap" style="width:76px; flex:0 0 auto;">
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <circle class="track" cx="60" cy="60" r="52"></circle>
+                <circle class="bar" id="verifyRingBar" cx="60" cy="60" r="52" stroke-dasharray="326.7" stroke-dashoffset="0"></circle>
+              </svg>
+              <div class="mid"><div class="num" id="verifyRingTime" style="font-size:1.1rem;">--</div><div class="lbl">s</div></div>
+            </div>
           </div>
 
-          <!-- ================= SOUND CHIRP =================
-               Wahi beacon code, par SOUND ke through. Isse 120 students ko
-               6 digit type karne ki zaroorat nahi — phone khud sun kar bhar
-               leta hai. Band (9.0-11.2 kHz) jaan-boojh kar audible hai taaki
-               HAR phone/laptop ise handle kare (ultrasound par kai sasta
-               speaker 20-40 dB gir jata tha aur code milta hi nahi tha). -->
-          <div class="divider"></div>
-          <div style="font-size:.8rem; font-weight:700; color:var(--info); letter-spacing:.04em;">🔊 CHIRP — students ka phone khud sun lega</div>
-          <div class="muted fs-sm mt-1" id="chirpHint">
-            Ye code ko sound me badal kar bajata hai (9.0–11.2 kHz — HAR phone sun lega).
-            Laptop/PA speaker ki volume poori rakhein aur screen ki taraf rakhein.
+          <!-- Naya code + uska UI timer -->
+          <div id="verifyCodeBox" class="hide" style="margin-top:12px;">
+            <div class="center">
+              <div class="mono" id="verifyCodeDisplay" style="font-size:2.4rem; letter-spacing:.32em; font-weight:700; color:var(--ok);">------</div>
+              <div class="muted fs-xs mt-1">Students ke phone par ye pop-up aayega — wo yahi code daalenge.</div>
+            </div>
+            <div class="progress mt-2"><i id="verifyBar" style="width:0%; background:var(--ok);"></i></div>
           </div>
-          <div class="row mt-2" style="gap:8px;">
-            <button type="button" class="btn btn-sm grow" id="chirpBtn" onclick="playChirpNow()">🔊 Ek baar bajao</button>
-            <button type="button" class="btn btn-sm btn-ghost grow" id="chirpAutoBtn" onclick="toggleChirpAuto()">🔁 Auto (har 45s)</button>
-          </div>
-          <div class="muted fs-xs mt-1" id="chirpStatus">Taiyaar — jab code ready ho to bajayein.</div>
-          <div class="muted fs-xs mt-1">
-            Zaroori: <b>beech me kuch mat bolna</b> — awaaz chirp ko dabaa deti hai. Auto ON ho to
-            students ko sirf phone uthana hai, kuch type nahi karna.
+
+          <!-- Button sirf tab dikhta hai jab sab confirm ho jaayein -->
+          <button type="button" class="btn btn-ok btn-block mt-3 hide" id="verifyGenBtn" onclick="generateVerifyCode()">⚡ Generate New Code</button>
+          <div class="muted fs-xs mt-1" id="verifyNote">
+            UI par 20 second dikhega. Asli code server par 30 second valid rahega (network delay ke liye chhota buffer).
           </div>
         </div>
 
@@ -752,18 +733,9 @@
   </section>
 </div>
 
-<!-- ==================== MODALS ==================== -->
-<!-- BEACON PROJECTOR: fullscreen rotating code. Teacher ise projector/TV par
-     chala sakta hai — peeche baithe students bhi code padh lein. Ye ek
-     rotation/attempt ka live proof hai: ghar bait ke koi current code nahi
-     de sakta kyunki wo teacher ke screen par hi hai. -->
-<div class="beacon-projector" id="beaconProjector" role="dialog" aria-modal="true" aria-labelledby="bpLabel">
-  <button type="button" class="bp-close" onclick="closeBeaconProjector()">✕ Band karein</button>
-  <div class="bp-label" id="bpLabel">📡 CLASS BEACON — APNA CODE TYPE KARO</div>
-  <div class="bp-code" id="beaconProjectorCode">------</div>
-  <div class="bp-meta">Ye code <span id="beaconProjectorCount">--s</span> me badal jayega · <span id="beaconProjectorCombo">—</span></div>
-</div>
-
+<!-- BEACON PROJECTOR REMOVED (fullscreen rotating-code view). Naya stage-2
+     "New Code" code seedha teacher ke screen par 20 second dikhta hai, jo
+     students apne phone ke pop-up me daalte hain. -->
 <div class="modal" id="generateModal" role="dialog" aria-modal="true" aria-labelledby="genTitle">
   <div class="sheet">
     <div class="sheet-grab"></div>
@@ -1171,10 +1143,6 @@ function saveSelection() {
       expiry_minutes: $('expiryMinutes').value,
       require_approval: $('requireApproval').checked,
       send_pdf: $('autoSendPdf').checked,
-      // Beacon prefs bhi save: reload ke baad teacher ko dobara toggle nahi
-      // karna padta.
-      require_beacon: $('requireBeacon').checked,
-      beacon_minutes: $('beaconMinutes').value,
     }));
   } catch (err) {}
 }
@@ -1194,13 +1162,7 @@ function restoreSelection() {
     if (saved.expiry_minutes) $('expiryMinutes').value = saved.expiry_minutes;
     if (typeof saved.require_approval === 'boolean') $('requireApproval').checked = saved.require_approval;
     if (typeof saved.send_pdf === 'boolean') $('autoSendPdf').checked = saved.send_pdf;
-    if (typeof saved.require_beacon === 'boolean') $('requireBeacon').checked = saved.require_beacon;
-    if (saved.beacon_minutes) $('beaconMinutes').value = saved.beacon_minutes;
-    // Duration sirf tab dikhe jab beacon ON ho — warna UI confusing lagega.
-    $('beaconDurationWrap').classList.toggle('hide', !$('requireBeacon').checked);
-    $('beaconSwitchNote').textContent = $('requireBeacon').checked
-      ? 'ON — students ko rotating code type karna hoga'
-      : 'OFF — sirf GPS check (ghar se mark ho sakta hai)';
+    // Beacon prefs hata diye — ab koi restore karne ki zaroorat nahi.
   } catch (err) {}
 }
 function saveActiveSession(data) {
@@ -1289,9 +1251,8 @@ function updateReportLabel() {
 const RING_CIRCUMFERENCE = 326.7; // 2πr, r = 52
 
 function updateTimer() {
-  // Beacon countdown bhi 1-second tick par update ho — students ka panel aur
-  // projector ek hi timer se chalenge, isliye do alag intervals nahi.
-  if (beaconActive) updateBeaconCountdown();
+  // Attendance code ka main countdown (stage-2 "New Code" ka apna 1-second
+  // timer alag chalata hai — tickVerifyUi).
   if (!expiryTimestamp) return;
   const remaining = Math.max(0, Math.round((expiryTimestamp - Date.now()) / 1000));
   const m = Math.floor(remaining / 60);
@@ -1369,17 +1330,16 @@ async function refreshSessionStatus(sessionId) {
   // Countdown timer ko chhue bina: live feed sirf chalte session me poll karti hai.
   if (data.active) {
     startLivePoll();
-    // Beacon ON session me rotating code polling shuru — students ko code
-    // dikhna zaroori hai warna wo mark hi nahi kar payenge.
-    if (data.beacon_required) startBeaconLoop(); else stopBeaconLoop();
-    $('requireBeacon').checked = data.beacon_required === true;
-    $('beaconSwitchNote').textContent = data.beacon_required
-      ? `ON — code har ${Math.round((data.slot_ms || 45000) / 1000)}s badalta hai`
-      : 'OFF — sirf GPS check (ghar se mark ho sakta hai)';
-    $('beaconDurationWrap').classList.toggle('hide', !data.beacon_required);
+    // Stage-2 flow: rotating-code polling ki jagah halka "sab confirm?" poll.
+    // Ye button dikhata hai ki teacher "Generate New Code" dabba sakta hai ya nahi.
+    renderVerifyPanel(Object.assign({ active: true }, data));
+    pollVerifyReadiness();
+    verifyPollTimer = setInterval(pollVerifyReadiness, 5000);
   } else {
     stopLivePoll();
-    stopBeaconLoop();
+    if (verifyPollTimer) clearInterval(verifyPollTimer);
+    verifyPollTimer = null;
+    renderVerifyPanel({ active: false });
   }
   return data;
 }
@@ -1397,293 +1357,197 @@ async function restoreActiveSession() {
 }
 
 /* =====================================================================
-   BEACON (live rotating code)
-   Attendance code constant hota hai — wo WhatsApp par chal jata hai. Beacon
-   uska "ABHI class me ho" proof hai: server har 45 second me ek naya code
-   banata hai jo sirf teacher ke screen par dikhta hai. Student ko wo current
-   code type karna padta hai, isliye:
-     - ghar bait ke koi purana code kaam nahi karta
-     - purani class ka code naye class me kaam nahi karta
-   Teacher har 45s par ek chhota GET karta hai (lightweight, koi DB write nahi).
+   STAGE-2 — "NEW CODE" (beacon ka poora replacement)
+   ---------------------------------------------------------------------
+   Flow:
+     1. Teacher attendance code banata hai (default 7 minute) — upar.
+     2. Students "Confirm" dabate hain -> entry PENDING list me jaati hai.
+     3. Sab confirm hone par "Generate New Code" button ACTIVE ho jaata hai.
+     4. Teacher dabata hai -> 6-digit code. UI par 20s, server par 30s valid.
+     5. Students ke phone par pop-up; sahi code = attendance approved.
+
+   ---- 20s (UI) vs 30s (REAL) — SABSE IMPORTANT PART ----
+   Teacher ke screen par sirf `verifyDisplaySec` (20s) dikhata hai.
+   Server par code `verifyRealSec` (30s) tak valid rehta hai.
+   Ye do alag hain JAAN-BOOJH kar:
+     - UI timer 20 par khatam hote hi teacher ko lagta hai code band.
+     - Server par 10 second ka chhota buffer bacha rehta hai — sirf network
+       latency / type karne me time ke liye. Wo 10s UI me KABHI nahi dikhte.
+   Isliye frontend me koi bhi number hard-code NAHI hai — dono server se
+   aate hain (verify_display_seconds / verify_real_seconds). Server hi
+   source of truth hai; frontend sirf dikhata hai.
    ===================================================================== */
-const BEACON_SLOT_MS_FALLBACK = 45000; // server se aata hai; yahin sirf fallback
-let beaconPollTimer = null;
-let beaconProjectorTimer = null;
-let beaconSlotMs = BEACON_SLOT_MS_FALLBACK;
-let beaconSlot = -1;
-let beaconSecretLive = '';
-let beaconActive = false;
-// Teacher ka "band" button / beacon-off session — iske baad polling nahi chalti.
-// (beaconActive se alag: wo sirf "code live hai" batata hai.)
-let beaconStopped = false;
-// Beacon-over warning ek hi baar dikhe, har 45s me dobara na aaye.
-let beaconOverWarned = false;
-// Last fetch par server ne kitne ms me next code bataya tha. Countdown hamesha
-// isme se "local elapsed time" minus karke banti hai — phone ki ghadi kitni bhi
-// galat ho, beacon ka timer sahi rahega.
-let beaconMsUntilNext = BEACON_SLOT_MS_FALLBACK;
-let beaconFetchedAt = 0;
 
-/* ----------------------------------------------------------------------
-   CHIRP PLAYER (Web Audio)
-   Beacon ka code sound me bajata hai. Wahi code jo screen par hai, isliye
-   verification server par wahi verifyBeaconCode() karta hai — naya crypto
-   nahi, sirf naya channel.
-   Kyun: 120 students ko 6 digit type karna slow hai. Band (9.0-11.2 kHz)
-   jaan-boojh kar audible hai taaki HAR phone/laptop ka speaker + mic ise
-   handle kare — ultrasound (16-18 kHz) par kai sasta speaker 20-40 dB gir
-   jata tha aur student ka phone code nikal hi nahi pata tha. */
-let beaconChirpLive = null; // server se aaya hua spec (hz + sequence)
-let chirpAutoTimer = null;
-let chirpCtx = null; // AudioContext ek hi baar banao — baar-baar banane par Safari dhamaka karta hai
+// Server se aayi hui UI timing. Defaults sirf tab jab field na mile.
+let verifyDisplaySec = 20;   // UI par kitne second DIKHAANE hain (20)
+let verifyRealSec = 30;      // server par kitne second VALID hai (30)
+// UI countdown ka deadline. Ye server ke REAL expiry se banti hai, par
+// display duration se clamp hoti hai (startVerifyUi dekhein).
+let verifyDeadlineMs = 0;
+let verifyTimer = null;
+let verifyPolling = false;
+// "Sab confirm ho gaya?" ka halka poll timer (5s). Purane beacon-loop ki jagah.
+let verifyPollTimer = null;
+// Server se aaya hua last live state (button visibility + roster info).
+let verifyState = { all_confirmed: false, pending_count: 0, roster_size: 0, unverified_roster: false };
 
-function getChirpCtx() {
-  if (!chirpCtx) {
-    const Ctor = window.AudioContext || window.webkitAudioContext;
-    if (!Ctor) return null;
-    try { chirpCtx = new Ctor(); } catch (err) { return null; }
-  }
-  return chirpCtx;
-}
-
-function setChirpStatus(msg) {
-  const el = $('chirpStatus');
+function setVerifyHint(msg) {
+  const el = $('verifyHint');
   if (el) el.textContent = msg;
 }
 
-// Spec ke sequence ko beep-beep karke bajata hai. Hamesha ek hi AudioContext
-// use karte hain; suspended ho to resume (iOS par pehla play user-gesture ke
-// andar hi hota hai, isliye button click se kaam kar jata hai).
-async function playChirpSpec(spec) {
-  const ctx = getChirpCtx();
-  if (!ctx) return false;
-  if (ctx.state === 'suspended') {
-    try { await ctx.resume(); } catch (err) { /* neeche handle */ }
+// 1-second UI tick — ring/bar/text update. Asli validity server par hai;
+// ye sirf teacher ke screen par dikhata hai.
+function tickVerifyUi() {
+  if (!verifyDeadlineMs) return;
+  const leftSec = Math.ceil(Math.max(0, verifyDeadlineMs - Date.now()) / 1000);
+
+  const ringTime = $('verifyRingTime');
+  if (ringTime) ringTime.textContent = String(leftSec);
+  const bar = $('verifyBar');
+  if (bar) bar.style.width = Math.min(100, (leftSec / verifyDisplaySec) * 100) + '%';
+  const ringBar = $('verifyRingBar');
+  if (ringBar) {
+    const ratio = Math.min(1, Math.max(0, leftSec / verifyDisplaySec));
+    ringBar.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE * (1 - ratio)));
+    ringBar.style.stroke = ratio <= 0.35 ? 'var(--err)' : 'var(--ok)';
   }
-  const seq = (spec && spec.sequence) || [];
-  if (!seq.length) return false;
-  let t = ctx.currentTime + 0.06; // thoda lead time — scheduler ko saans lene do
-  seq.forEach((tone) => {
-    const dur = Math.max(0.05, (Number(tone.ms) || 150) / 1000);
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = Number(tone.hz) || 0;
-    // Envelope ZAROORI hai: seedha on/off karne par speaker "click" karta hai
-    // aur us click me broadband energy hoti hai — jo sasti mic par digit
-    // jaisa lag sakta hai. 12 ms ramp se wo problem nahi hoti.
-    gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(0.85, t + 0.012);
-    gain.gain.setValueAtTime(0.85, t + Math.max(0.012, dur - 0.012));
-    gain.gain.linearRampToValueAtTime(0, t + dur);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(t);
-    osc.stop(t + dur + 0.02);
-    t += dur + (Number(spec.gap_ms) || 40) / 1000;
-  });
-  return true;
+  if (leftSec <= 0) {
+    // UI timer khatam. Server par abhi bhi kuch asli validity bacha hogi, par
+    // wo sirf latency ka buffer hai — naya window nahi. Teacher ko turant
+    // naya code banane ka option de dete hain.
+    clearVerifyTimer();
+    const box = $('verifyCodeBox');
+    if (box) box.classList.add('hide');
+    const btn = $('verifyGenBtn');
+    if (btn) btn.classList.remove('hide');
+    setVerifyHint('Code ka time khatam. Naya code generate karein.');
+  }
 }
 
-async function playChirpNow() {
-  if (!beaconChirpLive) {
-    setChirpStatus('Chirp ready nahi hai — pehle code generate karein.');
-    toast('Pehle attendance code generate karein.', 'warn');
+function clearVerifyTimer() {
+  if (verifyTimer) clearInterval(verifyTimer);
+  verifyTimer = null;
+  verifyDeadlineMs = 0;
+}
+// Naya code milne par UI timer chalu karta hai.
+//
+// `realMsLeft` = server par kitne ms BACHE hain (30s TTL se gina hua).
+// UI par hum sirf `verifyDisplaySec` (20s) dikhate hain, isliye deadline ko
+// min(realMsLeft, displaySec*1000) par clamp karte hain. Isse:
+//   - UI kabhi 20s se zyada nahi dikhega (teacher ko jhooth nahi),
+//   - server ka 30s buffer chhupa rahega (latency ke liye).
+function startVerifyUi(code, realMsLeft) {
+  clearVerifyTimer();
+  const displayMs = verifyDisplaySec * 1000;
+  verifyDeadlineMs = Date.now() + Math.max(0, Math.min(displayMs, realMsLeft));
+
+  const display = $('verifyCodeDisplay');
+  if (display) display.textContent = code;
+  const box = $('verifyCodeBox');
+  if (box) box.classList.remove('hide');
+  const btn = $('verifyGenBtn');
+  if (btn) btn.classList.add('hide'); // code chal raha hai -> button chhupa
+
+  setVerifyHint('Ye code students ke phone par pop-up me aayega.');
+  verifyTimer = setInterval(tickVerifyUi, 1000);
+  tickVerifyUi();
+}
+
+// Panel visibility + button state (poll ya session refresh se update).
+function renderVerifyPanel(data) {
+  const panel = $('verifyPanel');
+  if (!panel) return;
+  if (!data || data.active === false) {
+    panel.classList.add('hide');
+    clearVerifyTimer();
     return;
   }
-  const btn = $('chirpBtn');
-  if (btn) btn.disabled = true;
-  setChirpStatus('🔊 Baj raha hai… (students ke phone sun rahe hain)');
+  panel.classList.remove('hide');
+
+  // Sab confirm? Tabhi button active. Server ye bhi dobara check karta hai —
+  // UI ka check sirf jaldi feedback dene ke liye hai, security server par hai.
+  const all = data.all_confirmed === true;
+  const issued = data.verify_code_issued === true;
+  const btn = $('verifyGenBtn');
+  if (btn) {
+    btn.classList.toggle('hide', !all || issued);
+    btn.disabled = false;
+  }
+
+  const total = data.roster_size || 0;
+  if (issued) {
+    setVerifyHint('Code chal raha hai — students daal rahe hain…');
+  } else if (all) {
+    setVerifyHint(total
+      ? `Sab ${total} students confirm ho chuke hain. Naya code banayein.`
+      : 'Sab confirm ho chuke hain. Naya code banayein.');
+  } else {
+    setVerifyHint(total
+      ? `${data.confirmed_count || 0} / ${total} students confirm. Baaki ka intezaar…`
+      : 'Students se confirm karein, phir naya code banayein.');
+  }
+
+  verifyState = {
+    all_confirmed: all,
+    pending_count: data.pending_count || 0,
+    roster_size: total,
+    // Roster nahi hai to count-based check possible nahi — teacher khud
+    // confirm karega, isliye button dabate waqt force=true jayega.
+    unverified_roster: data.unverified_roster === true,
+  };
+}
+
+// Lightweight poll — sab confirm ho gaya ya nahi + code ki live state.
+// Pehle beacon-loop ki jagah hai, par bahut halka (ek GET, ~5s).
+async function pollVerifyReadiness() {
+  if (!activeSessionId || document.hidden || verifyPolling) return;
+  verifyPolling = true;
   try {
-    const ok = await playChirpSpec(beaconChirpLive);
-    if (!ok) {
-      setChirpStatus('Baj nahi paya — browser ne audio block kiya. Ek baar screen par tap karein.');
-      toast('Audio block hua. Ek baar tap karke dobara try karein.', 'warn');
+    const res = await teacherFetch('/api/teacher/verify-readiness?session_id=' + encodeURIComponent(activeSessionId));
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.found) renderVerifyPanel(Object.assign({ active: true }, data));
+  } catch (err) {
+    // Auth error par chup-chaap ruk jaata hai (login screen par hai).
+  } finally {
+    verifyPolling = false;
+  }
+}
+
+// "Generate New Code" ka click. Server se naya 6-digit code aata hai.
+async function generateVerifyCode() {
+  if (!activeSessionId) { toast('Pehle attendance code generate karein.', 'warn'); return; }
+  const btn = $('verifyGenBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Bana rahe hain…'; }
+  try {
+    // Roster nahi hai to force=true (teacher khud confirm kar chuka hai ki sab
+    // aa gaye). Roster hai to server force IGNORE karta hai — safety ke liye.
+    const force = verifyState.unverified_roster === true;
+    const res = await teacherFetch('/api/teacher/verify-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: activeSessionId, force }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      toast(data.error || 'Naya code nahi ban paya.', 'err', 6000);
+      if (btn) btn.classList.remove('hide');
       return;
     }
-    const ms = beaconChirpLive.total_ms || 2000;
-    setChirpStatus(`✅ Baj gaya (${(ms / 1000).toFixed(1)}s). Code ${beaconSecretLive} bheja gaya.`);
-  } finally {
-    setTimeout(() => { if (btn) btn.disabled = false; }, 500);
-  }
-}
+    // Server se UI/REAL timing dono lo — frontend me hard-code kuch nahi hai.
+    if (data.verify_display_seconds) verifyDisplaySec = data.verify_display_seconds;
+    if (data.verify_real_seconds) verifyRealSec = data.verify_real_seconds;
 
-// Auto: har 45 second (beacon slot ke saath) chirp bajata hai. Isse teacher
-// ko baar-baar button dabana nahi padta, aur jo student late aaya wo agle
-// chirp par khud pakad leta hai.
-function toggleChirpAuto() {
-  if (chirpAutoTimer) {
-    stopChirpAuto('Auto band kar diya.');
-    return;
-  }
-  if (!beaconChirpLive) {
-    toast('Pehle attendance code generate karein.', 'warn');
-    return;
-  }
-  const btn = $('chirpAutoBtn');
-  if (btn) { btn.textContent = '⏹ Auto band karo'; btn.classList.add('btn-ok'); }
-  setChirpStatus('🔁 Auto ON — har 45 second me khud bajega.');
-  playChirpNow();
-  chirpAutoTimer = setInterval(() => {
-    // Session band ho gaya to auto apne aap ruk jaye — warna screen band hone
-    // ke baad bhi bajta rehta hai (aur free Render instance ko jagata rehta hai).
-    if (beaconStopped || !beaconChirpLive) { stopChirpAuto('Session band — auto ruk gaya.'); return; }
-    playChirpNow();
-  }, BEACON_SLOT_MS_FALLBACK);
-}
-
-function stopChirpAuto(msg) {
-  if (chirpAutoTimer) { clearInterval(chirpAutoTimer); chirpAutoTimer = null; }
-  const btn = $('chirpAutoBtn');
-  if (btn) { btn.textContent = '🔁 Auto (har 45s)'; btn.classList.remove('btn-ok'); }
-  if (msg) setChirpStatus(msg);
-}
-
-// Beacon toggle ka note + duration dropdown ka visibility.
-function updateBeaconNote() {
-  const on = $('requireBeacon').checked;
-  $('beaconSwitchNote').textContent = on
-    ? 'ON — students ko rotating code type karna hoga'
-    : 'OFF — sirf GPS check (ghar se mark ho sakta hai)';
-  $('beaconDurationWrap').classList.toggle('hide', !on);
-  saveSelection();
-}
-
-// Beacon poora band karne par projector/panel turant band.
-function stopBeaconLoop() {
-  if (beaconPollTimer) { clearTimeout(beaconPollTimer); beaconPollTimer = null; }
-  if (beaconProjectorTimer) { clearInterval(beaconProjectorTimer); beaconProjectorTimer = null; }
-  beaconStopped = true;
-  beaconActive = false;
-  beaconSlot = -1;
-  beaconSecretLive = '';
-  // Auto chirp bhi band — warna session khatam hone ke baad bhi speaker
-  // bajta rehta hai (aur teacher ko lagta hai beacon zinda hai).
-  stopChirpAuto('');
-  beaconChirpLive = null;
-  closeBeaconProjector();
-  if ($('beaconBlock')) $('beaconBlock').classList.add('hide');
-}
-
-// Server se current slot ka code le kar UI update karta hai.
-// NOTE: gate me `beaconActive` NAHI dekhna — wo tab set hota hai jab pehla
-// response render hota hai. Pehle yahi bug tha: startBeaconLoop() se
-// pollBeaconOnce() call hoti thi, jo `!beaconActive` par turant return kar
-// deta tha — matlab beacon kabhi start hi nahi hota tha. Ab sirf
-// `beaconStopped` (teacher ne band kiya) check karte hain.
-async function pollBeaconOnce() {
-  if (!activeSessionId || beaconStopped) return;
-  try {
-    const res = await teacherFetch('/api/teacher/beacon?session_id=' + encodeURIComponent(activeSessionId));
-    if (res.status === 404) { stopBeaconLoop(); return; }
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.error) { stopBeaconLoop(); return; }
-    if (data.beacon_required === false) { stopBeaconLoop(); return; }
-    renderBeacon(data);
-    // Server batata hai kitne ms me next slot aayega — hum uske thoda pehle
-    // poll karte hain taaki screen par stale code na dikhe.
-    const next = Math.max(1500, (data.ms_until_next || beaconSlotMs) - 1200);
-    beaconPollTimer = setTimeout(pollBeaconOnce, next);
+    // UI sirf 20s dikhayega (display timer); server ki asli 30s validity
+    // chhupi rahegi — startVerifyUi deadline ko displaySec par clamp karta hai.
+    startVerifyUi(data.verify_code, Number(data.verify_ms_left) || verifyRealSec * 1000);
+    toast('Naya code ban gaya — students ko board par dikhayein.', 'ok', 5000);
+    refreshSessionStatus(activeSessionId);
   } catch (err) {
-    // Network hiccup: 3 second me retry. Beacon zinda rehna chahiye, warna
-    // students class me khade rahenge aur mark nahi kar payenge.
-    // Gate me `beaconActive` NAHI — wo tab set hota hai jab pehla response
-    // render hota hai. Yahan check karte to pehle fetch fail = retry hi nahi
-    // hota, aur beacon hamesha ke liye dead reh jata tha.
-    if (!beaconStopped) beaconPollTimer = setTimeout(pollBeaconOnce, 3000);
+    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ Generate New Code'; }
   }
-}
-
-function renderBeacon(data) {
-  beaconActive = true;
-  beaconSecretLive = data.beacon_code || '';
-  beaconSlotMs = data.slot_ms || BEACON_SLOT_MS_FALLBACK;
-  // Countdown server ke bheje hue ms_until_next se chalti hai — iske liye hum
-  // apna local clock bilkul use NAHI karte. (Pehle yahan `serverNow` se gina
-  // jata tha, jisme clock offset ghar-tha-hai wala bug tha: phone ki ghadi 10
-  // minute aage ho to countdown "45s - 10min" = 0 par atak jata tha.)
-  beaconMsUntilNext = Number(data.ms_until_next) || beaconSlotMs;
-  beaconFetchedAt = Date.now();
-  if ($('beaconBlock')) $('beaconBlock').classList.remove('hide');
-  if ($('beaconCode')) $('beaconCode').textContent = beaconSecretLive || '------';
-  // Chirp spec (server se aata hai) — teacher page isi se sound bajata hai.
-  // Wahi code jo screen par hai, sirf sound me. Server ne `hz`/`sequence`
-  // diya hai taaki playback aur decode kabhi out-of-sync na hon.
-  beaconChirpLive = data.chirp || null;
-  updateBeaconCountdown();
-  // Beacon khatam hone par saaf message. Do alag cases hain, dono ko ek jaisa
-  // message dene se teacher confuse hota tha:
-  //  - code_expired: attendance code bhi khatam -> dono naye banane padenge
-  //  - sirf beacon khatam: code zinda, par students mark nahi kar sakte
-  // Polling CHALU rakhte hain taaki teacher naya code generate kar sake.
-  if ((data.beacon_over || data.code_expired) && !beaconOverWarned) {
-    beaconOverWarned = true;
-    toast(
-      data.code_expired
-        ? 'Attendance code aur beacon dono khatam ho gaye. Naya code generate karein.'
-        : 'Beacon time khatam — attendance code zinda hai par ab koi mark nahi kar sakta. Naya code generate karein.',
-      'warn',
-      9000
-    );
-  }
-}
-
-function updateBeaconCountdown() {
-  if (!beaconActive || !beaconSecretLive) return;
-  // Sirf "kitna time guzra" count karte hain (Date.now() - beaconFetchedAt).
-  // Server ne kitna time bacha tha wo beaconMsUntilNext se aata hai — hum
-  // kabhi apni ghadi se server ka time derive NAHI karte, warna phone ki ghadi
-  // galat ho to countdown 0 par atak jata tha.
-  const elapsed = Date.now() - beaconFetchedAt;
-  const left = Math.max(0, beaconMsUntilNext - elapsed);
-  const secs = Math.ceil(left / 1000);
-  if ($('beaconCountdown')) $('beaconCountdown').textContent = secs + 's';
-  if ($('beaconBar')) $('beaconBar').style.width = Math.min(100, (left / beaconSlotMs) * 100) + '%';
-}
-
-// Session ke shuru me beacon ON hai to loop start.
-function startBeaconLoop() {
-  if (!activeSessionId) return;
-  // Naya session ya dobara ON kiya to pehle ka "stopped" flag saaf karo,
-  // warna polling turant return kar degi.
-  beaconStopped = false;
-  if (beaconPollTimer) { clearTimeout(beaconPollTimer); beaconPollTimer = null; }
-  pollBeaconOnce();
-}
-
-function copyBeacon() {
-  if (!beaconSecretLive) { toast('Abhi koi live beacon code nahi hai.', 'warn'); return; }
-  const text = `${beaconSecretLive}`;
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text)
-      .then(() => toast('Beacon copy: ' + text, 'ok'))
-      .catch(() => toast('Copy nahi hua. Code: ' + text, 'warn'));
-  } else { toast('Beacon code: ' + text, 'warn'); }
-}
-
-// Fullscreen projector view — phone/laptop ko board se chipka do, students
-// peeche baithe baith ke padh lein.
-function openBeaconProjector() {
-  if (!beaconSecretLive) { toast('Pehle code generate karein.', 'warn'); return; }
-  document.getElementById('beaconProjector').classList.add('open');
-  const combo = $('codeCombo');
-  if (combo && $('beaconProjectorCombo')) $('beaconProjectorCombo').textContent = combo.textContent || '—';
-  if (beaconProjectorTimer) clearInterval(beaconProjectorTimer);
-  beaconProjectorTimer = setInterval(() => {
-    const code = $('beaconProjectorCode');
-    const cd = $('beaconProjectorCount');
-    if (code) code.textContent = beaconSecretLive || '------';
-    if (cd) cd.textContent = ($('beaconCountdown') ? $('beaconCountdown').textContent : '--s');
-  }, 250);
-}
-function closeBeaconProjector() {
-  document.getElementById('beaconProjector').classList.remove('open');
-  if (beaconProjectorTimer) { clearInterval(beaconProjectorTimer); beaconProjectorTimer = null; }
-}
-
-function beaconHelp() {
-  toast('Beacon har 45s me badalta hai. Isi liye sirf class me baithe students mark kar sakte hain — ghar se purana code kaam nahi karta.', 'ok');
-  setTimeout(() => toast('Projector mode se board par dikhayein. Beacon time attendance code se lamba rakhein.', 'ok'), 3200);
 }
 
 /* =====================================================================
@@ -1715,10 +1579,9 @@ function openGenerateConfirm() {
     ['Subject', c.subject],
     ['Course type', c.course_type],
     ['Code window', $('expiryMinutes').value + ' minute'],
-    ['Location check', $('requireLocation').checked ? 'ON (GPS verified)' : 'OFF (sirf code + beacon — default)'],
+    ['Location check', $('requireLocation').checked ? 'ON (GPS verified)' : 'OFF (sirf code + naya code — default)'],
     ['Approval mode', $('requireApproval').checked ? 'ON (aapko approve karna hoga)' : 'OFF'],
     ['PDF email', $('autoSendPdf').checked ? 'ON' : 'OFF'],
-    ['Live beacon', $('requireBeacon').checked ? `ON — ${$('beaconMinutes').value} minute, har 45s code badlega` : 'OFF (sirf GPS)'],
   ];
   $('generateSummary').innerHTML = rows.map(([k, v]) => `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>`).join('');
   openModal('generateModal');
@@ -1746,10 +1609,7 @@ async function confirmGenerate() {
         require_approval: $('requireApproval').checked,
         send_pdf: $('autoSendPdf').checked,
         expiry_minutes: Number($('expiryMinutes').value),
-        // Beacon: teacher ka live proof ki student ABHI class me hai. Code
-        // har 45s badalta hai aur sirf uske screen par dikhta hai.
-        require_beacon: $('requireBeacon').checked,
-        beacon_minutes: Number($('beaconMinutes').value),
+        // Beacon params hata diye — stage-2 "New Code" flow default hai.
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -1757,9 +1617,8 @@ async function confirmGenerate() {
 
     closeModal('generateModal');
     saveSelection();
-    // Naya session = naya beacon. Purane session ka "over" warning ab
-    // galat hoga, isliye reset kar do ( warna teacher ko dobara warning milega).
-    beaconOverWarned = false;
+    // Naya session = naya stage-2 cycle (purana "New Code" state reset).
+    verifyState = { all_confirmed: false, pending_count: 0, roster_size: 0, unverified_roster: false };
     await refreshSessionStatus(data.session_id);
     saveActiveSession({ code: data.code, session_id: data.session_id, class_name: data.class_name, subject: data.subject, course_type: data.course_type, system: data.system });
     await loadSessions(data.session_id);
@@ -2659,27 +2518,33 @@ function teacherBusyForPopup() {
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// AUTO-POPUP REMOVED (naye flow me)
+// ---------------------------------------------------------------------------
+// Purana flow me naye pending aate hi ye sheet AUTOMATICALLY khul jati thi.
+// Ab aisa nahi hota: naye stage-2 flow me students ke "Confirm" karne par
+// unki entry ZAROORI pending me jaati hai (teacher ka approval hi asli
+// approval hai). Teacher side par koi chadakta pop-up nahi aayega — na
+// approve sheet, na koi alert.
+//
+// Students ke confirm karne ka matlab hai "maine attendance mark ki request
+// bhej di". Ab teacher ko sirf ye karna hai:
+//   1. Count dekhna ki sab aa gaye (STEP 2 panel),
+//   2. "Generate New Code" dabana,
+//   3. Students ke phone par pop-up se code daalna.
+// Isliye ye function jaan-boojh kar khaali chhod diya gaya hai — sirf
+// banner update hota hai, koi modal nahi khulta. Teacher chahe to "Review &
+// approve" button se MANUALLY sheet khol sakta hai.
 function scheduleAutoOpen(freshIds) {
-  if (!freshIds.length) return;      // purani list hai — popup mat kholo
-  if (pendingSheetOpen) return;      // khud hi khuli hai
-  if (teacherBusyForPopup()) return; // teacher kisi kaam me hai
-  if (pendingAutoOpenTimer) return;  // ek timer already queue me hai
-  // Chhota delay: ek saath 2-3 entry aaye to list poora render ho jaaye, aur
-  // teacher ko "popup chala gaya" ka shock na lage.
-  pendingAutoOpenTimer = setTimeout(() => {
-    pendingAutoOpenTimer = null;
-    if (pendingSheetOpen || teacherBusyForPopup()) return;
-    freshIds.forEach((id) => pendingSeenIds.add(id));
-    saveSeenPending();
-    openPendingSheet('auto');
-  }, PENDING_AUTO_OPEN_DELAY_MS);
+  // Purana behaviour: naye pending par sheet auto-open. Ab kuch nahi.
+  return;
 }
 
-// Banner + popup dono ka faisla yahan se hota hai, taaki har poll par dono
-// ek jaisi picture se chalein.
+// Banner + (ab koi popup nahi) — dono ka faisla yahan se hota hai.
 function applyPendingBannerAndMaybePopup(data) {
   applyPendingBanner(data);
-  scheduleAutoOpen(freshPendingIds(data && data.pending));
+  // scheduleAutoOpen() jaan-boojh kar nahi chala rahe — teacher ka screen
+  // ab kabhi unattended approve-sheet se dhakka nahi khayega.
 }
 
 /* =====================================================================
