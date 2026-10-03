@@ -268,7 +268,15 @@ const TEACHER_MAX_FAILED_LOGINS = Number(process.env.TEACHER_MAX_FAILED_LOGINS) 
 const CODE_EXPIRY_OPTIONS_MIN = [2, 5, 7];
 
 // Naya session by default manual-approval mode me khulega ya nahi (server-wide default).
-const REQUIRE_APPROVAL_DEFAULT = boolWithDefault(process.env.REQUIRE_APPROVAL_DEFAULT, false);
+// Approval mode default: STAGE-2 flow me ON hai.
+//
+// Naye code-based flow me ye OFF rakhna FATAL hai: students ki entry turant
+// "present" ho jayegi (decideMarkStatus line 2 — location OFF par presenceProof
+// = true), teacher ka "Generate New Code" button kabhi active nahi hoga, aur
+// student ke phone par pop-up kabhi nahi aayega. Matlab poora naya verification
+// hi bypass ho jayega.
+// Env se override kar sakte ho: REQUIRE_APPROVAL_DEFAULT=false
+const REQUIRE_APPROVAL_DEFAULT = boolWithDefault(process.env.REQUIRE_APPROVAL_DEFAULT, true);
 
 // Ek bhi anti-proxy flag (mock location, shared coordinates, reused device,
 // automation) lage to wo mark chup-chaap count nahi hoga — "pending" jayega
@@ -1361,14 +1369,19 @@ function computePercentages({ present, rawHeld, leaveDays }) {
 function decideMarkStatus({ requireApproval, autoReview, locationRequired, locationVerified, beaconVerified, gpsConflict, flags }) {
   const activeFlags = Array.isArray(flags) ? flags.filter(Boolean) : [];
   // 1) Teacher ne khud approval mode ON kiya -> sab pending.
+  //
+  // NAYE STAGE-2 FLOW KE LIYE YE ZAROORI HAI. Purane beacon flow me teacher
+  // approval ek OPTIONAL extra layer tha (default OFF), kyunki beacon code khud
+  // "abhi class me ho" ka proof tha. Ab beacon hata diya gaya hai, aur asli
+  // approval student ke phone par aaye NAYE CODE se hoti hai. Isliye ab har
+  // "Confirm" PENDING jaana zaroori hai — warna student turant "present" ho
+  // jayega, teacher ka "Generate New Code" button bekaar ho jayega, aur naya
+  // flow kuch bhi verify nahi karega (sirf formality ban jayegi).
   if (requireApproval === true) return { status: "pending", reason: "approval_mode" };
   // 2) PRESENCE PROOF.
-  //    Location ON  -> GPS YA beacon (koi ek kaafi).
+  //    Location ON  -> GPS verify (beacon ab nahi hai).
   //    Location OFF -> teacher ne GPS check hata diya, isliye GPS ki wajah se koi
-  //                    pending NAHI. Presence ka sahara beacon hai (session me ON
-  //                    ho to); warna valid code + device-lock hi gate hai. Default
-  //                    ab OFF hai — indoor GPS fail hone par genuine students
-  //                    pending me nahi jate (wahi bug tha).
+  //                    pending NAHI.
   const presenceProof = locationRequired
     ? (locationVerified === true || beaconVerified === true)
     : true;
@@ -2892,6 +2905,13 @@ app.get("/api/teacher/session-status", requireTeacherAuth, async (req, res) => {
       verify_issued_count: session.verify_issued_count || 0,
       verify_expires_at: session.verify_code_expires_at || 0,
       verify_ms_left: Math.max(0, (session.verify_code_expires_at || 0) - now),
+      // "Sab students confirm ho gaye?" — teacher ke "Generate New Code" button
+      // ki visibility isi se chalti hai. Ye fields missing hone se button kabhi
+      // active nahi hota tha (page reload / initial render pe), kyunki
+      // renderVerifyPanel() ko `all_confirmed` chahiye.
+      // confirmed = present + pending (dono hi "student ne confirm kiya" hain).
+      all_confirmed: roster_size > 0 ? (marked_count - pending_count) + pending_count >= roster_size : marked_count > 0,
+      unverified_roster: roster_size === 0,
     });
   } catch (err) {
     console.error(err);
@@ -4183,6 +4203,12 @@ app.get("/api/student/verify-status", studentLookupLimiter, async (req, res) => 
       verify_expired: Boolean(session.verify_code_hash) && !live,
       verify_issued_count: session.verify_issued_count || 0,
       verify_ms_left: Math.max(0, (session.verify_code_expires_at || 0) - now),
+      // ZAROORI: is class me GPS chahiye ya nahi — student ka peekSession()
+      // isi field par GPS maangne ya skip karne ka faisla karta hai. Ye field
+      // bhoolne se GPS hamesha "off" samajh aata tha aur location-required
+      // sessions me student GPS ke bina mark karta tha (server phir use
+      // 5 koshish ke chakkar me pending bhej deta tha).
+      location_required: session.require_location === true,
     });
   } catch (err) {
     console.error(err);

@@ -9,6 +9,7 @@
     "test:boot": "node tools/boot-smoke-test.js",
     "test:approval": "node tools/approval-logic-test.js",
     "test:beacon": "node tools/beacon-test.js",
+    "test:flow": "node tools/verify-code-flow-test.js",
     "test:chirp": "node tools/chirp-test.js",
     "test:relay": "node tools/relay-test.js",
     "backup": "node tools/backup-attendance.js",
