@@ -1501,25 +1501,34 @@ function beaconRequired(session) {
 // NAYA CRYPTO NAHI: chirp wahi beacon code bhejta hai, isliye verify bhi wahi
 // verifyBeaconCode() karta hai (slot rotate + 1-slot grace sab already hai).
 // ---------------------------------------------------------------------------
-// Tones 16.5k se shuru — 19k+ par sasta phone mic tezi se kaat deta hai,
-// isliye digit range ko neeche rakha. 240 Hz step = 10 digits, aur FFT me
-// tones ek dusre se aaram se alag dikhte hain.
-const CHIRP_TONE_MIN_HZ = 16500;
+// Tones 9.0k se shuru — YE JAAN-BOOJH KAR AUDIBLE BAND ME HAIN.
+// Pehle 16.5-18.7 kHz (ultrasonic) tha jiska physics fayda tha (sound deewar se
+// bahar nahi jaati) — PAR asli duniya me wo HAR phone par kaam nahi karta: sasta
+// laptop/phone speaker 16 kHz+ par 20-40 dB gir jata hai aur kai phone mic bhi
+// wahan tak sunte hi nahi, isliye student ka phone code nikal hi nahi pata tha.
+// Ab band 9.0-11.2 kHz par hai — 12 kHz tak lagbhag SAARE phone/laptop flat hote
+// hain, isliye "Suno" sab par chalta hai. Trade-off saaf hai: sound ab sunai
+// deta hai aur deewar ke aar-paar bhi ja sakta hai, isliye asli anti-proxy
+// rotating code + device-lock + teacher ki nazar par hai, sirf sound par nahi.
+// 240 Hz step = 10 digits, aur FFT me tones ek dusre se aaram se alag dikhte hain.
+const CHIRP_TONE_MIN_HZ = 9000;
 const CHIRP_TONE_STEP_HZ = 240;
-const CHIRP_TONE_MS = 150; // ek digit kitni der bajta hai
-// Tones ke beech gap. Ye 120 ms jaan-boojh kar hai (pehle 40 ms tha — wo BUG tha).
+const CHIRP_TONE_MS = 180; // ek digit kitni der bajta hai (180 ms = slow phone par bhi 4-5 frame)
+// Tones ke beech gap. Ye jaan-boojh kar itna hai (pehle 40 ms tha — wo BUG tha).
 // Wajah: do LAGATAAR same digit wale code (jaise "55") me tone band karne ka
-// ek hi sahara gap hai. 40 ms gap itna chhota tha ki 40 ms ke analysis frame me
-// sirf EK frame usme padta tha — matlab silence kabhi 2 frame tak nahi pahunchta
-// tha, tone band nahi hota tha, aur "55" ek lamba tone ban kar EK digit ban jata
-// tha (code 5 digit ka → student ka submit fail). 120 ms gap me ~3 frame padte
-// hain, isliye tone bharosemand band hota hai. Poora chirp ab ~2.3s ka hai —
+// ek hi sahara gap hai. Bahut chhota gap hone par silence kabhi 2 frame tak nahi
+// pahunchta tha, tone band nahi hota tha, aur "55" ek lamba tone ban kar EK digit
+// ban jata tha (code 5 digit ka → student ka submit fail). Ab ~3-4 frame padte
+// hain, isliye tone bharosemand band hota hai. Poora chirp ab ~2.8s ka hai —
 // classroom ke liye theek hai.
-const CHIRP_GAP_MS = 120;
-const CHIRP_LEAD_HZ = 16000; // "ab shuru" marker (digit range se neeche, distinct)
+const CHIRP_GAP_MS = 140;
+// "ab shuru" marker — digit range (9000) se 2.5 step (600 Hz) neeche, isliye
+// distinct hai aur galti se digit 0 nahi banta. Server aur student dono isi se
+// code ka FRAME banate hain (opening + closing lead ke beech hi digits ginte hain).
+const CHIRP_LEAD_HZ = 8400;
 const CHIRP_LEAD_MS = 300;
 
-// Digit -> frequency. 0..9 -> 16500..18660 Hz.
+// Digit -> frequency. 0..9 -> 9000..11160 Hz.
 function chirpToneForDigit(digit, opts) {
   const o = opts || {};
   const min = Number.isFinite(o.min_hz) ? o.min_hz : CHIRP_TONE_MIN_HZ;
@@ -2536,7 +2545,7 @@ app.get(["/api/teacher/session-beacon", "/api/teacher/beacon"], requireTeacherAu
       ends_at: beaconEnd,
       ms_left: Math.max(0, beaconEnd - now),
       duration_ms: session.beacon_duration_ms || 0,
-      // ULTRASONIC CHIRP: teacher page isi spec se sound bajata hai. Wahi code
+      // CHIRP: teacher page isi spec se sound bajata hai. Wahi code
       // jo upar `beacon_code` me hai — naya proof nahi, sirf naya CHANNEL hai.
       chirp: chirpSpecFor(beacon.code),
     });
@@ -3887,7 +3896,7 @@ app.get("/api/student/beacon-check", studentLookupLimiter, async (req, res) => {
     const needed = beaconRequired(session);
     return res.json({
       beacon_enabled: needed,
-      // ULTRASONIC CHIRP ke constants — student page isi se sound decode karta
+      // CHIRP ke constants — student page isi se sound decode karta
       // hai. Server se bhejne ka faayda: agar server.js me tones badle to
       // student page apne aap naye values use karega. Warna do jagah constants
       // rakhne padte aur ek din chupke out-of-sync ho jate (chirp bajta rehta,

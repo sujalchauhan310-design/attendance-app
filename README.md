@@ -114,9 +114,9 @@ isliye teacher ko us situation par ek clear warning milti hai.
 me Web Bluetooth API hi nahi hai). Isliye beacon ko **server-side rotating code** ke roop
 me banaya gaya — ye har device par chalta hai (Android/iPhone/laptop sab).
 
-### 🔊 Ultrasonic chirp — 120 students ke liye, bina koi hardware
+### 🔊 Sound chirp — 120 students ke liye, bina koi hardware
 Beacon ka 6-digit code screen par hota hai, par **120 students** ke liye type karna slow hai.
-Chirp **wahi code sound me** bhejta hai (16.5–18.7 kHz — kaan ko sunai nahi deta):
+Chirp **wahi code sound me** bhejta hai (**9.0–11.2 kHz**):
 
 | Kya | Kaise |
 |---|---|
@@ -125,19 +125,29 @@ Chirp **wahi code sound me** bhejta hai (16.5–18.7 kHz — kaan ko sunai nahi 
 | Crypto | **Naya nahi** — wahi `verifyBeaconCode()`, wahi slot rotation, wahi 1-slot grace |
 | Constants | Server `/api/student/beacon-check` se bhejta hai, taaki client/server out-of-sync na hon |
 
-**Yeh GPS se kyun behtar hai:**
-- **Sound deewar se bahar nahi jaati.** GPS deewar ke aar-paar same number deta hai (bahar
-  wale ko bhi), par 16 kHz ka sound doosre room me nahi pahunchta → "is room me hai" ka proof.
-- **Internet par relay mushkil hai.** WhatsApp/Zoom **Opus** codec speech ke liye bana hai aur
-  kam bitrate par apni bandwidth khud kam kar deta hai (narrowband = 4 kHz tak) → ultrasonic
-  band relay hote waqt kat jata hai.
-- **Rooted phone par bhi kaam karta hai** — ye physics hai, software claim nahi.
+> **⚠️ Band 9–11 kHz par kyun hai (aur iska trade-off):**
+> Pehle ye **16.5–18.7 kHz (ultrasound)** tha — theoretically best, kyunki sound deewar se
+> bahar nahi jaati. **Par practically har phone par kaam nahi karta tha:** sasta laptop/phone
+> speaker 16 kHz+ par 20–40 dB gir jata hai aur kai phone mic wahan tak sunte hi nahi, isliye
+> student ka phone code nikal hi nahi pata tha ("Suno" dabane par kuch nahi hota).
+> Ab band **9.0–11.2 kHz** hai — 12 kHz tak lagbhag **saare** phone/laptop flat hote hain,
+> isliye ye har device par chalta hai. **Trade-off saaf hai:** sound sunai deta hai aur deewar
+> ke aar-paar bhi ja sakta hai, isliye asli anti-proxy **rotating code + device-lock + teacher
+> ki nazar** par hai — sirf sound par nahi.
+>
+> **Device safety:** student page mic ko `sampleRate: 48000` par kholta hai (16 kHz mic par
+> 9–11 kHz band Nyquist ke bahar chala jata). Agar koi phone is band ko handle hi nahi kar
+> sakta, to page **turant saaf message** deta hai ("is phone par sound decode support nahi —
+> code type kar dein") — 15 second chup-chaap intezaar karne ke bajaye.
 
-**Noise ke liye:** classroom ka shor 100–4000 Hz me hota hai, 16–19 kHz band khaali rehta hai.
-Saath me mic **AGC/noise-suppression band** karke kholte hain (warna Chrome/Android 18 kHz ko
-"awaaz hi nahi" samajh kar dabaa dete hain), aur peak ko noise floor se **8 dB upar** hone par hi
-maante hain — isliye shor digit nahi banta. **Sabse bada fayda:** teacher ke phone ki jagah
-classroom ka **maujood PA/projector speaker** use karein — wo 10–20 guna loud hai aur free hai.
+**Iske saath kya milta hai:**
+- **Code framing:** server code ko do lead markers (8400 Hz) ke **beech** bajata hai, aur
+  student sirf inhi ke beech ke digits ginte hain. Isse mic-on click / koi bhi stray tone
+  code ko ek-ek khiska nahi sakta (pehle yahi bug tha — student ko teacher ke screen se
+  **alag** code milta tha).
+- **Rooted phone par bhi kaam karta hai** — ye physics hai, software claim nahi.
+- **Code type karna hamesha available hai** — koi phone sound decode na kar paye to 6 digit
+  type kar ke attendance ho jati hai (ye fallback kabhi band nahi hota).
 
 **Fallback:** agar sasta phone mic 17 kHz+ nahi sun pata, student wahi 6-digit code **type** kar
 deta hai (`beacon_channel = manual`) — kuch bhi tootta nahi, sirf proof weaker hota hai.
@@ -357,7 +367,7 @@ Render ka free instance ~15 min idle ke baad sota hai, isliye [cron-job.org](htt
 node tools/backup-attendance.js    # purana attendance data ka CSV backup (retention change se pehle!)
 node tools/approval-logic-test.js  # Smart approval logic (verified/fail/flag ke 8 case) + reason texts
 node tools/beacon-test.js          # Beacon core: slot rotation, 6-digit shape, grace slot, leak check (32 case)
-node tools/chirp-test.js           # Ultrasonic chirp codec: digit<->tone, 200 random code round-trip, drift/junk (39 case)
+node tools/chirp-test.js           # Sound chirp (9-11.2 kHz): digit<->tone, 200 random code round-trip, drift/junk, lead-framing (52 case)
 node tools/leave-logic-test.js      # Leave + % maths (leave hatane par effective %, zero-denominator guard)
 node tools/pdf-smoke-test.js       # PDF checks: session, 30-din grid, 90-din month-grid, 120-din summary, student report
 node tools/boot-smoke-test.js      # DB ke bina server boot + JSON error handling check

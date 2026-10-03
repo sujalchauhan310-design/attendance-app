@@ -268,15 +268,16 @@
             <button type="button" class="btn btn-sm btn-ghost grow" onclick="copyBeacon()">Copy beacon</button>
           </div>
 
-          <!-- ================= ULTRASONIC CHIRP =================
+          <!-- ================= SOUND CHIRP =================
                Wahi beacon code, par SOUND ke through. Isse 120 students ko
                6 digit type karne ki zaroorat nahi — phone khud sun kar bhar
-               leta hai, aur "is room me hai" ka proof milta hai (sound deewar
-               se bahar nahi jaati, GPS jaati hai). -->
+               leta hai. Band (9.0-11.2 kHz) jaan-boojh kar audible hai taaki
+               HAR phone/laptop ise handle kare (ultrasound par kai sasta
+               speaker 20-40 dB gir jata tha aur code milta hi nahi tha). -->
           <div class="divider"></div>
           <div style="font-size:.8rem; font-weight:700; color:var(--info); letter-spacing:.04em;">🔊 CHIRP — students ka phone khud sun lega</div>
           <div class="muted fs-sm mt-1" id="chirpHint">
-            Ye code ko sound me badal kar bajata hai (16.5–18.7 kHz, kaan ko sunai nahi deta).
+            Ye code ko sound me badal kar bajata hai (9.0–11.2 kHz — HAR phone sun lega).
             Laptop/PA speaker ki volume poori rakhein aur screen ki taraf rakhein.
           </div>
           <div class="row mt-2" style="gap:8px;">
@@ -1133,16 +1134,20 @@ function filterSelectBySystem(selectEl, system) {
   const groups = teacherOptgroupCache.get(selectEl.id);
   // System chuna hi nahi -> sab dikhao (purana behaviour).
   const keep = system ? groups.filter((g) => g.getAttribute('data-system') === system) : groups;
+  // BUG FIX: innerHTML se select dobara banane par naye <option> par `selected`
+  // nahi hota — browser selectedIndex 0 (placeholder) par reset kar deta tha, aur
+  // ye function system change par chalta hai. Matlab Annual -> Semester karne par
+  // ya class chunne ke baad hi selection chupke se ud jati thi. Ab value rebuild
+  // se pehle yaad rakhte hain aur baad me wapas lagate hain.
+  const prev = selectEl.value;
   const placeholder = selectEl.querySelector('option[value=""]');
   selectEl.innerHTML = '';
   if (placeholder) selectEl.appendChild(placeholder.cloneNode(true));
   keep.forEach((g) => selectEl.appendChild(g.cloneNode(true)));
-  // Annual "Theory" chuna tha aur ab Semester hai -> wo option nayi list me
-  // nahi bacha. Reset karna zaroori hai: warna browser chupke se value khaali
-  // kar deta hai aur teacher ko lagta hai selection waise hi hai.
-  if (selectEl.value && !Array.from(selectEl.options).some((o) => o.value === selectEl.value)) {
-    selectEl.value = '';
-  }
+  // Annual "Theory" chuna tha aur ab Semester hai -> wo option nayi list me nahi
+  // bacha, to saaf reset karo. Warna wahi value wapas lagao.
+  const canKeep = prev && Array.from(selectEl.options).some((o) => o.value === prev);
+  selectEl.value = canKeep ? prev : '';
 }
 
 function applySystemFilter() {
@@ -1420,13 +1425,14 @@ let beaconMsUntilNext = BEACON_SLOT_MS_FALLBACK;
 let beaconFetchedAt = 0;
 
 /* ----------------------------------------------------------------------
-   ULTRASONIC CHIRP PLAYER (Web Audio)
+   CHIRP PLAYER (Web Audio)
    Beacon ka code sound me bajata hai. Wahi code jo screen par hai, isliye
    verification server par wahi verifyBeaconCode() karta hai — naya crypto
    nahi, sirf naya channel.
-   Kyun: 120 students ko 6 digit type karna slow hai. Aur sound DEEWAR SE
-   BAHAR NAHI JAATI — isliye "is room me hai" ka proof milta hai, jo GPS
-   nahi de sakta (bahar wale ko bhi wahi GPS number milta hai). */
+   Kyun: 120 students ko 6 digit type karna slow hai. Band (9.0-11.2 kHz)
+   jaan-boojh kar audible hai taaki HAR phone/laptop ka speaker + mic ise
+   handle kare — ultrasound (16-18 kHz) par kai sasta speaker 20-40 dB gir
+   jata tha aur student ka phone code nikal hi nahi pata tha. */
 let beaconChirpLive = null; // server se aaya hua spec (hz + sequence)
 let chirpAutoTimer = null;
 let chirpCtx = null; // AudioContext ek hi baar banao — baar-baar banane par Safari dhamaka karta hai

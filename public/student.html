@@ -43,10 +43,11 @@
         maxlength="6" autocomplete="off" placeholder="000000" aria-describedby="beaconHint">
       <p class="hint" id="beaconHint">Teacher ke screen par dikhta hai. Ye har 45 second badalta hai — sirf class me baithe students hi dekh sakte hain.</p>
       <p id="beaconErr" class="field-error hide">Beacon code me sirf digits (0–9) chalte hain.</p>
-      <!-- ULTRASONIC CHIRP: teacher ka speaker 16.5–18.7 kHz ka beep-sequence
-           bajata hai (wahi code, sound me). Student ko sirf sun-na hai — 6 digit
-           type karne ki zaroorat nahi. Sound deewar se bahar nahi jaati, isliye
-           ye "is room me hai" ka asli proof deta hai (GPS nahi deta). -->
+      <!-- CHIRP: teacher ka speaker 9.0–11.2 kHz ka beep-sequence bajata hai
+           (wahi code, sound me). Student ko sirf sun-na hai — 6 digit type
+           karne ki zaroorat nahi. Band jaan-boojh kar audible hai taaki HAR
+           phone/laptop ka speaker + mic ise handle kare (ultrasound par kai
+           sasta speaker 20-40 dB gir jata tha aur code milta hi nahi tha). -->
       <button type="button" class="btn btn-block btn-info mt-2" id="chirpListenBtn" onclick="listenForChirp()">🎤 Suno — phone khud bhar dega</button>
       <div class="muted fs-xs mt-1" id="chirpListenStatus"></div>
     </div>
@@ -384,15 +385,21 @@ function filterSelectBySystem(selectEl, system) {
   const groups = studentOptgroupCache.get(selectEl.id);
   // System chuna hi nahi -> dono dikhao (purana behaviour).
   const keep = system ? groups.filter((g) => g.getAttribute('data-system') === system) : groups;
+  // BUG FIX (class select "kaam nahi kar raha"): innerHTML se select dobara
+  // banane par naye <option> par `selected` nahi hota, isliye browser
+  // selectedIndex ko 0 (placeholder) par reset kar deta tha. Ye function class
+  // change hone par hi chalta hai — matlab student class chunta tha aur wo
+  // turant "Select your class" ho jati thi. Ab rebuild se PEHLE value yaad
+  // rakhte hain aur baad me wapas lagate hain.
+  const prev = selectEl.value;
   const placeholder = selectEl.querySelector('option[value=""]');
   selectEl.innerHTML = '';
   if (placeholder) selectEl.appendChild(placeholder.cloneNode(true));
   keep.forEach((g) => selectEl.appendChild(g.cloneNode(true)));
-  // Chuna hua option nayi list me nahi hai -> reset, warna browser chupke se
-  // value khaali kar deta hai aur student ko lagta hai selection theek hai.
-  if (selectEl.value && !Array.from(selectEl.options).some((o) => o.value === selectEl.value)) {
-    selectEl.value = '';
-  }
+  // Chuna hua option nayi list me nahi bacha (jaise Annual Theory -> Semester)
+  // -> saaf reset. Warna wahi value wapas lagao.
+  const canKeep = prev && Array.from(selectEl.options).some((o) => o.value === prev);
+  selectEl.value = canKeep ? prev : '';
 }
 
 // System radio se current value ('' = kuch nahi chuna -> dono options).
@@ -474,20 +481,26 @@ async function peekBeaconNeeded(code) {
   }
 }
 
-/* ---------- ULTRASONIC CHIRP LISTENER (student side) ----------
-   Teacher ke speaker se 16.5–18.7 kHz ka beep-sequence aata hai — WAHI beacon
+/* ---------- CHIRP LISTENER (student side) ----------
+   Teacher ke speaker se 9.0–11.2 kHz ka beep-sequence aata hai — WAHI beacon
    code, sirf sound me. Student ko 6 digit type karne ki zaroorat nahi.
 
+   Band JAAN-BOOJH KAR audible hai (pehle 16.5–18.7 kHz tha): 12 kHz tak
+   lagbhag SAARE phone/laptop speaker + mic flat hote hain, isliye "Suno" har
+   phone par chalta hai. Ultrasound me kai sasta laptop speaker 20-40 dB gir
+   jata tha aur code milta hi nahi tha.
+
    Kaam kaise karta hai:
-     1) Mic kholte hain AGC + noise-suppression BAND kar ke. Ye zaroori hai —
-        Chrome/Android ka noise suppressor "18 kHz to awaaz hi nahi hai"
-        samajh kar use dabaa deta hai, aur decode kabhi nahi hota.
+     1) Mic kholte hain AGC + noise-suppression BAND kar ke (warna OS tone band
+        ko "awaaz hi nahi" samajh kar kaat deta hai) aur 48 kHz sampleRate
+        maangte hain (16 kHz mic par 9-11 kHz Nyquist ke bahar chala jata).
      2) AnalyserNode se har ~40 ms par spectrum lete hain.
-     3) 16.0–19.0 kHz band me sabse strong tone dhoondhte hain, aur noise floor
-        (2–6 kHz ka average) se kam se kam 8 dB upar hone par hi maante hain.
-        Isse classroom ka shor digit nahi banta.
-     4) Lagataar same tone ko ek hi baar ginte hain (dedupe), aur 6 digits
-        milte hi code ban jata hai. */
+     3) Server ke bataye band me sabse strong tone dhoondhte hain, aur noise
+        floor (2–6 kHz ka average) se kam se kam 8 dB upar hone par hi maante
+        hain. Isse classroom ka shor digit nahi banta.
+     4) Digits sirf opening aur closing LEAD marker ke BEECH ginte hain — isse
+        mic-on click / koi bhi stray tone code ko khiska nahi sakta.
+     5) 6 digits milte hi code ban jata hai. */
 let chirpListening = false;
 let chirpStopFn = null; // cleanup handle (mic stream + interval + audio ctx)
 // Proof kis channel se aaya — payload me jata hai (audit ke liye).
@@ -574,14 +587,33 @@ function createChirpSegmenter(p, opts) {
   // maante hain — ek-ada frame drop hone par tone tootkar double nahi ginta,
   // par asli 120 ms gap pakda jata hai (jisse "55" jaise repeat sahi milte hain).
   const minGapMs = Number(o.min_gap_ms) || Math.max(Math.round(frameMs * 1.5), 60);
+  // Lead marker (8400 Hz) se code ka FRAME banta hai. Aadha step = 120 Hz,
+  // par 150 Hz dheel rakhi hai — ye digit 0 (9000 Hz) se 600 Hz (2.5 step) door
+  // rehta hai, isliye kisi asli digit ko galti se lead nahi samajhta.
+  const leadTol = Number(o.lead_tol_hz) || Math.max(Math.round(p.tone_step_hz / 2), 150);
 
   let curHz = null; // abhi kaun sa tone sun rahe hain
   let curMs = 0; // wo tone kitni der se chal raha hai
   let silenceMs = 0;
+  // ---- FRAMING (asli BUG ka fix) ----
+  // Server code ko do lead markers ke BEECH bajata hai (lead ... 6 digits ...
+  // lead). Pehle ye segmenter lead ko sirf "digit nahi" maan kar chhod deta tha,
+  // boundary ka koi faayda nahi leta tha. Isse mic-on ka click / speaker pop /
+  // classroom ka koi bhi tone band ke aas-paas code me GHUSS jata tha aur saare
+  // digits ek-ek khiska deta tha: student ko 6 digit to milte the, par code
+  // teacher ke screen wale se ALAG. Ab digits sirf opening aur closing lead ke
+  // beech ginte hain, isliye aisa shift ho hi nahi sakta.
+  let armed = false; // opening lead mil gaya -> ab digits ginti hain
+  let closed = false; // closing lead mil gaya -> is chirp ka code pura
+  let inLead = false; // abhi lead tone ke andar hain (300 ms lamba hota hai)
   const digits = [];
 
+  function isLead(hz) {
+    return Number.isFinite(hz) && Math.abs(hz - p.lead_hz) <= leadTol;
+  }
+
   function closeTone() {
-    if (curHz !== null && curMs >= minToneMs) {
+    if (curHz !== null && curMs >= minToneMs && armed && !closed) {
       const d = chirpDigitFromHz(curHz, p);
       // Lead marker (aur range se bahar ki koi cheez) digit nahi banta.
       if (d !== null) digits.push(d);
@@ -590,12 +622,44 @@ function createChirpSegmenter(p, opts) {
     curMs = 0;
   }
 
+  // Lead ke frames bhi "chup" hain — par tone ko band kar dete hain, warna lead
+  // khud ek lamba tone ban kar agle digit ko nigal jata.
+  function onSilence() {
+    silenceMs += frameMs;
+    if (curHz !== null && silenceMs >= minGapMs) closeTone();
+  }
+
   return {
     // peakHz: strong tone mila to uski frequency, warna null.
     push(peakHz) {
+      if (isLead(peakHz)) {
+        // Lead 300 ms chalta hai — marker SIRF shuruaat par ginte hain.
+        if (!inLead) {
+          inLead = true;
+          closeTone(); // adhoora tone (aakhri digit) flush ho jaye
+          if (armed) {
+            closed = true; // opening ke baad aaya lead = closing marker
+            armed = false;
+          } else if (!closed) {
+            armed = true; // pehla lead = opening marker
+            digits.length = 0;
+          }
+          silenceMs = 0;
+        }
+        return; // lead ke baaki frames chup-chaap ignore
+      }
+      inLead = false;
+
       if (peakHz === null || peakHz === undefined) {
-        silenceMs += frameMs;
-        if (curHz !== null && silenceMs >= minGapMs) closeTone();
+        onSilence();
+        return;
+      }
+      // Opening lead se PEHLE ka kuch bhi (mic click / shor) ignore karo, aur
+      // closing lead ke BAAD ka bhi — digit sirf dono lead ke beech me ginte hain.
+      if (!armed || closed) return;
+      // Range se bahar ki frequency bhi silence hi hai.
+      if (chirpDigitFromHz(peakHz, p) === null) {
+        onSilence();
         return;
       }
       silenceMs = 0;
@@ -655,18 +719,33 @@ async function listenForChirp() {
 
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      // AGC / noise-suppression / echo-cancel BAND — warna OS ultrasonic band
-      // ko "awaaz hi nahi" samajh kar kaat deta hai.
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
+      // AGC / noise-suppression / echo-cancel BAND — warna OS tone band ko
+      // "awaaz hi nahi" samajh kar kaat deta hai.
+      // sampleRate 48k: agar browser mic ko 16 kHz par khol de to 9-11 kHz band
+      // Nyquist (8 kHz) ke bahar chala jata aur decode namumkin ho jata.
+      audio: {
+        echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+        channelCount: 1, sampleRate: 48000,
+      },
       video: false,
     });
     const Ctor = window.AudioContext || window.webkitAudioContext;
     if (!Ctor) { setChirpListenStatus('Audio support nahi — code type kar dein.'); stopChirpListen(); return; }
-    ctx = new Ctor();
+    // 48 kHz wala context mangte hain (ye hint hai, guarantee nahi).
+    try { ctx = new Ctor({ sampleRate: 48000 }); } catch (err) { ctx = new Ctor(); }
+    // Agar ye phone/browser is band ko handle hi nahi kar sakta (mic 16 kHz par
+    // khul gaya), to saaf message do — 15 second chup-chaap intezaar karne se
+    // behtar hai ki student turant code type kar le.
+    const topHz = p.tone_min_hz + 9 * p.tone_step_hz;
+    if (!(ctx.sampleRate > 2 * topHz)) {
+      stopChirpListen();
+      setChirpListenStatus(`Is phone par sound decode support nahi (mic ${Math.round(ctx.sampleRate / 1000)} kHz) — code type kar dein.`);
+      return;
+    }
     const src = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
     // 2048 @ 48 kHz = ~43 ms ka window. Ye jaan-boojh kar CHHOTA hai:
-    // tone 150 ms ka hai aur gap 40 ms ka. Bada window (8192 = 170 ms) lene par
+    // tone 180 ms ka hai aur gap 140 ms ka. Bada window (8192 = 170 ms) lene par
     // ek hi reading me DO tones mix ho jate the — beech ka gap gayab ho jata,
     // aur "55" jaise do lagataar same tone ek hi lamba tone ban jate the.
     // 2048 par bin ~23 Hz chauda hai, tone gap 240 Hz — aaram se alag dikhta hai.
@@ -1009,7 +1088,7 @@ async function requestLocationToken(p, fix) {
 // ---------------------------------------------------------------------------
 // BURST SPREAD (120+ students ke liye)
 // ---------------------------------------------------------------------------
-// Ultrasonic chirp ka ek badside hai: 120 students ka phone EK HI waqt me chirp
+// Sound chirp ka ek badside hai: 120 students ka phone EK HI waqt me chirp
 // sunta hai (2 second me), isliye sab log ek hi 2-3 second ke window me "Mark
 // attendance" dabate hain. Server par ek saath 120 POST aati hain aur har POST
 // kai DB query karti hai (duplicate check, device check, anti-proxy, save).

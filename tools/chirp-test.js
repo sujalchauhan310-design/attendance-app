@@ -9,11 +9,11 @@
 // jaye to teacher ka chirp bajta rahega aur student ka phone kabhi sahi code
 // nahi nikaalega — aur ye bug classroom me hi pata chalta hai (jahan debug
 // karna sabse mushkil hai). Isliye usko yahin pakadte hain.
-const CHIRP_TONE_MIN_HZ = 16500;
+const CHIRP_TONE_MIN_HZ = 9000;
 const CHIRP_TONE_STEP_HZ = 240;
-const CHIRP_TONE_MS = 150;
-const CHIRP_GAP_MS = 120;
-const CHIRP_LEAD_HZ = 16000;
+const CHIRP_TONE_MS = 180;
+const CHIRP_GAP_MS = 140;
+const CHIRP_LEAD_HZ = 8400;
 const CHIRP_LEAD_MS = 300;
 
 function chirpToneForDigit(digit, opts) {
@@ -89,14 +89,25 @@ function createChirpSegmenter(p, opts) {
   const frameMs = Number(o.frame_ms) || 40;
   const minToneMs = Number(o.min_tone_ms) || 80;
   const minGapMs = Number(o.min_gap_ms) || Math.max(Math.round(frameMs * 1.5), 60);
+  const leadTol = Number(o.lead_tol_hz) || Math.max(Math.round(p.tone_step_hz / 2), 150);
 
   let curHz = null;
   let curMs = 0;
   let silenceMs = 0;
+  // FRAMING (student.html se bilkul same) — digits sirf opening aur closing
+  // lead marker ke BEECH ginte hain. Isse chirp se pehle aaya koi bhi shor
+  // (mic click, speaker pop) code me ghuss kar digits khiska nahi sakta.
+  let armed = false;
+  let closed = false;
+  let inLead = false;
   const digits = [];
 
+  function isLead(hz) {
+    return Number.isFinite(hz) && Math.abs(hz - p.lead_hz) <= leadTol;
+  }
+
   function closeTone() {
-    if (curHz !== null && curMs >= minToneMs) {
+    if (curHz !== null && curMs >= minToneMs && armed && !closed) {
       const d = chirpDigitForTone(curHz, p);
       if (d !== null) digits.push(d);
     }
@@ -104,11 +115,37 @@ function createChirpSegmenter(p, opts) {
     curMs = 0;
   }
 
+  function onSilence() {
+    silenceMs += frameMs;
+    if (curHz !== null && silenceMs >= minGapMs) closeTone();
+  }
+
   return {
     push(peakHz) {
+      if (isLead(peakHz)) {
+        if (!inLead) {
+          inLead = true;
+          closeTone();
+          if (armed) {
+            closed = true;
+            armed = false;
+          } else if (!closed) {
+            armed = true;
+            digits.length = 0;
+          }
+          silenceMs = 0;
+        }
+        return;
+      }
+      inLead = false;
+
       if (peakHz === null || peakHz === undefined) {
-        silenceMs += frameMs;
-        if (curHz !== null && silenceMs >= minGapMs) closeTone();
+        onSilence();
+        return;
+      }
+      if (!armed || closed) return;
+      if (chirpDigitForTone(peakHz, p) === null) {
+        onSilence();
         return;
       }
       silenceMs = 0;
@@ -166,8 +203,16 @@ function check(label, condition) {
   const gap = chirpToneForDigit(5) - chirpToneForDigit(4);
   check(`tone spacing ${gap} Hz hai (>=200 Hz chahiye)`, gap >= 200);
   const top = chirpToneForDigit(9);
-  check(`sabse upar wala tone ${top} Hz < 19000 Hz (sasta mic bhi sun lega)`, top < 19000);
-  check(`sabse neeche wala tone ${CHIRP_TONE_MIN_HZ} Hz audible band se upar hai`, CHIRP_TONE_MIN_HZ > 16000);
+  check(`sabse upar wala tone ${top} Hz <= 12000 Hz (HAR phone/laptop speaker ise aaram se bajata hai)`, top <= 12000);
+  check(`sabse neeche wala tone ${CHIRP_TONE_MIN_HZ} Hz >= 8000 Hz (speech se upar, isliye shor digit nahi banta)`, CHIRP_TONE_MIN_HZ >= 8000);
+  check(
+    `poora chirp band (${CHIRP_TONE_MIN_HZ}-${top} Hz) 8-12 kHz me hai — "saare phone" coverage`,
+    CHIRP_TONE_MIN_HZ >= 8000 && top <= 12000,
+  );
+  check(
+    `lead marker (${CHIRP_LEAD_HZ} Hz) digit 0 (${chirpToneForDigit(0)} Hz) se >=1.5 step neeche hai`,
+    chirpToneForDigit(0) - CHIRP_LEAD_HZ >= 1.5 * CHIRP_TONE_STEP_HZ,
+  );
 }
 
 // 3) ROUND TRIP — poore 6-digit code par, random 200 codes. Yehi asli test hai.
@@ -208,8 +253,15 @@ function check(label, condition) {
 // 6) Range se bahar ki awaaz = reject. Bahut zyada dheel dena galat tone ko
 //    galat digit bana dega, aur student ka poora code bigad jayega.
 {
+  const outHi = chirpToneForDigit(9) + CHIRP_TONE_STEP_HZ; // band ke thoda upar
+  const outLo = CHIRP_TONE_MIN_HZ - CHIRP_TONE_STEP_HZ; // band se thoda neeche
   check("20000 Hz (range ke bahar) -> null", chirpDigitForTone(20000) === null);
-  check("10000 Hz (range ke bahar) -> null", chirpDigitForTone(10000) === null);
+  check(`${outHi} Hz (band ${CHIRP_TONE_MIN_HZ}-${chirpToneForDigit(9)} ke upar) -> null`, chirpDigitForTone(outHi) === null);
+  check(`${outLo} Hz (band se neeche) -> null`, chirpDigitForTone(outLo) === null);
+  // 10000 Hz pehle "bahar" tha (jab band 16.5k+ tha) — ab naye 9-11.2 kHz band
+  // me ye ek VALID tone hai (digit 4 = 9960 Hz ke kareeb). Ye assertion jaan-boojh
+  // kar hai taaki band badalne par test chup-chaap purani duniya me na jee le.
+  check("10000 Hz ab valid hai (naya band) -> digit 4", chirpDigitForTone(10000) === 4);
   check("0 Hz -> null", chirpDigitForTone(0) === null);
   check("NaN -> null", chirpDigitForTone(NaN) === null);
 }
@@ -218,9 +270,10 @@ function check(label, condition) {
 {
   check("null input -> null", chirpCodeFromTones(null) === null);
   check("khali array -> null", chirpCodeFromTones([]) === null);
-  check("5 tones (6 chahiye) -> null", chirpCodeFromTones([16500, 16500, 16500, 16500, 16500]) === null);
-  check("7 tones -> null", chirpCodeFromTones([16500, 16500, 16500, 16500, 16500, 16500, 16500]) === null);
-  check("NaN tone -> null", chirpCodeFromTones([16500, NaN, 16500, 16500, 16500, 16500]) === null);
+  const d0 = chirpToneForDigit(0);
+  check("5 tones (6 chahiye) -> null", chirpCodeFromTones([d0, d0, d0, d0, d0]) === null);
+  check("7 tones -> null", chirpCodeFromTones([d0, d0, d0, d0, d0, d0, d0]) === null);
+  check("NaN tone -> null", chirpCodeFromTones([d0, NaN, d0, d0, d0, d0]) === null);
   check("string junk -> null", chirpCodeFromTones(["abc", "x", 1, 2, 3, 4]) === null);
   check("undefined -> null", chirpCodeFromTones(undefined) === null);
 }
@@ -292,6 +345,14 @@ function simulateChirp(code, opts) {
   );
   const slot = CHIRP_TONE_MS + CHIRP_GAP_MS; // ek tone + uska gap
   const totalMs = spec.total_ms + 500; // closing lead bhi sun-ne ka waqt
+  // OPTIONAL: opening lead se PEHLE ka shor (mic-on click / speaker pop / koi
+  // bhi 16-18 kHz ki awaaz). Asli bug yahi tha — ye ek jhootha digit ban kar
+  // poore code ko ek-ek khiska deta tha.
+  const preMs = Number(o.pre_noise_ms) || 0;
+  const preHz = Number(o.pre_noise_hz);
+  if (preMs > 0) {
+    for (let t = 0; t < preMs; t += frameMs) seg.push(Number.isFinite(preHz) ? preHz : null);
+  }
   for (let t = 0; t < totalMs; t += frameMs) {
     let hz = null;
     let tt = t;
@@ -372,6 +433,41 @@ function simulateChirp(code, opts) {
   // (gap detection 2 frame ka hai).
   const seg = simulateChirp("345678");
   check("asli chirp par exactly 6 digit (na kam na zyada)", seg.count === 6);
+}
+
+{
+  // ASLI BUG (student ko teacher ke screen se ALAG code mil raha tha):
+  // chirp se PEHLE aaye koi bhi 16-18 kHz tone ko purana decoder ek digit maan
+  // leta tha, aur poora code ek digit khisak jata tha. Ab opening lead marker
+  // se pehle ka sab kuch ignore hota hai.
+  const codes = ["123456", "555555", "900009", "000000", "987654"];
+  let allOk = true;
+  const bad = [];
+  for (const c of codes) {
+    // 200 ms ka stray tone (mic-on click jaisa) opening lead se pehle
+    const seg = simulateChirp(c, { pre_noise_ms: 200, pre_noise_hz: chirpToneForDigit(3) });
+    if (seg.code !== c) { allOk = false; bad.push(`${c} -> ${seg.code}`); }
+  }
+  check(`opening lead se pehle ka shor code ko corrupt nahi karta (${codes.length} codes)${bad.length ? " | FAILED: " + bad.join(" ; ") : ""}`, allOk);
+}
+
+{
+  // Stray tone lead se pehle NA ho par 6 digit ke BAAD aa jaye -> usse bhi
+  // code nahi badalna chahiye (closing lead ke baad ka sab ignore).
+  const seg = simulateChirp("246813", { pre_noise_ms: 0 });
+  check("closing lead ke baad kuch bhi na aaye to bhi code sahi", seg.code === "246813");
+}
+
+{
+  // Bina kisi lead marker ke aaye tones ko digit NAHI maanna chahiye — warna
+  // random classroom noise ek poora jhootha code bana deti hai.
+  const seg = createChirpSegmenter({ tone_min_hz: CHIRP_TONE_MIN_HZ, tone_step_hz: CHIRP_TONE_STEP_HZ, lead_hz: CHIRP_LEAD_HZ }, { frame_ms: 40 });
+  for (let n = 0; n < 6; n++) {
+    for (let f = 0; f < 4; f++) seg.push(chirpToneForDigit(1)); // 160ms tone
+    for (let f = 0; f < 3; f++) seg.push(null); // 120ms gap
+  }
+  seg.flush();
+  check("opening lead ke BINA tones se code nahi banta (framing zaroori)", seg.count === 0);
 }
 
 console.log(`\n${fail === 0 ? "ALL CHIRP TESTS PASSED" : `${fail} FAILED`} — pass=${pass} fail=${fail}`);
