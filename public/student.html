@@ -23,16 +23,28 @@
 
   <div id="topAlert"></div>
 
-  <!-- ================= STEP 1 — code + details ================= -->
+  <!-- ================= STEP 1 — System (sabse pehle) ================= -->
   <section class="card accent mt-2">
-    <div class="field">
-      <label class="label" for="code">Code from teacher</label>
-      <input id="code" class="code-input" type="text" inputmode="numeric" pattern="[0-9]*"
-        maxlength="5" autocomplete="off" placeholder="00000" aria-describedby="codeHint">
-      <p class="hint" id="codeHint">Teacher ke screen par likha 5-digit code — ye sirf ~10 second me badal jaata hai, turant daalein aur mark karein.</p>
-      <p id="codeErr" class="field-error hide">Code me sirf digits (0–9) chalte hain.</p>
+    <div class="card-title">
+      <h3>1. Choose your system</h3>
+      <span class="chip chip-gold">Pehle ye chunein</span>
     </div>
+    <div class="field mb-0">
+      <label class="label">System</label>
+      <div class="seg" id="systemGroup" role="radiogroup" aria-label="System">
+        <label class="seg-opt"><input type="radio" name="system" value="Annual"><span>Annual</span></label>
+        <label class="seg-opt"><input type="radio" name="system" value="Semester"><span>Semester</span></label>
+      </div>
+      <p class="hint">System chunein — Class ki list usi hisaab se dikhegi, aur aage ke steps khul jayenge.</p>
+    </div>
+  </section>
 
+  <!-- ================= STEP 2 — aapki details (system ke baad khulega) ================= -->
+  <section class="card hide mt-2" id="step2">
+    <div class="card-title">
+      <h3>2. Your details</h3>
+      <span class="chip">Roll · Name · Class · Major</span>
+    </div>
 
     <div class="field">
       <label class="label" for="rollNo">Roll Number</label>
@@ -48,15 +60,6 @@
     </div>
 
     <div class="field">
-      <label class="label">System</label>
-      <div class="seg" id="systemGroup" role="radiogroup" aria-label="System">
-        <label class="seg-opt"><input type="radio" name="system" value="Annual"><span>Annual</span></label>
-        <label class="seg-opt"><input type="radio" name="system" value="Semester"><span>Semester</span></label>
-      </div>
-      <p class="hint">System chunein — Class ki list usi hisaab se dikhegi.</p>
-    </div>
-
-    <div class="field mb-0">
       <label class="label" for="className">Class</label>
       <!-- System ke hisaab se sirf usi ka optgroup dikhta hai (neeche JS
            applySystemFilter). Teacher ki list se EXACTLY match hona zaroori
@@ -80,12 +83,24 @@
         </optgroup>
       </select>
     </div>
+
+    <div class="field mb-0">
+      <label class="label" for="majorSubject">Major Subject <span class="opt">(optional)</span></label>
+      <select id="majorSubject" class="select">
+        <option value="">Select major subject</option>
+        <option>Political Science</option><option>History</option><option>Public Administration</option>
+        <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
+        <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
+        <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
+        <option>Computer Science</option><option>Physical Education</option><option>Other</option>
+      </select>
+    </div>
   </section>
 
-  <!-- ================= STEP 2 — subject details ================= -->
-  <section class="card">
+  <!-- ================= STEP 3 — class details (details ke baad khulega) ================= -->
+  <section class="card hide mt-2" id="step3">
     <div class="card-title">
-      <h3>Class details</h3>
+      <h3>3. Class details</h3>
       <span class="chip" id="detailsHintChip">Teacher ke code se match karein</span>
     </div>
 
@@ -101,7 +116,7 @@
       </select>
     </div>
 
-    <div class="field">
+    <div class="field mb-0">
       <label class="label" for="courseType">Course Type</label>
       <!-- Semester (NEP/CBCS) + Annual dono. Teacher ke dropdown se EXACTLY
            match karna zaroori hai — attendance record tabhi banta hai jab
@@ -129,24 +144,12 @@
         </optgroup>
       </select>
     </div>
-
-    <div class="field mb-0">
-      <label class="label" for="majorSubject">Major Subject <span class="opt">(optional)</span></label>
-      <select id="majorSubject" class="select">
-        <option value="">Select major subject</option>
-        <option>Political Science</option><option>History</option><option>Public Administration</option>
-        <option>Sociology</option><option>Economics</option><option>Hindi</option><option>English</option>
-        <option>Geography</option><option>Psychology</option><option>Philosophy</option><option>Mathematics</option>
-        <option>Physics</option><option>Chemistry</option><option>Biology</option><option>Commerce</option>
-        <option>Computer Science</option><option>Physical Education</option><option>Other</option>
-      </select>
-    </div>
   </section>
 
-  <!-- ================= STEP 3 — location ================= -->
-  <section class="card">
+  <!-- ================= STEP 4 — location (class details ke baad khulega) ================= -->
+  <section class="card hide mt-2" id="stepLocation">
     <div class="card-title">
-      <h3>Location check</h3>
+      <h3>4. Location check</h3>
       <span class="chip chip-gold" id="radiusChip">📍 Radius 150 m</span>
     </div>
     <p class="card-sub">Attendance ka proof server khud verify karta hai (code + location check). GPS sirf tab chahiye jab is class me location check ON ho.</p>
@@ -182,9 +185,28 @@
     </div>
   </section>
 
-  <button id="submitBtn" type="button" class="btn btn-primary btn-block mt-2" onclick="openConfirm()">
-    Mark Attendance
-  </button>
+  <!-- ================= STEP 5 — code from teacher (BADA + BOLD) ================= -->
+  <section class="card accent hide mt-2" id="stepCode">
+    <div class="card-title">
+      <h3>5. Code from teacher</h3>
+      <span class="chip chip-gold">Aakhri step</span>
+    </div>
+    <div class="field mb-0">
+      <label class="label" for="code" style="font-size:1.1rem; font-weight:700;">Code from teacher</label>
+      <input id="code" class="code-input" type="text" inputmode="numeric" pattern="[0-9]*"
+        maxlength="5" autocomplete="off" placeholder="00000" aria-describedby="codeHint"
+        style="font-size:2.6rem; font-weight:800; letter-spacing:.32em; text-align:center;">
+      <p class="hint" id="codeHint">Teacher ke screen par likha 5-digit code — ye sirf ~10 second me badal jaata hai, turant daalein aur mark karein.</p>
+      <p id="codeErr" class="field-error hide">Code me sirf digits (0–9) chalte hain.</p>
+    </div>
+  </section>
+
+  <!-- ================= STEP 6 — Mark attendance ================= -->
+  <div class="hide" id="stepSubmit">
+    <button id="submitBtn" type="button" class="btn btn-primary btn-block mt-2" onclick="openConfirm()">
+      Mark Attendance
+    </button>
+  </div>
 
   <div id="queueStatus" class="mt-2"></div>
   <div id="failedBox" class="mt-2"></div>
@@ -1013,7 +1035,7 @@ setInterval(flushQueue, 25000); // safety net, agar 'online' event na aaye
    ---------------------------------------------------------------------- */
 // System radio badalne par Class + Course Type ki list turant badalti hai.
 document.querySelectorAll('input[name="system"]').forEach((radio) => {
-  radio.addEventListener('change', applySystemFilter);
+  radio.addEventListener('change', () => { applySystemFilter(); updateWizard(); });
 });
 // Class chunne par system khud set ho jata hai (BA Sem 3 -> Semester), aur
 // tab list dobara filter hoti hai.
@@ -1025,6 +1047,54 @@ if ($('className')) $('className').addEventListener('change', () => {
 // me hi lagne chahiye.
 applySystemFilter();
 syncSystemFromClass();
+
+/* ----------------------------------------------------------------------
+   WIZARD — har step pichla step bharte hi khulta hai:
+   1) System -> 2) details (roll/name/class/major) -> 3) subject/course
+   -> 4) location -> 5) code from teacher (bada) -> 6) Mark attendance
+   ---------------------------------------------------------------------- */
+function setStepVisible(id, on) { const el = $(id); if (el) el.classList.toggle('hide', !on); }
+function wizardSystemChosen() { return !!document.querySelector('input[name="system"]:checked'); }
+function wizardDetailsFilled() {
+  return Boolean($('rollNo').value.trim() && $('studentName').value.trim() && $('className').value);
+}
+function wizardClassDetailsFilled() { return Boolean($('subject').value && $('courseType').value); }
+function updateWizard() {
+  const s1 = wizardSystemChosen();
+  setStepVisible('step2', s1);
+  const s2 = s1 && wizardDetailsFilled();
+  setStepVisible('step3', s2);
+  const s3 = s2 && wizardClassDetailsFilled();
+  setStepVisible('stepLocation', s3);
+  setStepVisible('stepCode', s3);
+  setStepVisible('stepSubmit', s3);
+}
+['rollNo', 'studentName', 'className'].forEach((id) => {
+  const el = $(id);
+  if (el) { el.addEventListener('input', updateWizard); el.addEventListener('change', updateWizard); }
+});
+['subject', 'courseType'].forEach((id) => {
+  const el = $(id);
+  if (el) el.addEventListener('change', updateWizard);
+});
+updateWizard();
+
+/* ----------------------------------------------------------------------
+   LOCATION PERMISSION — page khulte hi ek baar permission maango, taaki
+   student aage jab GPS maange to popup pehle hi ho chuka ho.
+   ---------------------------------------------------------------------- */
+(function primeLocationPermission() {
+  if (!navigator.geolocation) return;
+  setTimeout(() => {
+    try {
+      navigator.geolocation.getCurrentPosition(
+        () => {},
+        () => {},
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
+      );
+    } catch (err) { /* ignore — student baad me "Get location again" daba sakta hai */ }
+  }, 700);
+})();
 
 /* =====================================================================
    Teacher ko batao (weak net / GPS fail) + apna PDF download

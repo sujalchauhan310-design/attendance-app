@@ -181,19 +181,19 @@
         <div class="field">
           <label class="label" for="expiryMinutes">Code kitni der chalega</label>
           <select id="expiryMinutes" class="select">
-            <option value="0.5">20 second — Quick (jaldi mark karwao)</option>
+            <option value="0.5">25 second — Quick (jaldi mark karwao)</option>
             <option value="2">2 minute — sabse safe</option>
             <option value="5">5 minute</option>
             <option value="7" selected>7 minute (default)</option>
           </select>
-          <p class="hint">Chhota window = code WhatsApp par share hokar bahar use hone ka mauka kam. Quick mode me students ko ~10 second dikhta hai (asli me ~20 second chalta hai, taaki slow phone wale bhi mark kar sakein).</p>
+          <p class="hint">Chhota window = code WhatsApp par share hokar bahar use hone ka mauka kam. Quick mode me students ko ~10 second dikhta hai (asli me ~25 second chalta hai, taaki slow phone wale bhi mark kar sakein). Location check ON karne par ye khud 7 minute ho jaata hai.</p>
         </div>
 
 
         <div class="stack" style="gap:10px;">
           <div class="switch-row">
             <div><div class="t">📍 Location check</div><div class="d" id="locSwitchNote">OFF — GPS optional (sirf code + device-lock hi gate hai)</div></div>
-            <label class="switch"><input type="checkbox" id="requireLocation" onchange="saveSelection()"><i></i></label>
+            <label class="switch"><input type="checkbox" id="requireLocation" onchange="onLocationToggle()"><i></i></label>
           </div>
           <div class="switch-row">
             <div><div class="t">✅ Approval mode</div><div class="d">Har mark aapke approve karne par count hoga</div></div>
@@ -1090,6 +1090,14 @@ function applySystemFilter() {
 }
 
 
+// Location check ON karne par code window khud 7 minute (default) ho jata hai —
+// chhota 25-second quick code location check ke saath match nahi karta.
+function onLocationToggle() {
+  if ($('requireLocation') && $('requireLocation').checked && $('expiryMinutes')) {
+    $('expiryMinutes').value = '7';
+  }
+  saveSelection();
+}
 function saveSelection() {
   try {
     localStorage.setItem(SELECTION_KEY, JSON.stringify({

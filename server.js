@@ -245,17 +245,17 @@ const CODE_EXPIRY_OPTIONS_MIN = [0.5, 2, 5, 7];
 // ---------------------------------------------------------------------------
 // Teacher aur student dono ki screen par countdown CHHOTA (~10s) dikhta hai —
 // isse urgency banti hai aur code turant aage pass nahi hota. PAR server us se
-// lamba (20s) tak code accept karta hai, taaki slow phone / weak net wale
+// lamba (25s) tak code accept karta hai, taaki slow phone / weak net wale
 // honest students galti se absent na ho jayein.
 //
 // ZAROORI: ye "soft" hai — UI 10s par kabhi hard "Expired" NAHI dikhata. 10s
 // ke baad sirf halka "Closing…" state aata hai, aur asli "Expired" sirf tab
-// jab 20s ka real window bhi khatam ho jaye. Warna ek student 15s par mark
+// jab 25s ka real window bhi khatam ho jaye. Warna ek student 15s par mark
 // karke success pa lega aur app buggy lagega — aur ek baar pata chal gaya to
 // trick 2 minute me poori class ko pata chal jayegi.
 // Dono values env se tunable (CODE_DISPLAY_SEC / CODE_ACCEPT_SEC).
 const CODE_DISPLAY_SEC = Math.max(3, Number(process.env.CODE_DISPLAY_SEC) || 10);
-const CODE_ACCEPT_SEC = Math.max(CODE_DISPLAY_SEC, Number(process.env.CODE_ACCEPT_SEC) || 20);
+const CODE_ACCEPT_SEC = Math.max(CODE_DISPLAY_SEC, Number(process.env.CODE_ACCEPT_SEC) || 25);
 
 // PURE: teacher ke chune window se (a) asli accept window aur (b) dikhne wala
 // countdown nikalta hai. Quick code par dono alag hote hain (soft deadline);
@@ -2234,7 +2234,7 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
     // useful to a student who is not in the room and got it on WhatsApp.
     const requestedMin = Number(req.body.expiry_minutes);
     const expiryMinutes = CODE_EXPIRY_OPTIONS_MIN.includes(requestedMin) ? requestedMin : CODE_EXPIRY_OPTIONS_MIN[CODE_EXPIRY_OPTIONS_MIN.length - 1];
-    // SOFT DEADLINE: quick (0.5m) code par asli accept 20s, par screen par
+    // SOFT DEADLINE: quick (0.5m) code par asli accept 25s, par screen par
     // sirf ~10s dikhta hai. Normal code par accept == display (koi bluff nahi).
     const codeWindow = resolveCodeWindow(expiryMinutes);
     const expiryMs = codeWindow.acceptMs;
@@ -2275,7 +2275,7 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       expires_in_seconds: expiryMs / 1000,
       expires_at: session.expires_at,
       // SOFT DEADLINE: screen par dikhne wala countdown. Quick code me ye
-      // expires_in_seconds se CHHOTA hota hai (10s vs 20s). Teacher page ise
+      // expires_in_seconds se CHHOTA hota hai (10s vs 25s). Teacher page ise
       // countdown ke liye use karta hai, par accept server par hi hota hai.
       display_seconds_left: Math.round(codeWindow.displayMs / 1000),
       quick_code: codeWindow.isQuick,

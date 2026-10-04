@@ -9,7 +9,7 @@
 // bolega jo server 30s tak maan raha hai (contradiction, app "buggy" lagega),
 // ya soft-deadline hona hi band ho jayega. Isliye usko yahin pakadte hain.
 const CODE_DISPLAY_SEC = 10;
-const CODE_ACCEPT_SEC = 20;
+const CODE_ACCEPT_SEC = 25;
 
 // server.js: resolveCodeWindow() ki exact copy.
 function resolveCodeWindow(expiryMinutes, opts) {
@@ -39,11 +39,11 @@ function check(label, condition) {
 
 console.log("--- CODE WINDOW (SOFT DEADLINE) TESTS ---\n");
 
-// 1) Quick (0.5m) = asli 20s, par dikhta 10s.
+// 1) Quick (0.5m) = asli 25s, par dikhta 10s.
 {
   const w = resolveCodeWindow(0.5);
   check("quick code quick flag true", w.isQuick === true);
-  check(`quick accept = 20s (${w.acceptMs})`, w.acceptMs === 20000);
+  check(`quick accept = 25s (${w.acceptMs})`, w.acceptMs === 25000);
   check(`quick display = 10s (${w.displayMs})`, w.displayMs === 10000);
   check("quick: display < accept (soft deadline asli hai)", w.displayMs < w.acceptMs);
 }
