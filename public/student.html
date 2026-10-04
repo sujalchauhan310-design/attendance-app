@@ -199,6 +199,15 @@
       <p class="hint" id="codeHint">Teacher ke screen par likha 5-digit code — ye sirf ~10 second me badal jaata hai, turant daalein aur mark karein.</p>
       <p id="codeErr" class="field-error hide">Code me sirf digits (0–9) chalte hain.</p>
     </div>
+
+    <!-- SOUND CODE auto-fetch: 5-digit code daalte hi mic khud sunna shuru (koi touch nahi) -->
+    <input id="soundCode" type="hidden" value="">
+    <div class="muted fs-xs mt-1" id="soundListenStatus"></div>
+    <details class="mt-2 hide" id="soundManualWrap">
+      <summary class="muted fs-xs">Sun nahi pa rahe? Teacher se code pooch ke yahan likhein</summary>
+      <input id="soundManual" class="input mt-1" type="text" maxlength="3" placeholder="3 letters (jaise aaa)" style="text-transform:lowercase">
+      <button type="button" class="btn btn-sm mt-1" onclick="applyManualSound()">Ye code lagao</button>
+    </details>
   </section>
 
   <!-- ================= STEP 6 — Mark attendance ================= -->
@@ -452,6 +461,8 @@ function syncSystemFromClass() {
 let locPeekCache = { code: '', required: true, done: false };
 let locPeekBusy = false;
 let sessionLocationRequired = true;
+// SOUND CODE ke mic params (server se aate hain jab session me sound ON ho).
+let soundParams = null;
 
 async function peekLocationRequired(code) {
   const clean = String(code || '').trim();
@@ -467,6 +478,13 @@ async function peekLocationRequired(code) {
     const required = res.ok && data.location_required === true;
     locPeekCache = { code: clean, required, done: true };
     sessionLocationRequired = required;
+    // SOUND CODE: ON ho to mic-listen button + manual fallback dikhao.
+    soundParams = (res.ok && data.sound_enabled && data.chirp) ? data.chirp : null;
+    if ($('soundManualWrap')) $('soundManualWrap').classList.toggle('hide', !soundParams);
+    if (!soundParams && $('soundCode')) $('soundCode').value = '';
+    // AUTO-LISTEN: student ko koi button dabane ki zaroorat nahi — 5-digit code
+    // daalte hi mic khud sunna shuru kar deta hai.
+    if (soundParams) setTimeout(() => { try { startSoundListen(); } catch (e) {} }, 300);
   } catch (err) {
     // Net fail = default (safe) rakho — server ka apna error message batayega.
     locPeekCache = { code: clean, required: true, done: true };
@@ -483,6 +501,113 @@ $('code').addEventListener('input', () => {
     locPeekCache = { code: v, required: true, done: false };
   }
 });
+
+/* ---------- SOUND CODE (student): mic sun kar code auto-fill ---------- */
+let soundListenOn = false;
+let soundStopFn = null; // manual fallback listener ko rokne ke liye
+function setSoundListenStatus(m) { const el = $('soundListenStatus'); if (el) el.textContent = m || ''; }
+async function startSoundListen() {
+  if (soundListenOn) return;
+  if (!soundParams) { setSoundListenStatus('Is class me sound code ON nahi hai — teacher se code lein.'); return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setSoundListenStatus('Is browser me mic nahi — teacher se code likhwayein.'); return; }
+  // RACE FIX: flag turant set karo (await se pehle) — warna peek dobara chalne
+  // par do getUserMedia session khul jaate the (mic double-on).
+  soundListenOn = true;
+  let stream = null, ctx = null, timer = null;
+  const stop = () => {
+    soundListenOn = false;
+    soundStopFn = null;
+    if (timer) clearInterval(timer);
+    if (ctx) { try { ctx.close(); } catch (e) {} }
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+  };
+  soundStopFn = stop;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1, sampleRate: 48000 }, video: false,
+    });
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) { setSoundListenStatus('Audio support nahi.'); stop(); return; }
+    try { ctx = new Ctor({ sampleRate: 48000 }); } catch (e) { ctx = new Ctor(); }
+    const src = ctx.createMediaStreamSource(stream);
+    const an = ctx.createAnalyser(); an.fftSize = 2048; an.smoothingTimeConstant = 0;
+    src.connect(an);
+    const buf = new Float32Array(an.frequencyBinCount);
+    setSoundListenStatus('🎤 Sun raha hoon… (phone teacher ki taraf rakhein)');
+    const letters = 'abcdefghijklmnopqrstuvwxyz';
+    const lo = soundParams.tone_min_hz, hi = soundParams.tone_min_hz + 25 * soundParams.tone_step_hz;
+    timer = setInterval(() => {
+      an.getFloatFrequencyData(buf);
+      const binHz = ctx.sampleRate / an.fftSize;
+      const loBin = Math.max(1, Math.floor((lo - 120) / binHz));
+      const hiBin = Math.min(buf.length - 2, Math.ceil((hi + 120) / binHz));
+      let peak = -Infinity, peakBin = -1;
+      for (let i = loBin; i <= hiBin; i++) { if (buf[i] > peak) { peak = buf[i]; peakBin = i; } }
+      let sum = 0, n = 0;
+      const fLo = Math.max(1, Math.floor(2000 / binHz)), fHi = Math.min(buf.length - 1, Math.floor(6000 / binHz));
+      for (let i = fLo; i <= fHi; i++) { if (Number.isFinite(buf[i])) { sum += buf[i]; n++; } }
+      const floor = n ? sum / n : -100;
+      if (peakBin < 0 || !(peak > floor + 8)) return;
+      const hz = peakBin * binHz;
+      const i = Math.round((hz - soundParams.tone_min_hz) / soundParams.tone_step_hz);
+      if (i < 0 || i > 25) return;
+      if (Math.abs(hz - (soundParams.tone_min_hz + i * soundParams.tone_step_hz)) > soundParams.tone_step_hz / 2) return;
+      if ($('soundCode')) $('soundCode').value = letters[i].repeat(3);
+      stop();
+      setSoundListenStatus('✅ Sound code mil gaya — ab Mark Attendance dabayein.');
+      toast('Sound code mil gaya ✓', 'ok');
+    }, 40);
+  } catch (err) {
+    setSoundListenStatus('Mic permission nahi mila — teacher se code likhwayein.');
+    stop();
+  }
+}
+function applyManualSound() {
+  const v = (($('soundManual') && $('soundManual').value) || '').trim().toLowerCase();
+  if (!/^[a-z]{3}$/.test(v)) { toast('3 letters likhein (jaise aaa).', 'err'); return; }
+  if ($('soundCode')) $('soundCode').value = v;
+  if (soundStopFn) { try { soundStopFn(); } catch (e) {} } // auto-listener rok do
+  setSoundListenStatus('✅ Manual code lag gaya.');
+  toast('Code lag gaya ✓', 'ok');
+}
+
+/* ---------- RELAY: verified phone wahi tone EK BAAR dobara bajaye ---------- */
+let relayTimer = null;
+function playChirpStudent(spec) {
+  const Ctor = window.AudioContext || window.webkitAudioContext;
+  if (!Ctor || !spec || !spec.sequence) return;
+  let ctx = null; try { ctx = new Ctor(); } catch (e) { return; }
+  let t = ctx.currentTime + 0.05;
+  spec.sequence.forEach((tone) => {
+    const dur = Math.max(0.05, (Number(tone.ms) || 150) / 1000);
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = 'sine'; osc.frequency.value = Number(tone.hz) || 0;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.9, t + 0.012);
+    g.gain.setValueAtTime(0.9, t + Math.max(0.012, dur - 0.012));
+    g.gain.linearRampToValueAtTime(0, t + dur);
+    osc.connect(g); g.connect(ctx.destination); osc.start(t); osc.stop(t + dur + 0.02);
+    t += dur + (Number(spec.gap_ms) || 100) / 1000;
+  });
+  setTimeout(() => { try { ctx.close(); } catch (e) {} }, (Number(spec.total_ms) || 2000) + 500);
+}
+function stopRelayStandby() { if (relayTimer) { clearInterval(relayTimer); relayTimer = null; } }
+function startRelayStandby(p) {
+  if (!soundParams) return; // sound session nahi
+  stopRelayStandby();
+  const tick = async () => {
+    if (document.hidden) return;
+    try {
+      const q = new URLSearchParams({ device_id, class_name: p.class_name, subject: p.subject, course_type: p.course_type, system: p.system || '' });
+      const res = await fetch('/api/student/relay-duty?' + q.toString(), { headers: { Accept: 'application/json' } });
+      const d = await res.json().catch(() => ({}));
+      if (d && d.play && d.chirp) playChirpStudent(d.chirp);
+    } catch (e) { /* net blip */ }
+  };
+  relayTimer = setInterval(tick, 4000);
+  setTimeout(() => { if (relayTimer) stopRelayStandby(); }, 10 * 60 * 1000);
+  tick();
+}
 
 /* ---------- platform help (iOS vs Android steps) ---------- */
 function detectPlatform() {
@@ -681,12 +806,17 @@ function gatherPayload() {
     course_type: $('courseType').value.trim(),
     major_subject: $('majorSubject').value.trim(),
     code: $('code').value.trim(),
+    // SOUND CODE: mic/manual se aaya 3-letter code (server sound se verify karta hai).
+    sound_code: ($('soundCode') && $('soundCode').value.trim().toLowerCase()) || '',
     client_flags: clientHintFlags(),
   };
 }
 
 function validatePayload(p) {
   if (!/^[0-9]{5}$/.test(p.code)) return 'Code exactly 5 digit ka hona chahiye.';
+  // SOUND CODE session hai par code abhi nahi mila — server se raw 400 aane se
+  // pehle hi saaf message dikhe.
+  if (soundParams && !p.sound_code) return 'Sound code nahi mila — mic ko teacher ki taraf rakhein (thoda rukein), ya neeche manual likhein.';
   if (!/^[0-9]+$/.test(p.roll_no)) return 'Roll number me sirf digits hone chahiye.';
   if (!p.name) return 'Apna naam likhein (pehli baar zaroori hai).';
   if (!p.class_name) return 'Apni class chunein.';
@@ -876,6 +1006,7 @@ async function confirmSubmit() {
 
     if (result.data.success) {
       closeConfirm();
+      startRelayStandby(p);
       if (result.data.pending) {
         const reason = result.data.pending_reason || '';
         const title =
@@ -1095,16 +1226,20 @@ window.__wizardReady = true; // safety-net script ko batao ki wizard chal gaya
    LOCATION PERMISSION — page khulte hi ek baar permission maango, taaki
    student aage jab GPS maange to popup pehle hi ho chuka ho.
    ---------------------------------------------------------------------- */
-(function primeLocationPermission() {
-  if (!navigator.geolocation) return;
+(function primePermissions() {
+  // Page khulte hi DONO permission popup aa jaye (location + microphone) —
+  // taaki aage student ko alag se kuch dabana na pade.
   setTimeout(() => {
     try {
-      navigator.geolocation.getCurrentPosition(
-        () => {},
-        () => {},
-        { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
-      );
-    } catch (err) { /* ignore — student baad me "Get location again" daba sakta hai */ }
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
+      }
+    } catch (err) { /* ignore */ }
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => s.getTracks().forEach((t) => t.stop())).catch(() => {});
+      }
+    } catch (err) { /* ignore */ }
   }, 700);
 })();
 

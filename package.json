@@ -9,9 +9,10 @@
     "test:boot": "node tools/boot-smoke-test.js",
     "test:approval": "node tools/approval-logic-test.js",
     "test:window": "node tools/code-window-test.js",
+    "test:sound": "node tools/sound-code-test.js",
     "backup": "node tools/backup-attendance.js",
     "verify:pages": "node tools/verify-pages.js",
-    "verify": "node tools/verify-pages.js && node tools/approval-logic-test.js && node tools/code-window-test.js && node tools/pdf-smoke-test.js && node tools/boot-smoke-test.js"
+    "verify": "node tools/verify-pages.js && node tools/approval-logic-test.js && node tools/code-window-test.js && node tools/sound-code-test.js && node tools/pdf-smoke-test.js && node tools/boot-smoke-test.js"
   },
   "dependencies": {
     "express": "^4.19.2",

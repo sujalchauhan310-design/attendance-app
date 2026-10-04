@@ -504,6 +504,9 @@ const locationAttemptSchema = new mongoose.Schema({
 locationAttemptSchema.index({ device_id: 1, date: 1, session_key: 1 }, { unique: true });
 const LocationAttempt = mongoose.model("LocationAttempt", locationAttemptSchema);
 
+// SOUND CODE (letter beacon + chirp + relay) — pure logic lib/sound-code.js me.
+const soundCode = require("./lib/sound-code.js");
+
 const activeCodeSchema = new mongoose.Schema({
   code: String,
   class_name: String,
@@ -519,6 +522,10 @@ require_approval: { type: Boolean, default: false }, // teacher approves each ma
 auto_review: { type: Boolean, default: true },
 send_pdf: { type: Boolean, default: true }, // auto-email attendance PDF 20 min after generation
 pdf_sent: { type: Boolean, default: false }, // prevents sending twice if server restarts
+// SOUND CODE: revolving sound code (letter x6, jaise "aaaaaa"). Secret
+// server-only rehta hai — student ko sirf derive hua code milta hai.
+beacon_enabled: { type: Boolean, default: false },
+beacon_secret: { type: String, default: "" },
   created_at: Number,
   expires_at: Number,
   // SOFT DEADLINE: screen par dikhne wala countdown yahan khatam hota hai. Quick
@@ -2221,6 +2228,10 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
     // (ALLOW_TEACHER_LOCATION_OFF; default true).
     const locationOn = ALLOW_TEACHER_LOCATION_OFF ? boolWithDefault(require_location, false) : true;
 
+    // SOUND CODE: teacher chahe to rotating sound code ON kare — student phone
+    // sound se code khud le lega, peeche wale ke phone relay karenge.
+    const soundOn = boolWithDefault(req.body.sound_code ?? req.body.require_beacon, false);
+
     // Optional shorter code window. A code that dies in 2 minutes is far less
     // useful to a student who is not in the room and got it on WhatsApp.
     const requestedMin = Number(req.body.expiry_minutes);
@@ -2244,6 +2255,8 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       require_approval: boolWithDefault(req.body.require_approval, REQUIRE_APPROVAL_DEFAULT),
       auto_review: boolWithDefault(req.body.auto_review, SMART_APPROVAL_DEFAULT),
       send_pdf: boolWithDefault(send_pdf, SEND_PDF_DEFAULT), // default ON (env se badal sakte hain)
+      beacon_enabled: soundOn,
+      beacon_secret: soundOn ? crypto.randomBytes(16).toString("hex") : "",
       created_at: now,
       expires_at: now + expiryMs,
       display_expires_at: now + codeWindow.displayMs,
@@ -2282,6 +2295,7 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       send_pdf: session.send_pdf,
       strict_location: STRICT_LOCATION,
       expiry_options_minutes: CODE_EXPIRY_OPTIONS_MIN,
+      sound_enabled: session.beacon_enabled === true,
     });
   } catch (err) {
     console.error(err);
@@ -2289,6 +2303,33 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
   }
 });
 
+
+// Teacher ke SOUND CODE ka current code (letter x6) + 45s countdown. Teacher page
+// ise dikhata hai aur wahi tone bajata hai; student phone se sun kar auto-fill.
+app.get("/api/teacher/sound-code", requireTeacherAuth, async (req, res) => {
+  try {
+    const { session_id } = req.query;
+    if (!session_id || !mongoose.Types.ObjectId.isValid(session_id)) {
+      return res.status(400).json({ error: "A valid session_id is required." });
+    }
+    const session = await ActiveCode.findById(session_id).lean();
+    if (!session || !session.beacon_enabled || !session.beacon_secret) return res.json({ sound_enabled: false });
+    const now = Date.now();
+    const b = soundCode.currentBeacon(session.beacon_secret, now);
+    res.json({
+      sound_enabled: true,
+      code: b.code,
+      seconds_left: Math.ceil(b.rotates_in_ms / 1000),
+      ms_until_next: b.rotates_in_ms,
+      code_expired: now > (session.expires_at || 0),
+      chirp: soundCode.chirpSpecFor(b.code),
+      server_now: now,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Sound code nahi mil paaya." });
+  }
+});
 
 // Live status of one generated code. The teacher page uses this on reload so
 // the countdown comes from SERVER time — a phone whose clock is a few minutes
@@ -2326,6 +2367,7 @@ app.get("/api/teacher/session-status", requireTeacherAuth, async (req, res) => {
       location_off: session.require_location === false,
       allow_location_off: ALLOW_TEACHER_LOCATION_OFF,
       send_pdf: session.send_pdf !== false,
+      sound_enabled: session.beacon_enabled === true && !!session.beacon_secret,
       created_at: session.created_at,
       expires_at: session.expires_at,
       server_now: now,
@@ -3609,15 +3651,57 @@ app.get("/api/student/location-check", studentLookupLimiter, async (req, res) =>
     if (!/^[0-9]{5}$/.test(code)) return res.json({ ok: true, location_required: false });
     const now = Date.now();
     const session = await ActiveCode.findOne({ code }).lean();
-    if (!session || now > session.expires_at) return res.json({ ok: true, location_required: false });
+    if (!session || now > session.expires_at) return res.json({ ok: true, location_required: false, sound_enabled: false });
     // mark-attendance ke saath CONSISTENT: purane sessions me `require_location`
-    // field thi hi nahi (undefined). Wahan `!== false` se location required mana
-    // jata hai — yahan bhi wahi, warna student GPS skip karke pending me chala jaata.
-    return res.json({ ok: true, location_required: session.require_location !== false });
+    // field thi hi nahi (undefined) -> wahan bhi location required maana jata hai.
+    return res.json({
+      ok: true,
+      location_required: session.require_location !== false,
+      // SOUND CODE ON ho to student page mic se letters decode karta hai (auto).
+      sound_enabled: session.beacon_enabled === true && !!session.beacon_secret,
+      chirp: session.beacon_enabled && session.beacon_secret ? {
+        tone_min_hz: soundCode.TONE_MIN_HZ, tone_step_hz: soundCode.TONE_STEP_HZ,
+        tone_ms: soundCode.TONE_MS, lead_hz: soundCode.LEAD_HZ, lead_ms: soundCode.LEAD_MS,
+      } : null,
+    });
   } catch (err) {
     console.error(err);
     res.json({ ok: true, location_required: false });
   }
+});
+
+// ---------- SOUND CODE: RELAY (peeche baithe students ke liye) ----------
+// Ek verified phone wahi tone EK BAAR bajata hai (range extend). Ek request =
+// ek relay (in-memory; server restart par saaf).
+const relayPending = new Map();
+app.post("/api/student/relay-request", studentLookupLimiter, (req, res) => {
+  try {
+    const b = req.body || {};
+    const key = soundCode.relaySessionKey(b.class_name, b.subject, b.course_type, b.system);
+    if (!b.device_id || !key || key === "|||") return res.json({ ok: false });
+    relayPending.set(key, { requester: String(b.device_id), expires_at: Date.now() + soundCode.RELAY_TTL_MS });
+    res.json({ ok: true, listen_ms: soundCode.RELAY_TTL_MS });
+  } catch (err) { res.json({ ok: false }); }
+});
+
+app.get("/api/student/relay-duty", studentLookupLimiter, async (req, res) => {
+  try {
+    const q = req.query;
+    const now = Date.now();
+    const key = soundCode.relaySessionKey(q.class_name, q.subject, q.course_type, q.system);
+    const entry = relayPending.get(key);
+    if (!soundCode.relayAlive(entry, now)) return res.json({ play: false });
+    const dec = soundCode.relayPickDecision(entry, String(q.device_id || ""), now);
+    if (!dec.play) return res.json({ play: false });
+    const activeCode = await ActiveCode.findOne({ class_name: q.class_name, subject: q.subject, course_type: q.course_type, system: systemMatch(q.system) }).sort({ created_at: -1 }).lean();
+    if (!activeCode || !activeCode.beacon_enabled || !activeCode.beacon_secret) return res.json({ play: false });
+    // GATE: sirf wahi device relay kare jisne aaj is class me mark kar liya ho.
+    const mine = await Attendance.findOne({ device_id: String(q.device_id || ""), class_name: q.class_name, subject: q.subject, course_type: q.course_type, date: todayDateString() }).lean();
+    if (!mine) return res.json({ play: false });
+    relayPending.delete(key); // ek request = ek relay (chaos band)
+    const code = soundCode.currentBeacon(activeCode.beacon_secret, now).code;
+    return res.json({ play: true, chirp: soundCode.chirpSpecFor(code) });
+  } catch (err) { res.json({ play: false }); }
 });
 
 app.post("/api/student/location-token", locationTokenLimiter, async (req, res) => {
@@ -3894,6 +3978,16 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
         }
         // Koshishein khatam -> ab entry teacher ke paas (pending) jayegi.
         location.flags = [...new Set([...clientHints, "no_location_proof"])];
+      }
+    }
+
+    // 1d. SOUND CODE — beacon ON ho to 6-letter code verify karo (student ke
+    //     phone ne sound se liya ya teacher se sunkar type kiya). Galat/purana =
+    //     HARD fail (pending nahi), kyunki sound room me hi pahunchti hai.
+    if (activeCode.beacon_enabled && activeCode.beacon_secret) {
+      const r = soundCode.verifyBeaconCode(activeCode.beacon_secret, req.body.sound_code, now);
+      if (!r.ok) {
+        return res.status(400).json({ error: r.reason, reason: "sound_wrong", retry_after_ms: soundCode.BEACON_SLOT_MS });
       }
     }
 
