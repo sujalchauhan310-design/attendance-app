@@ -11,47 +11,6 @@
      extra domains (fonts.googleapis.com + fonts.gstatic.com) page ko slow kar
      dete the. System fonts (app.css me fallback chain) turant load hote hain. -->
 <link rel="stylesheet" href="app.css">
-<style>
-/* =========================================================================
-   STEP-REVEAL ANIMATIONS — naya lightweight design
-   -------------------------------------------------------------------------
-   Ye POORA lightweight hai: sirf 4 chhote CSS keyframes + 2 rules. Koi
-   animation library (GSAP/Framer/AOS), koi external font, koi extra file
-   NAHI — isliye website ka size practically 0 bytes se badha hai.
-
-   Flow: step 1 (sirf code) -> step 2 (details form) -> step 3 (new code).
-   JS `revealStep()` inhe `display:none` se `display:block` + animation
-   chalu karke laata hai. Har step halka sa upar se slide hokar fade-in hota
-   hai, aur ek soft glow pulse deta hai — modern dikhta hai par heavy nahi.
-
-   `prefers-reduced-motion` respect karte hain: jise animation ki
-   zaroorat nahi, uske liye animation band kar dete hain (accessibility).
-   ========================================================================= */
-@keyframes stepIn {
-  from { opacity: 0; transform: translateY(18px) scale(0.985); }
-  to   { opacity: 1; transform: none; }
-}
-/* Naye code wale section par ek halka sa "glow" pulse — code aa raha hai. */
-@keyframes glowPulse {
-  0%, 100% { box-shadow: 0 10px 30px rgba(217, 180, 85, 0.08); }
-  50%      { box-shadow: 0 12px 42px rgba(55, 211, 153, 0.22); }
-}
-.step-reveal {
-  animation: stepIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-/* Sirf step-3 (new code) par glow pulse — baaki steps plain fade hain. */
-#stepVerify.step-reveal {
-  border-color: rgba(55, 211, 153, 0.5);
-  animation: stepIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both,
-             glowPulse 2.4s ease-in-out 0.45s infinite;
-}
-/* Accessibility: animation-hat pasand karne walon ke liye band. */
-@media (prefers-reduced-motion: reduce) {
-  .step-reveal, #stepVerify.step-reveal {
-    animation: none !important;
-  }
-}
-</style>
 </head>
 <body>
 <div class="app">
@@ -70,24 +29,11 @@
       <label class="label" for="code">Code from teacher</label>
       <input id="code" class="code-input" type="text" inputmode="numeric" pattern="[0-9]*"
         maxlength="5" autocomplete="off" placeholder="00000" aria-describedby="codeHint">
-      <p class="hint" id="codeHint">Teacher ke board par likha 5-digit code. Ye sirf kuch minute chalta hai.</p>
+      <p class="hint" id="codeHint">Teacher ke screen par likha 5-digit code — ye sirf ~10 second me badal jaata hai, turant daalein aur mark karein.</p>
       <p id="codeErr" class="field-error hide">Code me sirf digits (0–9) chalte hain.</p>
     </div>
 
-    <!-- ============ STEP-REVEAL ANIMATION (beacon ka replacement) ============
-         Naya design: teeno step ek-ek karke reveal hote hain, har step par
-         halka sa fade + slide + glow. Ye POORA lightweight hai — sirf CSS
-         keyframes (koi library nahi, koi extra file nahi), isliye website ka
-         size practically 0 bytes se badha hai (comments ke ilawa).
 
-         Sequence:
-           Step 1: sirf CODE input (details chhupi hain)
-           Step 2: code milte hi DETAILS form animate hokar aata hai
-           Step 3: confirm karne par NAYA CODE ka section/pop-up aata hai
-         Har step ka wrapper `.step-reveal` class se control hota hai, aur JS
-         sirf `revealStep(n)` se class toggle karta hai. -->
-    <!-- STEP 2 wrapper: details form. Initially hidden (step 1 = sirf code). -->
-    <div class="step-reveal" id="stepDetails" style="display:none;">
     <div class="field">
       <label class="label" for="rollNo">Roll Number</label>
       <input id="rollNo" class="input" type="text" inputmode="numeric" pattern="[0-9]*"
@@ -134,13 +80,10 @@
         </optgroup>
       </select>
     </div>
-  </div><!-- /stepDetails -->
   </section>
 
   <!-- ================= STEP 2 — subject details ================= -->
-  <!-- Ye bhi stepDetails ke andar nahi hai, par ek alag reveal class par hai
-       jise JS step-2 ke saath hi chhata hai (studentDetails). -->
-  <section class="card step-reveal" id="stepSubject" style="display:none;">
+  <section class="card">
     <div class="card-title">
       <h3>Class details</h3>
       <span class="chip" id="detailsHintChip">Teacher ke code se match karein</span>
@@ -201,15 +144,12 @@
   </section>
 
   <!-- ================= STEP 3 — location ================= -->
-  <!-- Location card + submit button dono step-2 ke saath reveal hote hain
-       (student ne pehle code + details bhar liye). -->
-  <div class="step-reveal" id="stepAction" style="display:none;">
   <section class="card">
     <div class="card-title">
       <h3>Location check</h3>
       <span class="chip chip-gold" id="radiusChip">📍 Radius 150 m</span>
     </div>
-    <p class="card-sub">Attendance ka proof server khud verify karta hai. GPS sirf tab chahiye jab is class me location check ON ho.</p>
+    <p class="card-sub">Attendance ka proof server khud verify karta hai (code + location check). GPS sirf tab chahiye jab is class me location check ON ho.</p>
 
     <div class="presence warn" id="presence">
       <div class="ring" id="presenceIcon">!</div>
@@ -245,37 +185,6 @@
   <button id="submitBtn" type="button" class="btn btn-primary btn-block mt-2" onclick="openConfirm()">
     Mark Attendance
   </button>
-  </div><!-- /stepAction -->
-
-  <!-- ================= STEP 3 — NEW CODE (beacon ka replacement) =========
-       Ye section tab aata hai jab teacher ne "Generate New Code" dabaya
-       hota hai. Usi waqt ek pop-up (modal) bhi khulta hai jisme student
-       ye code daalta hai. Sahi code = attendance approve.
-       Ye BHI step-3 reveal animation se aata hai (slide + fade). -->
-  <section class="card accent step-reveal" id="stepVerify" style="display:none;">
-    <div class="card-title">
-      <h3>🔐 Teacher ka naya code</h3>
-      <span class="chip chip-ok" id="verifyChip">Waiting</span>
-    </div>
-    <p class="card-sub" id="verifySub">
-      Teacher ne confirm kar liya hai ki sab aa gaye hain. Ab unke board par
-      dikhne wala 6-digit code yahan daalein — aapki attendance approve ho jayegi.
-    </p>
-
-    <div class="field mb-0">
-      <label class="label" for="verifyCodeInput">New code (6 digits)</label>
-      <input id="verifyCodeInput" class="code-input" type="text" inputmode="numeric"
-        pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="000000"
-        aria-describedby="verifyHint">
-      <p class="hint" id="verifyHint">Teacher ka board/projector par dikhta hai. Sirf digits (0–9).</p>
-      <p id="verifyErr" class="field-error hide"></p>
-    </div>
-
-    <button type="button" class="btn btn-ok btn-block mt-2" id="verifySubmitBtn" onclick="submitVerifyCode()">
-      ✓ Verify aur attendance approve karo
-    </button>
-    <p class="muted fs-xs mt-1" id="verifyTimerNote"></p>
-  </section>
 
   <div id="queueStatus" class="mt-2"></div>
   <div id="failedBox" class="mt-2"></div>
@@ -333,36 +242,6 @@
     <div class="sheet-foot">
       <button type="button" class="btn btn-ghost" onclick="closeConfirm()">Cancel</button>
       <button type="button" class="btn btn-primary" id="confirmBtn" onclick="confirmSubmit()">Yes, mark me present</button>
-    </div>
-  </div>
-</div>
-
-<!-- ================= NEW CODE pop-up (stage-2) =================
-     Ye pop-up tab khulta hai jab teacher ne "Generate New Code" dabaya
-     hota hai. Purane beacon wale flow ki tarah TEACHER side par koi popup
-     nahi aata — ab student ke phone par aata hai, aur student yahi code
-     daalta hai. Sahi code = attendance approve. -->
-<div class="modal" id="verifyModal" role="dialog" aria-modal="true" aria-labelledby="verifyTitle">
-  <div class="sheet">
-    <div class="sheet-grab"></div>
-    <div class="sheet-head">
-      <div>
-        <h2 id="verifyTitle">🔐 Teacher ka naya code</h2>
-        <p class="muted fs-sm mt-1">Board par dikhne wala 6-digit code daalein — attendance turant approve ho jayegi.</p>
-      </div>
-      <button type="button" class="sheet-close" onclick="closeVerifyModal()" aria-label="Close">✕</button>
-    </div>
-
-    <div class="field mb-0">
-      <label class="label" for="verifyCodeModalInput">New code</label>
-      <input id="verifyCodeModalInput" class="code-input" type="text" inputmode="numeric"
-        pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="000000">
-      <p id="verifyModalErr" class="field-error hide"></p>
-    </div>
-
-    <div class="sheet-foot">
-      <button type="button" class="btn btn-ghost" onclick="closeVerifyModal()">Baad me</button>
-      <button type="button" class="btn btn-ok" id="verifyModalSubmitBtn" onclick="submitVerifyCode()">Verify</button>
     </div>
   </div>
 </div>
@@ -467,38 +346,6 @@ function enforceDigitsOnly(inputEl, errEl) {
 enforceDigitsOnly($('code'), $('codeErr'));
 enforceDigitsOnly($('rollNo'), $('rollNoErr'));
 enforceDigitsOnly($('myRollNo'), $('myRollNoErr'));
-// Naye "New Code" ke dono inputs (pop-up + section) — sirf digits.
-enforceDigitsOnly($('verifyCodeModalInput'), $('verifyModalErr'));
-enforceDigitsOnly($('verifyCodeInput'), $('verifyErr'));
-
-// ---- STEP-REVEAL TRIGGER ----
-// Attendance code input par listener. Jaise hi code 5-digit ho jaata hai:
-//   1. Step-2 (details + subject + location/submit) animate hokar aata hai,
-//   2. Server se ek halka peek hota hai (location chahiye ya nahi).
-// Ye SAHI sequence hai jo user ne maanga tha: "pehle sirf code, phir details".
-$('code').addEventListener('input', function () {
-  const v = this.value.trim();
-  if (/^[0-9]{5}$/.test(v)) {
-    revealDetailsOnce();
-    peekSession(v);
-  } else {
-    // Code khaali/purna hata diya -> details phir se chhupa do, taaki student
-    // galat code par aage nahi badhe.
-    detailsRevealed = false;
-    hideSteps(['stepDetails', 'stepSubject', 'stepAction']);
-  }
-});
-
-// Ek chhota helper: diye gaye step wrappers ko turant chhupa deta hai
-// (animation ke bina — user ne code mita diya hai, to fade-out ka wait nahi).
-function hideSteps(ids) {
-  ids.forEach(function (id) {
-    const el = $(id);
-    if (!el) return;
-    el.classList.remove('step-reveal');
-    el.style.display = 'none';
-  });
-}
 
 /* ---------- system-wise option filter (Annual / Semester) ----------
    UI me System SABSE PEHLE hai. Uske baad Class aur Course Type ki list aati
@@ -562,257 +409,47 @@ function syncSystemFromClass() {
     applySystemFilter();
   }
 }
-/* =====================================================================
-   STAGE-2 "NEW CODE" — beacon + chirp + relay ka poora replacement
-   ---------------------------------------------------------------------
-   Naya flow (student side):
-     Step 1: sirf CODE input dikhta hai.
-     Step 2: 5-digit code milte hi DETAILS form animate hokar aata hai.
-     Step 3: "Mark Attendance" dabane par entry teacher ke PENDING list me
-             jaati hai. Teacher sab confirm hone par "Generate New Code"
-             dabata hai, aur student ke phone par POP-UP khulta hai.
-     Step 4: student naya 6-digit code daalta hai -> attendance APPROVE.
 
-   ---- Animation sequence ----
-   revealStep() neeche diye gaye wrappers ko `display:none` se laata hai aur
-   unpe halka slide+fade animation chalaata hai. Ye CSS-only hai (head me
-   <style>), koi library nahi — website lightweight rehti hai.
-
-   ---- 20s (teacher UI) vs 30s (real server TTL) ----
-   Student ke yahan timer UI nahi hai; student sirf code daalta hai. Asli
-   validity server par hoti hai (30s). Student ko koi countdown nahi
-   dikhaya jaata — kyunki use na pata ki teacher ne kitne der pehle code
-   banaya. Server galat/expired code par saaf error de deta hai.
-   ===================================================================== */
-
-// ---- STEP REVEAL (animation trigger) ----
-// Yahan se decide hota hai kaunsa step kab dikhega.
-// `stepDetails` / `stepSubject` / `stepAction` ko code 5-digit hone par
-// dikhate hain, aur `stepVerify` ko naya code aane par.
-function showReveal(id) {
-  const el = $(id);
-  if (!el || el.style.display !== 'none') return;
-  // Pehle `display:none` hatate hain, phir animation class add karte hain.
-  // CSS ke `stepIn` keyframes `both` fill-mode use karte hain, isliye
-  // animation shuru se proper opacity 0 se hoti hai (flicker nahi hota).
-  el.style.display = '';
-  el.classList.add('step-reveal');
-  // Chhota reflow force — browser ko ek frame lagta hai taaki animation
-  // add hone ke baad shuru se chale (warna kabhi-kabhi skip ho jaati hai).
-  void el.offsetWidth;
-}
-
-// Details + submit + location — sab ek saath (step 2). Sirf ek baar call
-// hota hai (5-digit code milte hi). Student pehle se code bhar raha hai,
-// isliye jab wo pura hota hai hum aage badh jaate hain.
-let detailsRevealed = false;
-function revealDetailsOnce() {
-  if (detailsRevealed) return;
-  detailsRevealed = true;
-  showReveal('stepDetails');
-  showReveal('stepSubject');
-  showReveal('stepAction');
-  // Location check chahiye to yahin se GPS maang lete hain (load par nahi),
-  // taaki step-2 reveal hone hi student ko loading dikhe.
-  maybeFetchLocation();
-}
-
-// ---- Session location requirement ----
-// Server se batata hai is class me GPS chahiye ya nahi. Default true (safe):
-// jab tak server saaf "OFF" na kahe, GPS ki koshish karte hain.
-// (coords / locBusy ka asli declaration niche location section me hai.)
+/* ---------- location-check peek ----------
+   Student ko code daalte hi server batata hai ki is session me location (GPS)
+   check chahiye ya nahi — warna student OFF hone par bhi GPS ka intezaar
+   karta tha. Default true (safe): jab tak server saaf "OFF" na kahe, GPS ki
+   koshish karte hain. Ek code par ek hi request, aur jaldi-typing par 1.2s. */
+let locPeekCache = { code: '', required: true, done: false };
+let locPeekBusy = false;
 let sessionLocationRequired = true;
 
-// Attendance code 5-digit ho jaaye to details reveal + server se peek.
-// Har keystroke par network call nahi — sirf jab poora 5-digit code ho.
-let peekCache = { code: '', done: false };
-let peekBusy = false;
-async function peekSession(code) {
+async function peekLocationRequired(code) {
   const clean = String(code || '').trim();
   if (!/^[0-9]{5}$/.test(clean)) return;
-  if (peekCache.code === clean && peekCache.done) return;
-  if (peekBusy) return;
-  peekBusy = true;
+  if (locPeekCache.code === clean && locPeekCache.done) return;
+  if (locPeekBusy) return;
+  locPeekBusy = true;
   try {
-    const res = await fetch('/api/student/verify-status?code=' + encodeURIComponent(clean), {
+    const res = await fetch('/api/student/location-check?code=' + encodeURIComponent(clean), {
       headers: { Accept: 'application/json' },
     });
     const data = await res.json().catch(() => ({}));
-    peekCache = { code: clean, done: true };
-    if (res.ok) {
-      // Location check chahiye ya nahi (session-level). Sirf res.ok par bharosa.
-      sessionLocationRequired = data.location_required === true;
-      maybeFetchLocation();
-      if (!sessionLocationRequired) {
-        setPresence('ok', 'Location ki zaroorat nahi', 'Is class me GPS check OFF hai — code se verify hoga.');
-      }
-    }
+    const required = res.ok && data.location_required === true;
+    locPeekCache = { code: clean, required, done: true };
+    sessionLocationRequired = required;
   } catch (err) {
-    // Net fail = kuch assume nahi karte; default (location required) hi rehta
-    // hai, aur server apne error message se bata dega. Student block nahi hota.
-    peekCache = { code: clean, done: true };
+    // Net fail = default (safe) rakho — server ka apna error message batayega.
+    locPeekCache = { code: clean, required: true, done: true };
   } finally {
-    peekBusy = false;
+    locPeekBusy = false;
   }
 }
 
-// Location tab chahiye tabhi GPS maango (saaf, jaldi).
-function maybeFetchLocation() {
-  if (sessionLocationRequired && !coords && !locBusy) fetchLocation({});
-}
-
-/* =====================================================================
-   STEP 3 — NAYA CODE: pop-up + submit
-   ---------------------------------------------------------------------
-   Teacher "Generate New Code" dabata hai -> server 6-digit code banata hai
-   (UI par 20s, server par 30s valid). Student ke phone par POP-UP khulta hai.
-   Student code daalta hai; sahi ho to uski PENDING attendance APPROVE ho
-   jaati hai (server Attendance.status "pending" -> "present").
-
-   Student ko koi countdown NAHI dikhaya jaata — requirement me nahi kaha
-   gaya, aur zaroorat bhi nahi: student ko nahi pata teacher ne code kab
-   banaya. Server galat/expired code par saaf error deta hai, aur student
-   dobara try kar sakta hai (teacher naya code bana sakta hai).
-   ===================================================================== */
-
-// Naya code aa gaya -> step-3 section animate hokar aaye + pop-up khule.
-function onVerifyCodeReady() {
-  showReveal('stepVerify');
-  const chip = $('verifyChip');
-  if (chip) { chip.textContent = 'Ready'; chip.className = 'chip chip-ok'; }
-  openVerifyModal();
-}
-
-function openVerifyModal() {
-  if (!$('verifyModal')) return;
-  openModal('verifyModal');
-  // Focus input par — student turant type kar sake.
-  setTimeout(() => {
-    const input = $('verifyCodeModalInput');
-    if (input) input.focus();
-  }, 260);
-}
-
-function closeVerifyModal() {
-  closeModal('verifyModal');
-  // Pop-up band karne par bhi step-3 section khula rahe — student chahe to
-  // scroll karke wahi code wahin daal sakta hai.
-  const sectionInput = $('verifyCodeInput');
-  if (sectionInput && $('stepVerify')) {
-    setTimeout(() => sectionInput.focus(), 260);
+$('code').addEventListener('input', () => {
+  const v = $('code').value.trim();
+  if (v.length === 5) peekLocationRequired(v);
+  // Code badal gaya to purana peek result bekaar — naya code dobara check hoga.
+  else if (locPeekCache.code !== v) {
+    locPeekCache = { code: v, required: true, done: false };
   }
-}
+});
 
-// Student naya code submit karta hai (pop-up ya section — dono se).
-async function submitVerifyCode() {
-  const btn = $('verifyModalSubmitBtn');
-  const errEl = $('verifyModalErr');
-  const modalInput = $('verifyCodeModalInput');
-  const sectionInput = $('verifyCodeInput');
-
-  // Value pop-up input se, warna section input se.
-  const entered = String((modalInput && modalInput.value) || (sectionInput && sectionInput.value) || '').trim();
-  if (!/^[0-9]{6}$/.test(entered)) {
-    showVerifyError('Naya code exactly 6 digit ka hona chahiye.');
-    return;
-  }
-
-  const code = String($('code').value.trim());
-  const roll = String($('rollNo').value.trim());
-  const device_id = getDeviceId();
-
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Checking…'; }
-  const sectionBtn = $('verifySubmitBtn');
-  if (sectionBtn) { sectionBtn.disabled = true; sectionBtn.innerHTML = '<span class="spinner"></span> Checking…'; }
-
-  try {
-    const res = await fetch('/api/student/verify-code', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, roll_no: roll, verify_code: entered, device_id }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.success) {
-      showVerifyError(data.error || 'Code verify nahi hua.');
-      // Galat code: input saaf karke focus wapas (student naya try kare).
-      if (modalInput) { modalInput.value = ''; modalInput.focus(); }
-      if (sectionInput) sectionInput.value = '';
-      return;
-    }
-    onVerifyApproved(entered, Number(data.approved) || 0);
-  } catch (err) {
-    showVerifyError('Internet nahi hai. Dobara try karein.');
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Verify'; }
-    if (sectionBtn) { sectionBtn.disabled = false; sectionBtn.textContent = '✓ Verify aur attendance approve karo'; }
-  }
-}
-
-// Error dono jagah (pop-up + section) dikhata hai, aur dono se saaf karta hai.
-function showVerifyError(msg) {
-  const errEl = $('verifyModalErr');
-  if (errEl) { errEl.textContent = msg; errEl.classList.remove('hide'); }
-  const serr = $('verifyErr');
-  if (serr) { serr.textContent = msg; serr.classList.remove('hide'); }
-}
-
-// ---- Sahi code mila -> attendance approve ----
-function onVerifyApproved(entered, approved) {
-  closeModal('verifyModal');
-  const sectionInput = $('verifyCodeInput');
-  if (sectionInput) sectionInput.value = '';
-  const roll = String($('rollNo').value.trim());
-
-  showResult('ok', 'Attendance approved! 🎉',
-    approved > 0
-      ? 'Aapka naya code sahi tha — attendance count ho gayi hai.'
-      : 'Aapki attendance pehle se count me thi. Code sahi tha!',
-    [['Roll Number', roll], ['Verified code', entered], ['Approved entries', String(approved)]]);
-  toast('Attendance approved ✓', 'ok');
-
-  // Chip "done", section ko update — double-submit avoid.
-  const chip = $('verifyChip');
-  if (chip) { chip.textContent = 'Approved'; chip.className = 'chip chip-ok'; }
-  const sub = $('verifySub');
-  if (sub) sub.textContent = 'Code verify ho gaya — aapki attendance count ho gayi hai.';
-  const note = $('verifyTimerNote');
-  if (note) note.textContent = '';
-}
-
-/* ---- Poll: teacher ne naya code banaya ya nahi? ----
-   Ye halka poll student ke phone par chalta hai jab tak code nahi aata.
-   Server sirf boolean (`verify_needed`) bhejta hai — CODE kabhi nahi, warna
-   koi valid attendance code rakh kar poll karte reh kar code nikal le sakta.
-   Ye bhi purane "beacon peek" ki jagah hai. */
-let verifyPollTimer = null;
-async function startVerifyPoll() {
-  if (verifyPollTimer) return;
-  const tick = async () => {
-    if (document.hidden) return;
-    const code = String($('code').value.trim());
-    if (!/^[0-9]{5}$/.test(code)) return;
-    try {
-      const res = await fetch('/api/student/verify-status?code=' + encodeURIComponent(code), {
-        headers: { Accept: 'application/json' },
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.verify_needed) {
-        // Naya code aa gaya -> pop-up. Poll band.
-        stopVerifyPoll();
-        onVerifyCodeReady();
-      }
-    } catch (err) {
-      // Net fail par chup-chaap agli tick ka intezaar — student block nahi hota.
-    }
-  };
-  // Turant ek check, phir har 3s.
-  tick();
-  verifyPollTimer = setInterval(tick, 3000);
-}
-function stopVerifyPoll() {
-  if (verifyPollTimer) clearInterval(verifyPollTimer);
-  verifyPollTimer = null;
-}
 /* ---------- platform help (iOS vs Android steps) ---------- */
 function detectPlatform() {
   const ua = navigator.userAgent || '';
@@ -936,8 +573,8 @@ async function fetchLocation(opts) {
 // Pehli load par GPS ka intezaar NAHI karte. Location ab default OFF hai, isliye
 // bina zaroorat maangna bekaar tha (aur fail hone par student ko laal "Location
 // nahi mil paayi" error dikhta tha — jabki GPS ki zaroorat hi nahi thi). GPS
-// sirf tab maangte hain jab beacon-check bataye ki is session me location chahiye
-// (wo code daalte hi pata chal jata hai — dekho peekSession).
+// sirf tab maangte hain jab location-check bataye ki is session me location chahiye
+// (wo code daalte hi pata chal jata hai — dekho peekLocationRequired).
 setPresence('warn', 'Location check zaroorat par hoga', 'Code daalte hi pata chal jayega ki is class me GPS chahiye ya nahi.');
 
 /* ---------- roll number → roster auto-fill + lock ---------- */
@@ -1019,9 +656,6 @@ function validatePayload(p) {
   if (!p.system) return 'Annual ya Semester chunein.';
   if (!p.subject) return 'Subject chunein.';
   if (!p.course_type) return 'Course type chunein.';
-  // Beacon ka koi field nahi — naya "New Code" step-3 me aata hai (pop-up),
-  // aur wo sirf tab aata hai jab teacher code banata hai. Yahan iski zaroorat
-  // nahi: pehle "Mark Attendance" se pending entry ban jaati hai.
   return null;
 }
 
@@ -1049,7 +683,7 @@ function openConfirm() {
 
   $('confirmErr').classList.add('hide');
   $('confirmLoc').innerHTML = !sessionLocationRequired
-    ? `<div class="presence ok"><div class="ring">✓</div><div><div class="txt">Location ki zaroorat nahi</div><div class="sub">Is class me GPS check OFF hai — beacon/code se verify hoga.</div></div></div>`
+    ? `<div class="presence ok"><div class="ring">✓</div><div><div class="txt">Location ki zaroorat nahi</div><div class="sub">Is class me GPS check OFF hai — valid code + device-lock se verify hoga.</div></div></div>`
     : coords
     ? `<div class="presence warn"><div class="ring">!</div><div><div class="txt">GPS fix ready</div><div class="sub">Accuracy ≈ ${esc(coords.accuracy)} m · submit par server class ke andar hone ki check karega</div></div></div>`
     : `<div class="presence bad"><div class="ring">✕</div><div><div class="txt">Location abhi nahi mili</div><div class="sub">Submit dabane par hum ek baar phir koshish karenge.</div></div></div>`;
@@ -1144,11 +778,6 @@ async function confirmSubmit() {
   btn.innerHTML = '<span class="spinner"></span> Checking location…';
   errEl.classList.add('hide');
 
-  // BEACON ERROR HANDLER REMOVED. Purane beacon flow me galat/expired beacon
-  // code par ye retryable error aata tha. Ab beacon nahi hai, isliye iski
-  // zaroorat nahi — naya "New Code" flow apna alag handle rakhta hai
-  // (submitVerifyCode + showVerifyError).
-
   try {
     // 1. Fresh GPS fix — SIRF jab session me location chahiye (default ab OFF).
     //    OFF hone par GPS ka intezaar bilkul nahi karte, mark seedha jaata hai
@@ -1174,10 +803,6 @@ async function confirmSubmit() {
     // hai — burst spread karke server ko bachaate hain (upar detail me likha hai).
     await spreadSubmitBurst();
     let result = await attemptSubmit(payload, 2);
-
-    // BEACON galat/khatam ka handler hata diya — naye flow me beacon jaisa
-    // koi hard-fail step nahi hai. Neeche ke "need_location" branch aur
-    // normal error handling hi ab kaam karte hain.
 
     // Server ne kaha "pehle GPS se koshish karo" (Koshish X/5) — matlab mark abhi
     // SAVE NAHI hua aur teacher ki list me bhi nahi gaya. Student ko yaheen rok
@@ -1217,23 +842,22 @@ async function confirmSubmit() {
       if (result.data.pending) {
         const reason = result.data.pending_reason || '';
         const title =
+          reason === 'approval_mode' ? 'Location verified — approval pending' :
           reason === 'flagged' ? 'Teacher ke review par hai' :
-          'Confirm ho gaya ✓';
+          'Teacher se approve karwao';
         const msg =
-          reason === 'flagged'
-            ? 'Aapki entry teacher ke Review tab me hai — wo confirm karenge to attendance count hogi.'
-            // Naye stage-2 flow ka MAIN message: student ka kaam ho gaya. Ab
-            // teacher sab confirm hone par "Generate New Code" dabayega, aur
-            // student ke phone par pop-up aayega. Usme code daalne par
-            // attendance approve ho jayegi.
-            : 'Aapki entry teacher ke paas pahunch gayi hai. Teacher jab sab students ke confirm hone par naya code banayenge, aapke phone par ek pop-up aayega — usme 6-digit code daalein, attendance approve ho jayegi.';
-        showResult('ok', title, msg,
+          reason === 'approval_mode'
+            ? 'Aap class ke andar the. Teacher ke approve karne par ye count hogi.'
+            : reason === 'flagged'
+              // Relay-shak wale case yahin aate hain. Student ko asli ilaaj
+              // batate hain: GPS ON rakhein — tab agali baar khud-ba-khud count
+              // hogi (teacher ko tap nahi karna padega). Ye 120 students me
+              // mass-pending rokne ke liye zaroori hai.
+              ? 'Aapki entry teacher ke Review tab me hai — wo confirm karenge to attendance count hogi. Agli baar turant count karane ke liye phone ka GPS/Location ON rakhein aur "Get location" dabayein (GPS band hone par system shak karta hai).'
+              : 'Aapki location verify nahi ho payi (net/GPS), isliye entry teacher ke paas chali gayi hai. Wo present mark karenge to attendance count hogi.';
+        showResult('warn', title, msg,
           [['Roll Number', p.roll_no], ['Name', p.name], ['Subject', p.subject], ['Course Type', p.course_type]]);
-        toast(title, 'ok');
-        // IMPORTANT: Naya code aane tak poll CHALU rakhte hain. Ye 3s par
-        // /api/student/verify-status hit karta hai aur jab teacher code banata
-        // hai, pop-up khul jaata hai. Tabhi poll band hota hai.
-        startVerifyPoll();
+        toast(title, 'warn');
       } else {
         showResult('ok', 'Attendance marked!', 'Aapki attendance record ho gayi hai.',
           [['Roll Number', p.roll_no], ['Name', p.name], ['Class', p.class_name],

@@ -453,12 +453,6 @@ table.data tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
 .tab-panel.active { display: block; animation: fadeUp 0.22s ease; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
-/* ---------- BEACON PROJECTOR CSS REMOVED ----------
-   Purane beacon flow ka fullscreen rotating-code view ab use nahi hota
-   (naye stage-2 "New Code" flow me code teacher ke code-card panel par
-   chhota ring ke saath dikhta hai, aur students apne phone ke pop-up me
-   daalte hain). Ye ~1.4 KB CSS hata diya gaya hai taaki app.css lightweight
-   rahe — koi bekaar rule nahi. */
 
 /* ---------- modals (bottom sheet on mobile, card on desktop) ---------- */
 .modal {

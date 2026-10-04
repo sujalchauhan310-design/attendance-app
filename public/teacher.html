@@ -1,4 +1,4 @@
-?<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -181,25 +181,23 @@
         <div class="field">
           <label class="label" for="expiryMinutes">Code kitni der chalega</label>
           <select id="expiryMinutes" class="select">
+            <option value="0.5">20 second — Quick (jaldi mark karwao)</option>
             <option value="2">2 minute — sabse safe</option>
             <option value="5">5 minute</option>
             <option value="7" selected>7 minute (default)</option>
           </select>
-          <p class="hint">Chhota window = code WhatsApp par share hokar bahar use hone ka mauka kam.</p>
+          <p class="hint">Chhota window = code WhatsApp par share hokar bahar use hone ka mauka kam. Quick mode me students ko ~10 second dikhta hai (asli me ~20 second chalta hai, taaki slow phone wale bhi mark kar sakein).</p>
         </div>
 
-        <!-- BEACON REMOVED. Uski jagah stage-2 "New Code" flow hai — neeche
-             code card me "Generate New Code" button. Wahan teacher sab
-             students confirm hone ke baad ek 6-digit code banata hai jo
-             students ke phone par pop-up me aati hai. -->
+
         <div class="stack" style="gap:10px;">
           <div class="switch-row">
-            <div><div class="t">📍 Location check</div><div class="d" id="locSwitchNote">OFF — GPS optional (code + naya code kaafi hai)</div></div>
+            <div><div class="t">📍 Location check</div><div class="d" id="locSwitchNote">OFF — GPS optional (sirf code + device-lock hi gate hai)</div></div>
             <label class="switch"><input type="checkbox" id="requireLocation" onchange="saveSelection()"><i></i></label>
           </div>
           <div class="switch-row">
             <div><div class="t">✅ Approval mode</div><div class="d">Har mark aapke approve karne par count hoga</div></div>
-            <label class="switch"><input type="checkbox" id="requireApproval" checked><i></i></label>
+            <label class="switch"><input type="checkbox" id="requireApproval"><i></i></label>
           </div>
           <div class="switch-row">
             <div><div class="t">📧 PDF email</div><div class="d">20 minute baad attendance PDF inbox par</div></div>
@@ -228,49 +226,6 @@
           <div class="muted fs-sm mt-1" id="codeCombo"></div>
         </div>
 
-        <!-- ============ STAGE-2: NEW CODE (beacon ka replacement) ============
-             Flow: students "Confirm" dabate hain -> unki entry teacher ke
-             pending list me chali jaati hai. Jab SAB students confirm ho
-             jaate hain, tab ye panel active hota hai aur teacher
-             "Generate New Code" dabata hai. Ek 6-digit code banti hai jo
-             students ke phone par pop-up me aati hai.
-
-             TIMER (20s vs 30s — dhyan se padhein):
-               * Neeche ka ring/text UI par sirf 20 SECOND dikhata hai.
-               * Asli code server par 30 SECOND valid rehta hai.
-             Dono alag values server se aati hain (verify_display_seconds /
-             verify_real_seconds), isliye frontend me koi hard-coded number
-             nahi hai. Server hi source of truth hai. -->
-        <div id="verifyPanel" class="hide" style="margin-top:14px; padding:14px; border:1px solid rgba(55,211,153,.35); border-radius:12px; background:rgba(55,211,153,.06);">
-          <div class="row between" style="align-items:center; gap:10px;">
-            <div class="grow">
-              <div style="font-size:.8rem; font-weight:700; color:var(--ok); letter-spacing:.04em;">🔐 STEP 2 — NEW CODE</div>
-              <div class="muted fs-sm mt-1" id="verifyHint">Sab students confirm hone ka intezaar hai…</div>
-            </div>
-            <div class="ring-wrap" style="width:76px; flex:0 0 auto;">
-              <svg viewBox="0 0 120 120" aria-hidden="true">
-                <circle class="track" cx="60" cy="60" r="52"></circle>
-                <circle class="bar" id="verifyRingBar" cx="60" cy="60" r="52" stroke-dasharray="326.7" stroke-dashoffset="0"></circle>
-              </svg>
-              <div class="mid"><div class="num" id="verifyRingTime" style="font-size:1.1rem;">--</div><div class="lbl">s</div></div>
-            </div>
-          </div>
-
-          <!-- Naya code + uska UI timer -->
-          <div id="verifyCodeBox" class="hide" style="margin-top:12px;">
-            <div class="center">
-              <div class="mono" id="verifyCodeDisplay" style="font-size:2.4rem; letter-spacing:.32em; font-weight:700; color:var(--ok);">------</div>
-              <div class="muted fs-xs mt-1">Students ke phone par ye pop-up aayega — wo yahi code daalenge.</div>
-            </div>
-            <div class="progress mt-2"><i id="verifyBar" style="width:0%; background:var(--ok);"></i></div>
-          </div>
-
-          <!-- Button sirf tab dikhta hai jab sab confirm ho jaayein -->
-          <button type="button" class="btn btn-ok btn-block mt-3 hide" id="verifyGenBtn" onclick="generateVerifyCode()">⚡ Generate New Code</button>
-          <div class="muted fs-xs mt-1" id="verifyNote">
-            UI par 20 second dikhega. Asli code server par 30 second valid rahega (network delay ke liye chhota buffer).
-          </div>
-        </div>
 
         <div class="row" style="gap:8px; margin-top:12px;">
           <button type="button" class="btn btn-sm grow" onclick="copyCode()">Copy code</button>
@@ -733,9 +688,8 @@
   </section>
 </div>
 
-<!-- BEACON PROJECTOR REMOVED (fullscreen rotating-code view). Naya stage-2
-     "New Code" code seedha teacher ke screen par 20 second dikhta hai, jo
-     students apne phone ke pop-up me daalte hain. -->
+<!-- ==================== MODALS ==================== -->
+
 <div class="modal" id="generateModal" role="dialog" aria-modal="true" aria-labelledby="genTitle">
   <div class="sheet">
     <div class="sheet-grab"></div>
@@ -1053,6 +1007,10 @@ const SELECTION_KEY = 'attendance_teacher_selection';
 const ACTIVE_SESSION_KEY = 'attendance_teacher_active_session';
 
 let expiryTimestamp = null;
+// SOFT DEADLINE: dikhne wale countdown (expiryTimestamp) ke alawa asli accept
+// window ka timestamp bhi rakhte hain. Quick code me ye doosra bada hota hai —
+// isliye 10s par hard "Expired" nahi dikhate, sirf "Closing…".
+let realExpiryTimestamp = null;
 let timerInterval = null;
 let activeSessionId = null;
 let lastRecords = [];
@@ -1162,7 +1120,6 @@ function restoreSelection() {
     if (saved.expiry_minutes) $('expiryMinutes').value = saved.expiry_minutes;
     if (typeof saved.require_approval === 'boolean') $('requireApproval').checked = saved.require_approval;
     if (typeof saved.send_pdf === 'boolean') $('autoSendPdf').checked = saved.send_pdf;
-    // Beacon prefs hata diye — ab koi restore karne ki zaroorat nahi.
   } catch (err) {}
 }
 function saveActiveSession(data) {
@@ -1251,8 +1208,6 @@ function updateReportLabel() {
 const RING_CIRCUMFERENCE = 326.7; // 2πr, r = 52
 
 function updateTimer() {
-  // Attendance code ka main countdown (stage-2 "New Code" ka apna 1-second
-  // timer alag chalata hai — tickVerifyUi).
   if (!expiryTimestamp) return;
   const remaining = Math.max(0, Math.round((expiryTimestamp - Date.now()) / 1000));
   const m = Math.floor(remaining / 60);
@@ -1265,6 +1220,20 @@ function updateTimer() {
   bar.style.stroke = ratio <= 0.2 ? 'var(--err)' : ratio <= 0.45 ? 'var(--warn)' : 'var(--gold)';
 
   if (remaining <= 0) {
+    // SOFT DEADLINE: dikhne wala countdown khatam ho gaya, PAR asli accept
+    // window abhi zinda ho sakta hai (quick code: 10s vs 30s). Abhi "Expired"
+    // dikhaya to agle 20s me student ka mark success hi contradiction lagega
+    // (app buggy dikhega) — aur ek baar pata chal gaya to trick bekaar. Isliye
+    // halka "Closing…" state. HARSH expire sirf tab jab REAL window bhi khatam.
+    const realLeft = realExpiryTimestamp
+      ? Math.max(0, Math.round((realExpiryTimestamp - Date.now()) / 1000))
+      : 0;
+    if (realLeft > 0) {
+      $('codeStateChip').textContent = 'Closing…';
+      $('codeStateChip').className = 'chip chip-warn';
+      $('codeNotes').textContent = `⏳ Countdown dikhne se khatam — students abhi ${realLeft}s tak mark kar sakte hain.`;
+      return;
+    }
     if (timerInterval) clearInterval(timerInterval);
     timerInterval = null;
     $('endSessionBtn').classList.add('hide');
@@ -1320,8 +1289,16 @@ async function refreshSessionStatus(sessionId) {
         : 'ON — server ne lock kiya hai (ALLOW_TEACHER_LOCATION_OFF=false)')
     : 'OFF — GPS optional (class ke andar baithe students pending me nahi jayenge)';
 
-  sessionTotalMs = Math.max(1000, (data.expires_at || 0) - (data.created_at || 0));
-  expiryTimestamp = Date.now() + (data.seconds_left || 0) * 1000;
+  // REAL accept window (server authoritative) — isse pata chalta hai code abhi
+  // bhi zinda hai ya nahi.
+  realExpiryTimestamp = Date.now() + (data.seconds_left || 0) * 1000;
+  // DIKHNE wala countdown. Quick code par server chhota display_seconds_left
+  // bhejta hai (soft deadline) — warna real ke barabar.
+  const displayLeft = (typeof data.display_seconds_left === 'number')
+    ? data.display_seconds_left
+    : (data.seconds_left || 0);
+  sessionTotalMs = Math.max(1000, displayLeft * 1000);
+  expiryTimestamp = Date.now() + displayLeft * 1000;
   $('endSessionBtn').classList.toggle('hide', !data.active);
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = setInterval(updateTimer, 1000);
@@ -1330,16 +1307,8 @@ async function refreshSessionStatus(sessionId) {
   // Countdown timer ko chhue bina: live feed sirf chalte session me poll karti hai.
   if (data.active) {
     startLivePoll();
-    // Stage-2 flow: rotating-code polling ki jagah halka "sab confirm?" poll.
-    // Ye button dikhata hai ki teacher "Generate New Code" dabba sakta hai ya nahi.
-    renderVerifyPanel(Object.assign({ active: true }, data));
-    pollVerifyReadiness();
-    verifyPollTimer = setInterval(pollVerifyReadiness, 5000);
   } else {
     stopLivePoll();
-    if (verifyPollTimer) clearInterval(verifyPollTimer);
-    verifyPollTimer = null;
-    renderVerifyPanel({ active: false });
   }
   return data;
 }
@@ -1356,199 +1325,6 @@ async function restoreActiveSession() {
   }
 }
 
-/* =====================================================================
-   STAGE-2 — "NEW CODE" (beacon ka poora replacement)
-   ---------------------------------------------------------------------
-   Flow:
-     1. Teacher attendance code banata hai (default 7 minute) — upar.
-     2. Students "Confirm" dabate hain -> entry PENDING list me jaati hai.
-     3. Sab confirm hone par "Generate New Code" button ACTIVE ho jaata hai.
-     4. Teacher dabata hai -> 6-digit code. UI par 20s, server par 30s valid.
-     5. Students ke phone par pop-up; sahi code = attendance approved.
-
-   ---- 20s (UI) vs 30s (REAL) — SABSE IMPORTANT PART ----
-   Teacher ke screen par sirf `verifyDisplaySec` (20s) dikhata hai.
-   Server par code `verifyRealSec` (30s) tak valid rehta hai.
-   Ye do alag hain JAAN-BOOJH kar:
-     - UI timer 20 par khatam hote hi teacher ko lagta hai code band.
-     - Server par 10 second ka chhota buffer bacha rehta hai — sirf network
-       latency / type karne me time ke liye. Wo 10s UI me KABHI nahi dikhte.
-   Isliye frontend me koi bhi number hard-code NAHI hai — dono server se
-   aate hain (verify_display_seconds / verify_real_seconds). Server hi
-   source of truth hai; frontend sirf dikhata hai.
-   ===================================================================== */
-
-// Server se aayi hui UI timing. Defaults sirf tab jab field na mile.
-let verifyDisplaySec = 20;   // UI par kitne second DIKHAANE hain (20)
-let verifyRealSec = 30;      // server par kitne second VALID hai (30)
-// UI countdown ka deadline. Ye server ke REAL expiry se banti hai, par
-// display duration se clamp hoti hai (startVerifyUi dekhein).
-let verifyDeadlineMs = 0;
-let verifyTimer = null;
-let verifyPolling = false;
-// "Sab confirm ho gaya?" ka halka poll timer (5s). Purane beacon-loop ki jagah.
-let verifyPollTimer = null;
-// Server se aaya hua last live state (button visibility + roster info).
-let verifyState = { all_confirmed: false, pending_count: 0, roster_size: 0, unverified_roster: false };
-
-function setVerifyHint(msg) {
-  const el = $('verifyHint');
-  if (el) el.textContent = msg;
-}
-
-// 1-second UI tick — ring/bar/text update. Asli validity server par hai;
-// ye sirf teacher ke screen par dikhata hai.
-function tickVerifyUi() {
-  if (!verifyDeadlineMs) return;
-  const leftSec = Math.ceil(Math.max(0, verifyDeadlineMs - Date.now()) / 1000);
-
-  const ringTime = $('verifyRingTime');
-  if (ringTime) ringTime.textContent = String(leftSec);
-  const bar = $('verifyBar');
-  if (bar) bar.style.width = Math.min(100, (leftSec / verifyDisplaySec) * 100) + '%';
-  const ringBar = $('verifyRingBar');
-  if (ringBar) {
-    const ratio = Math.min(1, Math.max(0, leftSec / verifyDisplaySec));
-    ringBar.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE * (1 - ratio)));
-    ringBar.style.stroke = ratio <= 0.35 ? 'var(--err)' : 'var(--ok)';
-  }
-  if (leftSec <= 0) {
-    // UI timer khatam. Server par abhi bhi kuch asli validity bacha hogi, par
-    // wo sirf latency ka buffer hai — naya window nahi. Teacher ko turant
-    // naya code banane ka option de dete hain.
-    clearVerifyTimer();
-    const box = $('verifyCodeBox');
-    if (box) box.classList.add('hide');
-    const btn = $('verifyGenBtn');
-    if (btn) btn.classList.remove('hide');
-    setVerifyHint('Code ka time khatam. Naya code generate karein.');
-  }
-}
-
-function clearVerifyTimer() {
-  if (verifyTimer) clearInterval(verifyTimer);
-  verifyTimer = null;
-  verifyDeadlineMs = 0;
-}
-// Naya code milne par UI timer chalu karta hai.
-//
-// `realMsLeft` = server par kitne ms BACHE hain (30s TTL se gina hua).
-// UI par hum sirf `verifyDisplaySec` (20s) dikhate hain, isliye deadline ko
-// min(realMsLeft, displaySec*1000) par clamp karte hain. Isse:
-//   - UI kabhi 20s se zyada nahi dikhega (teacher ko jhooth nahi),
-//   - server ka 30s buffer chhupa rahega (latency ke liye).
-function startVerifyUi(code, realMsLeft) {
-  clearVerifyTimer();
-  const displayMs = verifyDisplaySec * 1000;
-  verifyDeadlineMs = Date.now() + Math.max(0, Math.min(displayMs, realMsLeft));
-
-  const display = $('verifyCodeDisplay');
-  if (display) display.textContent = code;
-  const box = $('verifyCodeBox');
-  if (box) box.classList.remove('hide');
-  const btn = $('verifyGenBtn');
-  if (btn) btn.classList.add('hide'); // code chal raha hai -> button chhupa
-
-  setVerifyHint('Ye code students ke phone par pop-up me aayega.');
-  verifyTimer = setInterval(tickVerifyUi, 1000);
-  tickVerifyUi();
-}
-
-// Panel visibility + button state (poll ya session refresh se update).
-function renderVerifyPanel(data) {
-  const panel = $('verifyPanel');
-  if (!panel) return;
-  if (!data || data.active === false) {
-    panel.classList.add('hide');
-    clearVerifyTimer();
-    return;
-  }
-  panel.classList.remove('hide');
-
-  // Sab confirm? Tabhi button active. Server ye bhi dobara check karta hai —
-  // UI ka check sirf jaldi feedback dene ke liye hai, security server par hai.
-  const all = data.all_confirmed === true;
-  const issued = data.verify_code_issued === true;
-  const btn = $('verifyGenBtn');
-  if (btn) {
-    btn.classList.toggle('hide', !all || issued);
-    btn.disabled = false;
-  }
-
-  const total = data.roster_size || 0;
-  if (issued) {
-    setVerifyHint('Code chal raha hai — students daal rahe hain…');
-  } else if (all) {
-    setVerifyHint(total
-      ? `Sab ${total} students confirm ho chuke hain. Naya code banayein.`
-      : 'Sab confirm ho chuke hain. Naya code banayein.');
-  } else {
-    setVerifyHint(total
-      ? `${data.confirmed_count || 0} / ${total} students confirm. Baaki ka intezaar…`
-      : 'Students se confirm karein, phir naya code banayein.');
-  }
-
-  verifyState = {
-    all_confirmed: all,
-    pending_count: data.pending_count || 0,
-    roster_size: total,
-    // Roster nahi hai to count-based check possible nahi — teacher khud
-    // confirm karega, isliye button dabate waqt force=true jayega.
-    unverified_roster: data.unverified_roster === true,
-  };
-}
-
-// Lightweight poll — sab confirm ho gaya ya nahi + code ki live state.
-// Pehle beacon-loop ki jagah hai, par bahut halka (ek GET, ~5s).
-async function pollVerifyReadiness() {
-  if (!activeSessionId || document.hidden || verifyPolling) return;
-  verifyPolling = true;
-  try {
-    const res = await teacherFetch('/api/teacher/verify-readiness?session_id=' + encodeURIComponent(activeSessionId));
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data.found) renderVerifyPanel(Object.assign({ active: true }, data));
-  } catch (err) {
-    // Auth error par chup-chaap ruk jaata hai (login screen par hai).
-  } finally {
-    verifyPolling = false;
-  }
-}
-
-// "Generate New Code" ka click. Server se naya 6-digit code aata hai.
-async function generateVerifyCode() {
-  if (!activeSessionId) { toast('Pehle attendance code generate karein.', 'warn'); return; }
-  const btn = $('verifyGenBtn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Bana rahe hain…'; }
-  try {
-    // Roster nahi hai to force=true (teacher khud confirm kar chuka hai ki sab
-    // aa gaye). Roster hai to server force IGNORE karta hai — safety ke liye.
-    const force = verifyState.unverified_roster === true;
-    const res = await teacherFetch('/api/teacher/verify-code', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: activeSessionId, force }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.error) {
-      toast(data.error || 'Naya code nahi ban paya.', 'err', 6000);
-      if (btn) btn.classList.remove('hide');
-      return;
-    }
-    // Server se UI/REAL timing dono lo — frontend me hard-code kuch nahi hai.
-    if (data.verify_display_seconds) verifyDisplaySec = data.verify_display_seconds;
-    if (data.verify_real_seconds) verifyRealSec = data.verify_real_seconds;
-
-    // UI sirf 20s dikhayega (display timer); server ki asli 30s validity
-    // chhupi rahegi — startVerifyUi deadline ko displaySec par clamp karta hai.
-    startVerifyUi(data.verify_code, Number(data.verify_ms_left) || verifyRealSec * 1000);
-    toast('Naya code ban gaya — students ko board par dikhayein.', 'ok', 5000);
-    refreshSessionStatus(activeSessionId);
-  } catch (err) {
-    if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '⚡ Generate New Code'; }
-  }
-}
 
 /* =====================================================================
    Generate / end a code
@@ -1578,8 +1354,10 @@ function openGenerateConfirm() {
     ['System', c.system],
     ['Subject', c.subject],
     ['Course type', c.course_type],
-    ['Code window', $('expiryMinutes').value + ' minute'],
-    ['Location check', $('requireLocation').checked ? 'ON (GPS verified)' : 'OFF (sirf code + naya code — default)'],
+    ['Code window', Number($('expiryMinutes').value) < 1
+      ? 'Quick (~20s real, screen par ~10s dikhta hai)'
+      : $('expiryMinutes').value + ' minute'],
+    ['Location check', $('requireLocation').checked ? 'ON (GPS verified)' : 'OFF (sirf code + device-lock — default)'],
     ['Approval mode', $('requireApproval').checked ? 'ON (aapko approve karna hoga)' : 'OFF'],
     ['PDF email', $('autoSendPdf').checked ? 'ON' : 'OFF'],
   ];
@@ -1609,7 +1387,6 @@ async function confirmGenerate() {
         require_approval: $('requireApproval').checked,
         send_pdf: $('autoSendPdf').checked,
         expiry_minutes: Number($('expiryMinutes').value),
-        // Beacon params hata diye — stage-2 "New Code" flow default hai.
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -1617,13 +1394,13 @@ async function confirmGenerate() {
 
     closeModal('generateModal');
     saveSelection();
-    // Naya session = naya stage-2 cycle (purana "New Code" state reset).
-    verifyState = { all_confirmed: false, pending_count: 0, roster_size: 0, unverified_roster: false };
     await refreshSessionStatus(data.session_id);
     saveActiveSession({ code: data.code, session_id: data.session_id, class_name: data.class_name, subject: data.subject, course_type: data.course_type, system: data.system });
     await loadSessions(data.session_id);
     $('requireLocation').checked = data.require_location === true;
-    msg.innerHTML = alertOk(`Code ${data.code} ban gaya — ${Math.round((data.expires_in_seconds || 0) / 60)} minute ke liye.`);
+    const secs = Number(data.expires_in_seconds) || 0;
+    const durTxt = secs < 60 ? `${Math.round(secs)} second` : `${Math.round(secs / 60)} minute`;
+    msg.innerHTML = alertOk(`Code ${data.code} ban gaya — ${durTxt} ke liye.`);
     toast('Code: ' + data.code, 'ok');
   } catch (err) {
     if (!isAuthError(err)) toast('Network error. Dobara try karein.', 'err');
@@ -1826,15 +1603,7 @@ const FLAG_LABELS = {
   accuracy_poor: 'weak GPS accuracy',
   accuracy_missing: 'no accuracy reported',
   device_used_for_other_roll: 'same phone used for another roll number',
-  no_location_proof: 'GPS verify nahi hui (beacon ke bina)',
-  // Relay detector: beacon/chirp pass hua par GPS 1 km+ door bataya. Sound ghar
-  // se nahi aa sakti — matlab audio call par chirp relay ho raha ho sakta hai.
-  beacon_gps_conflict: 'beacon pass par GPS 1 km+ door (relay ka shak)',
-  // Beacon pass hua par GPS ne kuch bheja hi nahi (location band / permission
-  // denied). GPS band karke jagah chhupana relay ka aam tarika hai, isliye
-  // teacher review karata hai — jabki "GPS weak tha" wale students present
-  // hi rehte hain (wo genuinely indoor hote hain).
-  beacon_only_no_gps: 'beacon pass par GPS bilkul gayab (location band?)',
+  no_location_proof: 'GPS verify nahi hui',
 };
 function flagText(flags) {
   return (flags || []).map((f) => FLAG_LABELS[f] || f).join(' · ');
@@ -2231,6 +2000,9 @@ async function manualMark() {
         course_type: c.course_type,
         system: c.system,
         date: selectedDate(),
+        // Chal rahe session se link (agar hai) — warna PDF me manual naam
+        // sirf date+class+subject se match honge.
+        session_id: (typeof activeSessionId === "string" && activeSessionId) ? activeSessionId : "",
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -2518,33 +2290,27 @@ function teacherBusyForPopup() {
   return false;
 }
 
-// ---------------------------------------------------------------------------
-// AUTO-POPUP REMOVED (naye flow me)
-// ---------------------------------------------------------------------------
-// Purana flow me naye pending aate hi ye sheet AUTOMATICALLY khul jati thi.
-// Ab aisa nahi hota: naye stage-2 flow me students ke "Confirm" karne par
-// unki entry ZAROORI pending me jaati hai (teacher ka approval hi asli
-// approval hai). Teacher side par koi chadakta pop-up nahi aayega — na
-// approve sheet, na koi alert.
-//
-// Students ke confirm karne ka matlab hai "maine attendance mark ki request
-// bhej di". Ab teacher ko sirf ye karna hai:
-//   1. Count dekhna ki sab aa gaye (STEP 2 panel),
-//   2. "Generate New Code" dabana,
-//   3. Students ke phone par pop-up se code daalna.
-// Isliye ye function jaan-boojh kar khaali chhod diya gaya hai — sirf
-// banner update hota hai, koi modal nahi khulta. Teacher chahe to "Review &
-// approve" button se MANUALLY sheet khol sakta hai.
 function scheduleAutoOpen(freshIds) {
-  // Purana behaviour: naye pending par sheet auto-open. Ab kuch nahi.
-  return;
+  if (!freshIds.length) return;      // purani list hai — popup mat kholo
+  if (pendingSheetOpen) return;      // khud hi khuli hai
+  if (teacherBusyForPopup()) return; // teacher kisi kaam me hai
+  if (pendingAutoOpenTimer) return;  // ek timer already queue me hai
+  // Chhota delay: ek saath 2-3 entry aaye to list poora render ho jaaye, aur
+  // teacher ko "popup chala gaya" ka shock na lage.
+  pendingAutoOpenTimer = setTimeout(() => {
+    pendingAutoOpenTimer = null;
+    if (pendingSheetOpen || teacherBusyForPopup()) return;
+    freshIds.forEach((id) => pendingSeenIds.add(id));
+    saveSeenPending();
+    openPendingSheet('auto');
+  }, PENDING_AUTO_OPEN_DELAY_MS);
 }
 
-// Banner + (ab koi popup nahi) — dono ka faisla yahan se hota hai.
+// Banner + popup dono ka faisla yahan se hota hai, taaki har poll par dono
+// ek jaisi picture se chalein.
 function applyPendingBannerAndMaybePopup(data) {
   applyPendingBanner(data);
-  // scheduleAutoOpen() jaan-boojh kar nahi chala rahe — teacher ka screen
-  // ab kabhi unattended approve-sheet se dhakka nahi khayega.
+  scheduleAutoOpen(freshPendingIds(data && data.pending));
 }
 
 /* =====================================================================

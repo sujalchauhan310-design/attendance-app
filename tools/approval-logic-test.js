@@ -66,19 +66,17 @@ const cases = [
     expect: { status: "present", reason: "" },
   },
 
-  // ---- GPS ka naya role: presence = GPS YA beacon (koi ek kaafi) ----
-  // Ye case SABSE ZAROORI hai. Pehle GPS hi gate tha, isliye jis student ne
-  // chirp/code se sahi room-proof diya par classroom ka indoor GPS fail ho gaya,
-  // wo teacher ke approval queue me chala jata tha — 120 students me ye 20-40
-  // manual approvals banata tha.
+  // ---- Location (GPS) hi presence proof hai — beacon hat gaya hai ----
+  //   Location ON  -> GPS verified hona chahiye (warna pending).
+  //   Location OFF -> GPS ki wajah se koi pending nahi.
   {
-    name: "beacon verify + GPS fail -> PRESENT (beacon ka proof GPS se strong hai)",
-    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: false, beaconVerified: true, gpsConflict: false, flags: [] },
-    expect: { status: "present", reason: "" },
+    name: "location ON + GPS fail -> pending (koi proof nahi)",
+    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: false, flags: [] },
+    expect: { status: "pending", reason: "no_location_proof" },
   },
   {
-    name: "beacon verify + GPS fail + GPS 1km+ door (relay shak) -> pending/flagged",
-    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: false, beaconVerified: true, gpsConflict: true, flags: ["beacon_gps_conflict"] },
+    name: "location ON + GPS verify + dusra flag -> pending/flagged",
+    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: true, flags: ["device_used_for_other_roll"] },
     expect: { status: "pending", reason: "flagged" },
   },
   {
@@ -106,30 +104,11 @@ const cases = [
     input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: true, beaconVerified: true, gpsConflict: false, flags: [] },
     expect: { status: "present", reason: "" },
   },
+  // GPS verify hi presence proof hai — flag tab bhi pending karata hai.
   {
-    name: "beacon verify + GPS fail par koi dusra flag bhi ho -> pending/flagged",
-    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: false, beaconVerified: true, gpsConflict: false, flags: ["device_used_for_other_roll"] },
+    name: "GPS verify + koi flag -> pending/flagged",
+    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: true, flags: ["accuracy_poor"] },
     expect: { status: "pending", reason: "flagged" },
-  },
-  // GPS "weak tha" vs "bilkul gayab tha" ka farak — yahi relay hole tha.
-  // Weak (accuracy kam / stale / radius bahar) = genuine indoor student -> present.
-  {
-    name: "beacon verify + GPS WEAK (fix aaya par reject hua) -> present (genuine indoor)",
-    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: false, beaconVerified: true, gpsConflict: false, flags: [] },
-    expect: { status: "present", reason: "" },
-  },
-  // Gayab (lat/lng null) = location band karke jagah chhupana -> teacher review.
-  {
-    name: "beacon verify + GPS BILKUL gayab (relay shak) -> pending/flagged",
-    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: false, beaconVerified: true, gpsConflict: true, flags: ["beacon_only_no_gps"] },
-    expect: { status: "pending", reason: "flagged" },
-  },
-  // GPS verify + beacon verify + GPS "absent" flag galti se lag jaye to bhi
-  // present — kyunki GPS ne verify kar diya hai (flag bekaar hai).
-  {
-    name: "GPS verify + beacon verify -> present (gpsConflict ka koi asar nahi)",
-    input: { requireApproval: false, autoReview: true, locationRequired: true, locationVerified: true, beaconVerified: true, gpsConflict: true, flags: [] },
-    expect: { status: "present", reason: "" },
   },
 ];
 

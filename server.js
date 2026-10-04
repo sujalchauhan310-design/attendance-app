@@ -164,34 +164,6 @@ const GRID_MAX_DAYS = 45;
 // rehte hain. Purana TTL index boot par khud naya ban jata hai.
 const ATTENDANCE_RETENTION_DAYS = Number(process.env.ATTENDANCE_RETENTION_DAYS) || 90;
 
-// Beacon ON ho to ye classes me code chahiye
-const BEACON_DURATION_OPTIONS_MIN = [40, 45, 50, 60, 90];
-const BEACON_DEFAULT_DURATION_MS = 45 * 60 * 1000;
-// Beacon default ON hai (user ka main anti-proxy ask). Koi session ise OFF karke
-// chala sakta hai, ya poori app ke liye env se band kar sakta hai:
-// BEACON_DEFAULT=false
-const BEACON_DEFAULT = boolWithDefault(process.env.BEACON_DEFAULT, true);
-// ---------------------------------------------------------------------------
-// STAGE-2 "NEW CODE" — beacon ka replacement (see teacher.html "Generate New Code")
-// ---------------------------------------------------------------------------
-// Teacher ka code default duration 7 minute (upar CODE_EXPIRY_OPTIONS_MIN).
-// Student "Confirm" dabate hi entry teacher ke PENDING list me chali jaati hai.
-// Sab confirm hone ke baad teacher ek naya CHHOTI code banata hai, aur students
-// ke phone par pop-up aata hai jisme wo code daalte hain.
-//
-// ---- 20s (UI) vs 30s (REAL) ----
-// Ye do alag values JAAN-BOOJH kar alag rakhe gaye hain:
-//   * VERIFY_DISPLAY_SECONDS = 20  -> sirf teacher ke screen par dikhne wala timer.
-//   * VERIFY_REAL_TTL_MS      = 30s -> ASLI validity, server par enforce hoti hai.
-// Matlab code UI par 20 second dikhegi, par server usko 30 second tak maanta hai.
-// Iska matlab: UI 20 par khatam hote hi teacher sochta hai band, jabki server
-// par 10 second ka chhota buffer bacha hota hai — sirf network/typing latency
-// ke liye (student ka phone 1-2 second late hit karta hai to bhi na toote).
-// Extra 10 second kabhi bhi UI me dikhaya nahi jaata, isliye teacher ko timer
-// "jhooth" kabhi nahi bolta. Server hi source of truth hai — student ke phone
-// ki ghadi ya local timer pe koi bharosa nahi.
-const VERIFY_DISPLAY_SECONDS = 20;
-const VERIFY_REAL_TTL_MS = 30 * 1000;
 
 // GPS proof na milne par student ko kitni koshish milti hai. Iske andar mark
 // SAVE nahi hota — sirf student ko "Koshish X/5" dikhta hai — taki wo sach me
@@ -265,18 +237,45 @@ const TEACHER_MAX_FAILED_LOGINS = Number(process.env.TEACHER_MAX_FAILED_LOGINS) 
 
 // Code kitne minute zinda rahega — teacher in options me se chun sakta hai.
 // Chhota window = code share hokar bahar use hone ka mauka kam.
-const CODE_EXPIRY_OPTIONS_MIN = [2, 5, 7];
+// 0.5 minute (= 30 second) "Quick code" hai — dekho resolveCodeWindow() neeche.
+const CODE_EXPIRY_OPTIONS_MIN = [0.5, 2, 5, 7];
+
+// ---------------------------------------------------------------------------
+// SOFT DEADLINE ("screen par 10s dikhega, asli accept 20s")
+// ---------------------------------------------------------------------------
+// Teacher aur student dono ki screen par countdown CHHOTA (~10s) dikhta hai —
+// isse urgency banti hai aur code turant aage pass nahi hota. PAR server us se
+// lamba (20s) tak code accept karta hai, taaki slow phone / weak net wale
+// honest students galti se absent na ho jayein.
+//
+// ZAROORI: ye "soft" hai — UI 10s par kabhi hard "Expired" NAHI dikhata. 10s
+// ke baad sirf halka "Closing…" state aata hai, aur asli "Expired" sirf tab
+// jab 20s ka real window bhi khatam ho jaye. Warna ek student 15s par mark
+// karke success pa lega aur app buggy lagega — aur ek baar pata chal gaya to
+// trick 2 minute me poori class ko pata chal jayegi.
+// Dono values env se tunable (CODE_DISPLAY_SEC / CODE_ACCEPT_SEC).
+const CODE_DISPLAY_SEC = Math.max(3, Number(process.env.CODE_DISPLAY_SEC) || 10);
+const CODE_ACCEPT_SEC = Math.max(CODE_DISPLAY_SEC, Number(process.env.CODE_ACCEPT_SEC) || 20);
+
+// PURE: teacher ke chune window se (a) asli accept window aur (b) dikhne wala
+// countdown nikalta hai. Quick code par dono alag hote hain (soft deadline);
+// normal code par dono barabar (koi bluff nahi). tools/code-window-test.js isi
+// copy ko test karta hai — server badle to wahan bhi update karein.
+function resolveCodeWindow(expiryMinutes, opts) {
+  const o = opts || {};
+  const displaySec = Number.isFinite(o.display_sec) ? o.display_sec : CODE_DISPLAY_SEC;
+  const acceptSec = Number.isFinite(o.accept_sec) ? o.accept_sec : CODE_ACCEPT_SEC;
+  const minutes = Number(expiryMinutes);
+  const isQuick = Number.isFinite(minutes) && minutes <= 0.5;
+  const acceptMs = isQuick
+    ? Math.max(acceptSec, displaySec) * 1000
+    : Math.max(1000, (Number.isFinite(minutes) ? minutes : 1) * 60 * 1000);
+  const displayMs = isQuick ? Math.min(displaySec * 1000, acceptMs) : acceptMs;
+  return { isQuick, acceptMs, displayMs };
+}
 
 // Naya session by default manual-approval mode me khulega ya nahi (server-wide default).
-// Approval mode default: STAGE-2 flow me ON hai.
-//
-// Naye code-based flow me ye OFF rakhna FATAL hai: students ki entry turant
-// "present" ho jayegi (decideMarkStatus line 2 — location OFF par presenceProof
-// = true), teacher ka "Generate New Code" button kabhi active nahi hoga, aur
-// student ke phone par pop-up kabhi nahi aayega. Matlab poora naya verification
-// hi bypass ho jayega.
-// Env se override kar sakte ho: REQUIRE_APPROVAL_DEFAULT=false
-const REQUIRE_APPROVAL_DEFAULT = boolWithDefault(process.env.REQUIRE_APPROVAL_DEFAULT, true);
+const REQUIRE_APPROVAL_DEFAULT = boolWithDefault(process.env.REQUIRE_APPROVAL_DEFAULT, false);
 
 // Ek bhi anti-proxy flag (mock location, shared coordinates, reused device,
 // automation) lage to wo mark chup-chaap count nahi hoga — "pending" jayega
@@ -513,40 +512,6 @@ const activeCodeSchema = new mongoose.Schema({
 system: { type: String, enum: ["Annual", "Semester"], default: "Annual" }, // Annual / Semester system
 require_location: {type: Boolean, default: false }, // GPS check OPTIONAL — default OFF (indoor GPS aksar fail karta hai)
 require_approval: { type: Boolean, default: false }, // teacher approves each mark (highest anti-proxy setting)
-// BEACON (rotating in-class secret). Browser me real Bluetooth beacon chal hi nahi
-// sakta (iOS Safari me Web Bluetooth API hi nahi hai), isliye beacon ko aise banaya
-// gaya hai jo HAR phone par chalta hai: server har 45 second ka naya 6-digit code
-// banata hai. Teacher ka screen par wahi code chalta hai, student ko wahi type karna
-// hota hai. Ghar bait ke koi purana/screenshot wala code kaam nahi karta, aur
-// WhatsApp par bheja hua code 45 second me stale ho jaata hai.
-beacon_enabled: { type: Boolean, default: false },
-// Server-only secret. KABHI student ko nahi bhejte — isse hi codes derive hote hain.
-// Isliye student chahe server ka pura source code padh le, aage ke codes guess nahi
-// kar sakta (HMAC hai, brute-force impractical).
-beacon_secret: { type: String, default: "" },
-// Beacon me class kitni der chalti hai. Iske dauran student har PULSE_INTERVAL
-// par ping bhejta hai (nahaan bhejega = attendance save nahi). Isse "mark karke
-// phone chhupana" pakad me aata hai — 40-minute ki class me 40 minute signal chahiye.
-beacon_started_at: { type: Number, default: 0 },
-beacon_duration_ms: { type: Number, default: 0 },
-// ---- STAGE-2 "NEW CODE" (beacon ka replacement) ----
-  // Naya flow: student pehle "Confirm" dabata hai (uski entry teacher ke pending
-  // list me chali jaati hai). Jab sab students confirm ho jaate hain, teacher ke
-  // paas "Generate New Code" option aata hai — ek chhoti si 6-digit code banti
-  // hai jo students ke phone par pop-up me aati hai. Sahi code daalne par us
-  // student ki attendance approve ho jaati hai.
-  //
-  // IMPORTANT (20s vs 30s): ye code server par SIRF 30 second ke liye valid
-  // rehti hai (verify_code_expires_at), jabki teacher ka UI ise 20 second
-  // dikhata hai (verify_display_seconds). UI ka timer jaldi khatam hone se code
-  // turant invalid ho jaata hai — koi extra 10-second ka window nahi milta. Ye
-  // gap jaan-boojh kar rakha gaya hai taaki phone ka network delay / typing time
-  // ko ek chhota safety margin mil sake, par UI jhooth na bole.
-  verify_code_hash: { type: String, default: "" }, // sha256 hash of the live code
-  verify_code_issued_at: { type: Number, default: 0 },
-  verify_code_expires_at: { type: Number, default: 0 }, // REAL expiry (server par 30s)
-  verify_display_seconds: { type: Number, default: 20 }, // sirf UI me dikhne wala timer
-  verify_issued_count: { type: Number, default: 0 }, // kitni baar teacher ne code banaya
 // SMART APPROVAL (default ON): location verified + koi flag nahi => seedha
 // present. Fail/flag wale marks apne aap "pending" hote hain (teacher approve
 // kare) — isliye teacher ko roz 60 bacchon par tap nahi karna padta.
@@ -555,6 +520,11 @@ send_pdf: { type: Boolean, default: true }, // auto-email attendance PDF 20 min 
 pdf_sent: { type: Boolean, default: false }, // prevents sending twice if server restarts
   created_at: Number,
   expires_at: Number,
+  // SOFT DEADLINE: screen par dikhne wala countdown yahan khatam hota hai. Quick
+  // code me ye expires_at se PEHLE ho sakta hai (10s vs 30s) — par server
+  // acceptance hamesha expires_at se hi hota hai (dekho mark-attendance). Purane
+  // sessions me 0 hota hai -> fallback expires_at (koi behaviour change nahi).
+  display_expires_at: { type: Number, default: 0 },
   // Real Date object used only to auto-delete old sessions, so the collection
   // does not grow forever (every generated code = one document).
   createdAtDate: { type: Date, default: Date.now, expires: 90 * 24 * 60 * 60 },
@@ -620,20 +590,6 @@ const attendanceSchema = new mongoose.Schema({
   pending_reason: { type: String, default: "" },
   // Server ne is mark ke liye GPS proof verify kiya tha ya nahi.
   location_verified: { type: Boolean, default: false },
-  // Beacon (rotating in-class code) se verify hua ya nahi. Beacon OFF session
-  // me ye `false` rahega — isliye PDF me "beacon chahiye" ka matlab "sirf
-  // beacon wale session me nahi tha", cheating ka proof nahi.
-  beacon_verified: { type: Boolean, default: false },
-  // Beacon ka kaunsa slot use hua — audit ke liye (teacher ek baar me dekh
-  // sakta hai ki saare students ek hi 45-second window me the ya nahi).
-  beacon_slot: { type: Number, default: -1 },
-  // Proof kis channel se aaya: 'manual' (6 digit type kiya) | 'chirp' (sound sun
-  // kar) | 'qr' (scan kiya) | 'relay' (kisi verified phone ke chirp se). Sirf
-  // audit/analytics — verification har case me wahi verifyBeaconCode() karta
-  // hai, isliye ye field security ko kamzor NAHI karti. Isse teacher dekh sakta
-  // hai ki class ne kaunsa tarika use kiya, aur agar koi "chirp" claim kare jo
-  // possible na ho to wo shak ka signal hai.
-  beacon_channel: { type: String, default: "" },
   // Exactly how the server verified presence (kept so a teacher can review and
   // spot anything suspicious later). distance_m/accuracy come from the one-time
   // location token, never straight from the client.
@@ -1255,7 +1211,7 @@ function readGpsFix(body) {
 // PENDING me kaunse reasons ho sakte hain — teacher page inhi par text dikhata hai.
 const PENDING_REASON_TEXT = {
   approval_mode: "Approval mode ON — teacher approve karega",
-  no_location_proof: "Location proof nahi mili (GPS fail / net off / beacon OFF)",
+  no_location_proof: "Location proof nahi mili (GPS fail / net off)",
   location_check_off: "Is session me location check OFF tha",
   flagged: "Anti-proxy flag laga — teacher review kare",
 };
@@ -1366,39 +1322,22 @@ function computePercentages({ present, rawHeld, leaveDays }) {
 //
 // Aur GPS ab "relay detector" ban jata hai (gpsConflict, neeche step 3):
 // chirp pass hua par GPS 1 km+ door bata raha hai = shak (audio call par relay).
-function decideMarkStatus({ requireApproval, autoReview, locationRequired, locationVerified, beaconVerified, gpsConflict, flags }) {
+function decideMarkStatus({ requireApproval, autoReview, locationRequired, locationVerified, flags }) {
   const activeFlags = Array.isArray(flags) ? flags.filter(Boolean) : [];
   // 1) Teacher ne khud approval mode ON kiya -> sab pending.
-  //
-  // NAYE STAGE-2 FLOW KE LIYE YE ZAROORI HAI. Purane beacon flow me teacher
-  // approval ek OPTIONAL extra layer tha (default OFF), kyunki beacon code khud
-  // "abhi class me ho" ka proof tha. Ab beacon hata diya gaya hai, aur asli
-  // approval student ke phone par aaye NAYE CODE se hoti hai. Isliye ab har
-  // "Confirm" PENDING jaana zaroori hai — warna student turant "present" ho
-  // jayega, teacher ka "Generate New Code" button bekaar ho jayega, aur naya
-  // flow kuch bhi verify nahi karega (sirf formality ban jayegi).
   if (requireApproval === true) return { status: "pending", reason: "approval_mode" };
   // 2) PRESENCE PROOF.
-  //    Location ON  -> GPS verify (beacon ab nahi hai).
+  //    Location ON  -> GPS YA beacon (koi ek kaafi).
   //    Location OFF -> teacher ne GPS check hata diya, isliye GPS ki wajah se koi
-  //                    pending NAHI.
-  const presenceProof = locationRequired
-    ? (locationVerified === true || beaconVerified === true)
-    : true;
+  //                    pending NAHI. Presence ka sahara beacon hai (session me ON
+  //                    ho to); warna valid code + device-lock hi gate hai. Default
+  //                    ab OFF hai — indoor GPS fail hone par genuine students
+  //                    pending me nahi jate (wahi bug tha).
+  const presenceProof = locationRequired ? (locationVerified === true) : true;
   if (!presenceProof) {
     return { status: "pending", reason: "no_location_proof" };
   }
-  // 3) RELAY SIGNAL: beacon pass hua par GPS saaf-saaf shak kar raha hai —
-  //    ya 1 km+ door bata raha hai, ya GPS ne kuch bheja hi nahi (location band).
-  //    Sound ghar se nahi aa sakti, isliye ye combination shak karta hai —
-  //    teacher se review karate hain. REJECT nahi karte: indoors GPS kabhi-kabhi
-  //    bahut bigadta hai, aur genuine student ko block karna zyada bura hai.
-  //    NOTE: "GPS weak tha" (accuracy kam / stale / radius thoda bahar) yahan
-  //    NAHI aata — wo genuinely indoor student hai aur present hi rehta hai.
-  if (beaconVerified === true && locationVerified !== true && gpsConflict === true) {
-    return { status: "pending", reason: "flagged" };
-  }
-  // 4) Smart approval: proof mili par koi flag laga hai -> pending.
+  // 3) Smart approval: proof mili par koi flag laga hai -> pending.
   if (activeFlags.length && autoReview !== false) return { status: "pending", reason: "flagged" };
   // 5) Sab theek — seedha present (teacher ko tap nahi karna padta).
   return { status: "present", reason: "" };
@@ -1465,344 +1404,6 @@ const SHARED_COORD_CLUSTER_LIMIT = Number(process.env.SHARED_COORD_CLUSTER_LIMIT
 // bhi chhota ho. 40 m door do phones ka reported point match hona coincidence
 // hai, proof nahi.
 const SHARED_COORD_DISTANCE_FACTOR = Number(process.env.SHARED_COORD_DISTANCE_FACTOR) || 1;
-
-// ---------------------------------------------------------------------------
-// BEACON CORE (pure functions — tools/beacon-test.js isi ko test karta hai)
-// ---------------------------------------------------------------------------
-// Har 45 second ka ek "slot" hota hai. Us slot ka code HMAC(secret, slot) se
-// banta hai — isliye code DETERMINISTIC hai (teacher ka screen aur server ek hi
-// code nikalte hain) par aage ke codes guess nahi kiye ja sakte.
-//
-// Slot math server time par hai, isliye phone ki ghadi galat ho tab bhi student
-// kaam karta hai — wo sirf jo code teacher ke screen par hai wahi type karta hai.
-const BEACON_SLOT_MS = 45 * 1000;
-// Student ek slot purana code bhi maan sakta hai — typing me 10-15 second lagte
-// hain, aur teacher ka screen 1 second pehle ka code dikha raha hoga. Isse
-// "maine to sahi code daala tha" wali galtiyan nahi aatin. 1 se zyada purana
-// NAHI maante — warna WhatsApp par purana code chal phir se sakta hai.
-const BEACON_GRACE_SLOTS = 1;
-
-// Beacon ka current slot number (floor). Negative time (clock glitch) par 0.
-function beaconSlotAt(nowMs, slotMs) {
-  const slot = slotMs || BEACON_SLOT_MS;
-  const n = Number(nowMs);
-  if (!Number.isFinite(n) || n < 0) return 0;
-  return Math.floor(n / slot);
-}
-
-// Slot number se 6-digit numeric code. Sirf digits (student type karta hai,
-// isliye ambiguous characters — O/0, I/1 — nahi hone chahiye).
-function beaconCodeForSlot(secret, slot, slotMs) {
-  const slot2 = slotMs || BEACON_SLOT_MS;
-  const digest = crypto
-    .createHmac("sha256", String(secret || ""))
-    .update(`beacon.${slot2}.${slot}`)
-    .digest("hex");
-  // Pehle 4 hex chars -> number -> 6 digits me map. 16^4 = 65,536 values,
-  // 6-digit space me fold karke lagatar repeat hone ka chance kam hai.
-  let value = parseInt(digest.slice(0, 8), 16);
-  value = value % 1000000;
-  return String(value).padStart(6, "0");
-}
-
-// Abhi ka code + jab tak next code aayega (teacher ke countdown ke liye).
-function currentBeacon(secret, nowMs, slotMs) {
-  const slot = beaconSlotAt(nowMs, slotMs);
-  const slotMs2 = slotMs || BEACON_SLOT_MS;
-  return {
-    code: beaconCodeForSlot(secret, slot, slotMs2),
-    slot,
-    // Slot ke end tak kitne second bache (0 ho sakte hain — tab next code ready).
-    seconds_left: Math.max(0, Math.ceil((slot + 1) * slotMs2 - Number(nowMs || 0)) / 1000),
-    rotates_in_ms: Math.max(0, (slot + 1) * slotMs2 - Number(nowMs || 0)),
-  };
-}
-
-/**
- * Student ke bheje code ko validate karta hai.
- * Accept hota hai: current slot, ya GRACE ke andar ka pichla slot.
- * Equal-length compare + constant-time-ish behaviour chahiye isliye simple
- * string compare kiye hain (6 digits, timing attack ka realistic risk nahi).
- * returns: { ok: true, slot, stale: false } | { ok: false, reason }
- */
-function verifyBeaconCode(secret, submitted, nowMs, slotMs) {
-  const raw = String(submitted || "").trim();
-  if (!/^\d{6}$/.test(raw)) {
-    return { ok: false, reason: "Beacon code 6 digit ka hona chahiye." };
-  }
-  const slot = beaconSlotAt(nowMs, slotMs);
-  const slotMs2 = slotMs || BEACON_SLOT_MS;
-  for (let back = 0; back <= BEACON_GRACE_SLOTS; back++) {
-    const candidate = beaconCodeForSlot(secret, slot - back, slotMs2);
-    if (candidate === raw) {
-      return { ok: true, slot: slot - back, stale: back > 0 };
-    }
-  }
-  return {
-    ok: false,
-    reason: "Beacon code galat ya purana ho gaya. Screen par naya code dekhein aur dobara try karein.",
-  };
-}
-
-// Beacon nahi hai ya band hai to student ko koi extra proof nahi dena hai.
-// BEACON REMOVED — hamesha false.
-//
-// Ye pehle check karta tha ki "is session me beacon on hai ya nahi". Ab beacon
-// flow poora hata diya gaya hai, isliye ye HAMESHA false return karta hai. Ye
-// jaan-boojh kar kiya gaya hai: DB me PURANE sessions (jinke beacon_enabled=true
-// hai) abhi bhi pade hain. Agar ye unpar true return karta, to un sessions par
-// mark-attendance HARD FAIL ho jata ("beacon code galat") aur students kisi
-// bhi tarah attendance mark nahi kar paate. Ab sab purane sessions beacon-free
-// maane jate hain aur naya stage-2 flow normal chalta hai.
-function beaconRequired(session) {
-  return false;
-}
-// ---------------------------------------------------------------------------
-// STAGE-2 VERIFY CODE — helpers (beacon ka replacement)
-// ---------------------------------------------------------------------------
-// 6-digit numeric code (student type karta hai). crypto.randomInt use karte hain
-// taaki Math.random ke comparison-bias se bache —
-// generateCode() wali simple Math.random 5-digit code me thoda bias hota hai.
-function generateVerifyCode() {
-  return String(crypto.randomInt(0, 1000000)).padStart(6, "0");
-}
-
-// Plain code kabhi DB me nahi jaata — sirf sha256 hash store hota hai, taaki DB
-// leak hone par bhi koi live code na padh sake (sha256Hex() upar defined hai).
-function hashVerifyCode(code) {
-  return sha256Hex(String(code || "").trim());
-}
-
-// Server par REAL expiry check. UI ka 20-second timer sirf dikhane ke liye hai;
-// ASLI validity yahi function decide karta hai (30 second).
-function isVerifyCodeLive(session, nowMs) {
-  if (!session || !session.verify_code_hash) return false;
-  const now = Number(nowMs) || Date.now();
-  // Strict `<` (na ki `<=`): 30-second TTL ka matlab hai code t=0..29.999s tak
-  // valid hai, aur t=30.000s par EXPIRE. `<=` hota to code 30s par bhi ek
-  // extra sh instants valid rehta — off-by-one bug. Ye wahi boundary hai jo
-  // tools/beacon-test.js ka "30s par code expire" test pakadta hai.
-  return now < (session.verify_code_expires_at || 0);
-}
-
-// Student ka bheja hua code server ke live code se match karta hai?
-// Constant-time compare: crypto.timingSafeEqual. Length alag ho to wo bhi
-// pehle check kar lete hain (timingSafeEqual alag length par throw karta hai).
-function verifyCodeMatches(session, submitted, nowMs) {
-  const raw = String(submitted || "").trim();
-  if (!/^\d{6}$/.test(raw)) {
-    return { ok: false, reason: "Code 6 digit ka hona chahiye." };
-  }
-  if (!isVerifyCodeLive(session, nowMs)) {
-    return {
-      ok: false,
-      reason: "Code ki time limit khatam ho gayi. Teacher se naya code maangein.",
-      expired: true,
-    };
-  }
-  const a = Buffer.from(hashVerifyCode(raw));
-  const b = Buffer.from(String(session.verify_code_hash));
-  const match = a.length === b.length && crypto.timingSafeEqual(a, b);
-  if (!match) {
-    return { ok: false, reason: "Code galat hai. Teacher ka board check karein." };
-  }
-  return { ok: true };
-}
-
-// Teacher ko UI me dikhne wala hissa (20s) + REAL expiry (30s) ek saath.
-// Dono alag-alag bhejte hain taaki frontend khud na guess kare.
-function verifyCodePublicInfo(session, nowMs) {
-  const now = Number(nowMs) || Date.now();
-  const live = isVerifyCodeLive(session, now);
-  const realLeftMs = Math.max(0, (session.verify_code_expires_at || 0) - now);
-  return {
-    verify_active: live,
-    verify_issued: Boolean(session.verify_code_hash),
-    // REAL: server par kitne ms bache (30s TTL se gina hua).
-    verify_ms_left: realLeftMs,
-    verify_real_seconds_left: Math.ceil(realLeftMs / 1000),
-    // UI: teacher ke screen par kitne second dikhane hain (20s).
-    verify_display_seconds: VERIFY_DISPLAY_SECONDS,
-    verify_issued_count: session.verify_issued_count || 0,
-    verify_code_issued_at: session.verify_code_issued_at || 0,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// ULTRASONIC CHIRP — wahi beacon code, par SOUND ke through
-// ---------------------------------------------------------------------------
-// Kyun: 120 students ke liye 6 digit TYPE karna slow hai. Chirp wahi code sound
-// me bhejta hai, phone sun kar khud bhar leta hai. Do bade fayde:
-//   1) SOUND DEEWAR SE BAHAR NAHI JAATI. GPS ko deewar se farak nahi padta
-//      (bahar wale ko bhi wahi number milta hai), isliye GPS dhoka de jata hai.
-//      Sound se "is room me hai" ka proof milta hai — ye physics hai, software
-//      claim nahi.
-//   2) INTERNET PAR RELAY mushkil hai: WhatsApp/Zoom Opus codec use karte hain
-//      jo SPEECH ke liye bana hai. Kam bitrate par Opus apni bandwidth khud kam
-//      kar deta hai (narrowband = 4 kHz tak), isliye 16-18 kHz ka ultrasonic
-//      band relay hote waqt kat jata hai.
-//
-// NAYA CRYPTO NAHI: chirp wahi beacon code bhejta hai, isliye verify bhi wahi
-// verifyBeaconCode() karta hai (slot rotate + 1-slot grace sab already hai).
-// ---------------------------------------------------------------------------
-// Tones 9.0k se shuru — YE JAAN-BOOJH KAR AUDIBLE BAND ME HAIN.
-// Pehle 16.5-18.7 kHz (ultrasonic) tha jiska physics fayda tha (sound deewar se
-// bahar nahi jaati) — PAR asli duniya me wo HAR phone par kaam nahi karta: sasta
-// laptop/phone speaker 16 kHz+ par 20-40 dB gir jata hai aur kai phone mic bhi
-// wahan tak sunte hi nahi, isliye student ka phone code nikal hi nahi pata tha.
-// Ab band 9.0-11.2 kHz par hai — 12 kHz tak lagbhag SAARE phone/laptop flat hote
-// hain, isliye "Suno" sab par chalta hai. Trade-off saaf hai: sound ab sunai
-// deta hai aur deewar ke aar-paar bhi ja sakta hai, isliye asli anti-proxy
-// rotating code + device-lock + teacher ki nazar par hai, sirf sound par nahi.
-// 240 Hz step = 10 digits, aur FFT me tones ek dusre se aaram se alag dikhte hain.
-const CHIRP_TONE_MIN_HZ = 9000;
-const CHIRP_TONE_STEP_HZ = 240;
-const CHIRP_TONE_MS = 180; // ek digit kitni der bajta hai (180 ms = slow phone par bhi 4-5 frame)
-// Tones ke beech gap. Ye jaan-boojh kar itna hai (pehle 40 ms tha — wo BUG tha).
-// Wajah: do LAGATAAR same digit wale code (jaise "55") me tone band karne ka
-// ek hi sahara gap hai. Bahut chhota gap hone par silence kabhi 2 frame tak nahi
-// pahunchta tha, tone band nahi hota tha, aur "55" ek lamba tone ban kar EK digit
-// ban jata tha (code 5 digit ka → student ka submit fail). Ab ~3-4 frame padte
-// hain, isliye tone bharosemand band hota hai. Poora chirp ab ~2.8s ka hai —
-// classroom ke liye theek hai.
-const CHIRP_GAP_MS = 140;
-// "ab shuru" marker — digit range (9000) se 2.5 step (600 Hz) neeche, isliye
-// distinct hai aur galti se digit 0 nahi banta. Server aur student dono isi se
-// code ka FRAME banate hain (opening + closing lead ke beech hi digits ginte hain).
-const CHIRP_LEAD_HZ = 8400;
-const CHIRP_LEAD_MS = 300;
-
-// Digit -> frequency. 0..9 -> 9000..11160 Hz.
-function chirpToneForDigit(digit, opts) {
-  const o = opts || {};
-  const min = Number.isFinite(o.min_hz) ? o.min_hz : CHIRP_TONE_MIN_HZ;
-  const step = Number.isFinite(o.step_hz) ? o.step_hz : CHIRP_TONE_STEP_HZ;
-  const d = Number(digit);
-  if (!Number.isInteger(d) || d < 0 || d > 9) return null;
-  return min + d * step;
-}
-
-// Frequency -> digit (decode side). Tolerance ke saath — mic ka reading thoda
-// idhar-udhar hota hai, isliye sabse kareebi tone choose karte hain.
-function chirpDigitForTone(hz, opts) {
-  const o = opts || {};
-  const min = Number.isFinite(o.min_hz) ? o.min_hz : CHIRP_TONE_MIN_HZ;
-  const step = Number.isFinite(o.step_hz) ? o.step_hz : CHIRP_TONE_STEP_HZ;
-  const n = Number(hz);
-  if (!Number.isFinite(n)) return null;
-  const d = Math.round((n - min) / step);
-  // Aadha step se zyada door = ye tone is scheme ka hi nahi (bahaar ki awaaz).
-  if (d < 0 || d > 9) return null;
-  if (Math.abs(n - (min + d * step)) > step / 2) return null;
-  return d;
-}
-
-// 6-digit code -> play karne layak sequence (lead marker + 6 tones).
-function chirpSequenceFor(code) {
-  const digits = String(code || "").replace(/\D/g, "");
-  if (digits.length !== 6) return null;
-  const tones = [{ hz: CHIRP_LEAD_HZ, ms: CHIRP_LEAD_MS, lead: true }];
-  for (const ch of digits) {
-    tones.push({ hz: chirpToneForDigit(ch), ms: CHIRP_TONE_MS, lead: false });
-  }
-  // Aakhir me wahi lead marker — student ko "khatam" pata chale, aur decoder
-  // dono taraf se boundary pakad kar behtar sync kar sake.
-  tones.push({ hz: CHIRP_LEAD_HZ, ms: CHIRP_LEAD_MS, lead: true });
-  return tones;
-}
-
-// Tones ki list -> code. Decoder (aur test) isi ka use karte hain.
-function chirpCodeFromTones(hzList) {
-  if (!Array.isArray(hzList) || hzList.length !== 6) return null;
-  let out = "";
-  for (const hz of hzList) {
-    const d = chirpDigitForTone(hz);
-    if (d === null) return null;
-    out += String(d);
-  }
-  return out;
-}
-
-// Client (teacher page) ko bhejne wala chirp payload — ek hi jagah se,
-// taaki teacher ka playback aur server ka decode kabhi out-of-sync na hon.
-function chirpSpecFor(code) {
-  const tones = chirpSequenceFor(code);
-  if (!tones) return null;
-  return {
-    lead_hz: CHIRP_LEAD_HZ,
-    lead_ms: CHIRP_LEAD_MS,
-    tone_ms: CHIRP_TONE_MS,
-    gap_ms: CHIRP_GAP_MS,
-    tone_min_hz: CHIRP_TONE_MIN_HZ,
-    tone_step_hz: CHIRP_TONE_STEP_HZ,
-    // Digits ki frequencies (lead marker ke bina) — decoder inhe dhoondta hai.
-    hz: tones.filter((t) => !t.lead).map((t) => t.hz),
-    // Poora sequence playback ke liye (lead + tones + lead).
-    sequence: tones,
-    total_ms: tones.reduce((sum, t) => sum + t.ms + CHIRP_GAP_MS, 0),
-  };
-}
-
-// Proof kis channel se aaya — audit/analytics ke liye. Allowlist rakhi hai
-// taaki client koi random string DB me na bhej de. 'relay' = code kisi aur
-// verified phone ke bajaye chirp se mila (on-demand relay, neeche).
-const BEACON_CHANNELS = ["manual", "chirp", "qr", "relay"];
-function normalizeBeaconChannel(raw) {
-  const v = String(raw || "").trim().toLowerCase();
-  return BEACON_CHANNELS.includes(v) ? v : "manual";
-}
-
-// ---------------------------------------------------------------------------
-// ON-DEMAND SINGLE RELAY (audio range extension)
-// ---------------------------------------------------------------------------
-// Problem: teacher ka chirp classroom ke peeche tak hamesha nahi pahunchta.
-// Solution: SIRF tab jab koi student sach me sun nahi paata ("Suno" dabaya par
-// kuch nahi mila), hum EK already-verified phone ko kehte hain ki wo wahi chirp
-// EK BAAR baja de. Ek waqt me ek hi phone bajta hai, isliye interference/chaos
-// nahi hota — aur relay sirf verified (beacon apni attendance bana chuka) phone
-// karta hai, isliye ghar baithe banda relay karwa nahi sakta.
-//
-// Sab kuch IN-MEMORY hai: ek relay request sirf ~25 second zinda rehta hai aur
-// server restart par apne aap khali ho jata hai (koi DB likhai nahi, koi quota
-// kharch nahi).
-const RELAY_REQUEST_TTL_MS = Math.max(5000, (Number(process.env.RELAY_REQUEST_TTL_SEC) || 25) * 1000);
-// sessionKey -> { requester, created_at, expires_at } (abhi ka pending request)
-const relayPending = new Map();
-
-// Session pehchaan — SIRF ek hi session ke students ek doosre ki madad karte hain.
-function relaySessionKey(class_name, subject, course_type, system) {
-  return [class_name, subject, course_type, system]
-    .map((v) => String(v || "").trim().toLowerCase())
-    .join("|");
-}
-
-// PURE: pending request abhi zinda hai ya nahi.
-function relayAlive(entry, nowMs) {
-  if (!entry) return false;
-  const expiresAt = Number(entry.expires_at) || 0;
-  return Number.isFinite(expiresAt) && expiresAt > nowMs;
-}
-
-// PURE decision: kya ye device abhi relay bajaye?
-//   entry    = relayPending ka record { requester, created_at, expires_at } ya undefined
-//   deviceId = jis phone ne relay-duty poocha
-// returns { play, reason }
-function relayPickDecision(entry, deviceId, nowMs, ttlMs) {
-  const ttl = Number(ttlMs) || RELAY_REQUEST_TTL_MS;
-  if (!entry) return { play: false, reason: "no_request" };
-  const expiresAt = Number(entry.expires_at) || (Number(entry.created_at) + ttl);
-  if (!Number.isFinite(expiresAt) || expiresAt <= nowMs) return { play: false, reason: "expired" };
-  // Apni hi request ko khud relay mat karo (student khud hi bajane lage — bekaar).
-  if (!deviceId || entry.requester === deviceId) return { play: false, reason: "self" };
-  return { play: true, reason: "" };
-}
-
-// Purane (expired) entries hata do taaki Map na bade.
-function pruneRelayPending(nowMs) {
-  for (const [key, entry] of relayPending) {
-    if (!relayAlive(entry, nowMs)) relayPending.delete(key);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // ANTI-PROXY FLAGS
@@ -2198,8 +1799,33 @@ async function sendAttendancePdfEmail(sessionId) {
     if (!session) return;
     claimed = true;
 
+    const dateForPdf = istDateStringFromMs(session.created_at || Date.now());
+
     // Only counted (non-pending) marks go on the emailed PDF.
-    const records = await Attendance.find({ session_id: sessionId, status: { $ne: "pending" } }).lean();
+    // 1) Is session ke normal marks.
+    const sessionRecords = await Attendance.find({ session_id: sessionId, status: { $ne: "pending" } }).lean();
+    // 2) Teacher ke MANUAL marks (roll jo roster/GPS fail ke case me teacher ne
+    //    khud add kiya). Ye session_id ke bina bante hain (date-level), isliye
+    //    PEHLE PDF me inke naam GAYAB ho jate the. Ab wahi din + class + subject
+    //    + course type + system wale manual marks bhi include karte hain.
+    const manualRecords = await Attendance.find({
+      source: "teacher-manual",
+      session_id: { $in: ["", null] },
+      class_name: session.class_name,
+      subject: session.subject,
+      course_type: session.course_type,
+      system: systemMatch(session.system),
+      date: dateForPdf,
+      status: { $ne: "pending" },
+    }).lean();
+    // Agar ek hi roll dono jagah ho to session ka record jeetta hai (ek roll ek
+    // hi baar dikhe).
+    const byRoll = new Map();
+    for (const r of sessionRecords.concat(manualRecords)) {
+      const key = String(r.roll_no || "") + "|" + String(r.subject || "") + "|" + String(r.course_type || "");
+      if (!byRoll.has(key)) byRoll.set(key, r);
+    }
+    const records = Array.from(byRoll.values());
     records.sort(compareRollNo);
 
     // Subject-wise routing: is subject ke liye email set hai to wahan, warna
@@ -2211,7 +1837,6 @@ async function sendAttendancePdfEmail(sessionId) {
       course_type: session.course_type,
     });
 
-    const dateForPdf = istDateStringFromMs(session.created_at || Date.now());
     const pdfBuffer = await buildSessionPdf({ ...session.toObject(), dateForPdf }, records);
 
     // Email body me sirf "PDF attached" nahi — analytics summary bhi jati hai.
@@ -2582,31 +2207,6 @@ const studentLookupLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// On-demand relay (neeche routes). Relay-request ek genuine blocker hai (student
-// sach me sun nahi paya) — par ek script se spam na ho, isliye bounded. Whole
-// class ek WiFi IP par ho sakti hai, isliye per-device+IP key.
-const relayRequestLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 60,
-  statusCode: 429,
-  message: { ok: false, reason: "rate_limited" },
-  standardHeaders: false,
-  legacyHeaders: false,
-  keyGenerator: combinedKey,
-});
-
-// Standby phones HAR 3 second relay-duty poll karte hain — 40 min ki class me
-// ek phone ~800 poll karta hai, isliye ye limiter generous hona chahiye warna
-// genuine standby phone hi cut ho jayega.
-const relayDutyLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 2000,
-  statusCode: 200, // "kuch nahi" jawab — student ko error nahi dikhana
-  message: { play: false },
-  standardHeaders: false,
-  legacyHeaders: false,
-  keyGenerator: combinedKey,
-});
 
 // ---------- TEACHER ROUTES ----------
 
@@ -2634,19 +2234,14 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
     // useful to a student who is not in the room and got it on WhatsApp.
     const requestedMin = Number(req.body.expiry_minutes);
     const expiryMinutes = CODE_EXPIRY_OPTIONS_MIN.includes(requestedMin) ? requestedMin : CODE_EXPIRY_OPTIONS_MIN[CODE_EXPIRY_OPTIONS_MIN.length - 1];
-    const expiryMs = expiryMinutes * 60 * 1000;
+    // SOFT DEADLINE: quick (0.5m) code par asli accept 20s, par screen par
+    // sirf ~10s dikhta hai. Normal code par accept == display (koi bluff nahi).
+    const codeWindow = resolveCodeWindow(expiryMinutes);
+    const expiryMs = codeWindow.acceptMs;
 
     const code = generateCode();
     const now = Date.now(); // SERVER time
 
-    // BEACON REMOVED — rotating-code/chirp flow hata diya gaya hai. Naya stage-2
-    // "New Code" flow (VERIFY_* constants upar) ise replace kar deta hai.
-    // Server par bhi beacon HAMESHA off rakhte hain, taaki ek purana bookmarked
-    // teacher page ya stale cached JS bhi beacon on na kar sake — warna wo
-    // students se rotating code maangta rahega, jo ab kahin exist nahi karta.
-    const beaconOn = false;
-    const beaconMinutes = 0;
-    const beaconDurationMs = 0;
 
     const session = await ActiveCode.create({
       code,
@@ -2658,14 +2253,9 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       require_approval: boolWithDefault(req.body.require_approval, REQUIRE_APPROVAL_DEFAULT),
       auto_review: boolWithDefault(req.body.auto_review, SMART_APPROVAL_DEFAULT),
       send_pdf: boolWithDefault(send_pdf, SEND_PDF_DEFAULT), // default ON (env se badal sakte hain)
-      beacon_enabled: beaconOn,
-      // 32 hex chars = 128 bits random secret. crypto.randomBytes se banta hai,
-      // isliye predict karna impossible hai.
-      beacon_secret: beaconOn ? crypto.randomBytes(16).toString("hex") : "",
-      beacon_started_at: beaconOn ? now : 0,
-      beacon_duration_ms: beaconOn ? beaconDurationMs : 0,
       created_at: now,
       expires_at: now + expiryMs,
+      display_expires_at: now + codeWindow.displayMs,
     });
     // Auto-email the attendance PDF 20 minutes after this code was generated.
     // The cron endpoint (/api/check-and-send-pdfs) is the safety net for when
@@ -2677,13 +2267,18 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       "session.generate",
       req,
       `${class_name}/${subject}/${course_type}`,
-      `code=${code} system=${system} expiry=${expiryMinutes}m location=${locationOn ? "ON" : "OFF"} smart_approval=${session.auto_review} pdf=${session.send_pdf} beacon=OFF(stage2)`
+      `code=${code} system=${system} expiry=${expiryMinutes}m${codeWindow.isQuick ? `(show ${CODE_DISPLAY_SEC}s/real ${CODE_ACCEPT_SEC}s)` : ""} location=${locationOn ? "ON" : "OFF"} smart_approval=${session.auto_review} pdf=${session.send_pdf}`
     );
     res.json({
       code,
       session_id: session._id.toString(),
       expires_in_seconds: expiryMs / 1000,
       expires_at: session.expires_at,
+      // SOFT DEADLINE: screen par dikhne wala countdown. Quick code me ye
+      // expires_in_seconds se CHHOTA hota hai (10s vs 20s). Teacher page ise
+      // countdown ke liye use karta hai, par accept server par hi hota hai.
+      display_seconds_left: Math.round(codeWindow.displayMs / 1000),
+      quick_code: codeWindow.isQuick,
       server_now: now,
       class_name,
       subject,
@@ -2696,9 +2291,6 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
       send_pdf: session.send_pdf,
       strict_location: STRICT_LOCATION,
       expiry_options_minutes: CODE_EXPIRY_OPTIONS_MIN,
-      // Stage-2 flow ka default: UI me 20s dikhega, server par 30s valid rahega.
-      verify_display_seconds: VERIFY_DISPLAY_SECONDS,
-      verify_real_seconds: VERIFY_REAL_TTL_MS / 1000,
     });
   } catch (err) {
     console.error(err);
@@ -2706,149 +2298,6 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
   }
 });
 
-// BEACON ROUTE RETIRED. Purana /api/teacher/beacon GET ab hamesha "off"
-// bolta hai — isse stale cached teacher page (purane beacon wala) ghoomte
-// rahe to wo rotating code poll karta rahe, par use koi code nahi milega aur
-// wo chup-chaap naye stage-2 flow par aa jayega.
-app.get(["/api/teacher/session-beacon", "/api/teacher/beacon"], requireTeacherAuth, async (req, res) => {
-  return res.json({ beacon_enabled: false, beacon_required: false, retired: true });
-});
-/* =======================================================================
-   STAGE-2 "NEW CODE" — teacher ke endpoints (beacon ka replacement)
-   -----------------------------------------------------------------------
-   Naya flow:
-     1. Teacher attendance code banata hai (default 7 minute).
-     2. Students "Confirm" dabate hain -> entry teacher ke PENDING list me.
-     3. Sab confirm hone par teacher ko "Generate New Code" button milta hai.
-     4. Teacher ise dabata hai -> ek 6-digit code banti hai.
-        UI par 20 second dikhta hai, par server par 30 second valid hai.
-     5. Students ke phone par pop-up aata hai; sahi code = attendance approved.
-   ======================================================================= */
-
-// (A) SAB CONFIRM HO GAYE? Teacher ka button tabhi dikhega.
-// Roster (Student collection) se compare karte hain. Roster upload nahi hai to
-// `unverified_roster` flag bhejte hain — UI me hint dikhega, aur teacher
-// `force: true` bhej kar khud confirm kar sakta hai.
-app.get("/api/teacher/verify-readiness", requireTeacherAuth, async (req, res) => {
-  try {
-    const { session_id } = req.query;
-    if (!session_id || !mongoose.Types.ObjectId.isValid(session_id)) {
-      return res.status(400).json({ error: "A valid session_id is required." });
-    }
-    const session = await ActiveCode.findById(session_id).lean();
-    if (!session) return res.json({ found: false });
-
-    const now = Date.now();
-    const [pendingCount, presentCount, rosterSize] = await Promise.all([
-      Attendance.countDocuments({ session_id, status: "pending" }),
-      Attendance.countDocuments({ session_id, status: "present" }),
-      session.class_name
-        ? Student.countDocuments({ class_name: session.class_name })
-        : Promise.resolve(0),
-    ]);
-
-    // "Sab confirm" = har roster student ne entry bhej di (present ya pending).
-    const confirmed = presentCount + pendingCount;
-    const allConfirmed = rosterSize > 0 ? confirmed >= rosterSize : confirmed > 0;
-
-    res.json({
-      found: true,
-      session_id,
-      pending_count: pendingCount,
-      present_count: presentCount,
-      confirmed_count: confirmed,
-      roster_size: rosterSize,
-      all_confirmed: allConfirmed,
-      unverified_roster: rosterSize === 0,
-      code_expired: now > session.expires_at,
-      ...verifyCodePublicInfo(session, now),
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Readiness check nahi ho paya." });
-  }
-});
-
-// (B) NAYA 6-DIGIT CODE BANAO — sirf tab jab sab students confirm ho chuke hon.
-// UI ka button check server par DOBARA check hota hai: frontend ka check sirf
-// convenience hai, asli gate yahi hai (client par bharosa kabhi nahi).
-app.post("/api/teacher/verify-code", requireTeacherAuth, async (req, res) => {
-  try {
-    const { session_id, force } = req.body;
-    if (!session_id || !mongoose.Types.ObjectId.isValid(session_id)) {
-      return res.status(400).json({ error: "A valid session_id is required." });
-    }
-    const session = await ActiveCode.findById(session_id);
-    if (!session) return res.status(404).json({ error: "Session not found." });
-
-    const now = Date.now();
-    if (now > session.expires_at) {
-      return res.status(400).json({ error: "Attendance code expire ho gaya. Naya code generate karein." });
-    }
-
-    // ---- Sab-confirmed gate (server-side, authoritative) ----
-    const [pendingCount, presentCount, rosterSize] = await Promise.all([
-      Attendance.countDocuments({ session_id, status: "pending" }),
-      Attendance.countDocuments({ session_id, status: "present" }),
-      session.class_name
-        ? Student.countDocuments({ class_name: session.class_name })
-        : Promise.resolve(0),
-    ]);
-    const confirmed = presentCount + pendingCount;
-    const allConfirmed = rosterSize > 0 ? confirmed >= rosterSize : confirmed > 0;
-
-    // `force` sirf roster-absent case me maante hain (teacher khud confirm kar
-    // raha hai ki sab aa gaye). Roster upload hai to force IGNORE hota hai —
-    // warna koi teacher 5/50 students par bhi code bana kar baaki 45 ko
-    // approve kara sakta, jo poore stage-2 ka maqsad hi khaali kar deta.
-    if (!allConfirmed && !(force === true && rosterSize === 0)) {
-      return res.status(409).json({
-        error:
-          rosterSize > 0
-            ? `Abhi sab students confirm nahi hue (${confirmed}/${rosterSize}). Sabke confirm hone ke baad hi naya code banega.`
-            : "Abhi koi student confirm nahi hua. Pehle students ko attendance mark karne dein.",
-        reason: "not_all_confirmed",
-        confirmed_count: confirmed,
-        roster_size: rosterSize,
-      });
-    }
-
-    // ---- CODE GENERATE ----
-    const code = generateVerifyCode();
-    session.verify_code_hash = hashVerifyCode(code);
-    session.verify_code_issued_at = now;
-    // REAL expiry = 30 second. Ye ASLI timer hai — server isi par enforce karta hai.
-    session.verify_code_expires_at = now + VERIFY_REAL_TTL_MS;
-    // UI timer = 20 second. Ye sirf teacher ke screen par dikhta hai.
-    session.verify_display_seconds = VERIFY_DISPLAY_SECONDS;
-    session.verify_issued_count = (session.verify_issued_count || 0) + 1;
-    await session.save();
-
-    audit(
-      "session.verify-code",
-      req,
-      session_id,
-      `issued=#${session.verify_issued_count} ui=${VERIFY_DISPLAY_SECONDS}s real=${VERIFY_REAL_TTL_MS / 1000}s pending=${pendingCount} forced=${force === true}`
-    );
-
-    res.json({
-      success: true,
-      // Plain code SIRF yahan, ek baar, teacher ko bhejte hain. Dobara kabhi
-      // nahi — DB me sirf hash hai (isVerifyCodeLive/hashVerifyCode upar).
-      verify_code: code,
-      // UI: 20s dikhega. REAL: 30s valid. Dono alag-alag jaan-boojh kar.
-      verify_display_seconds: VERIFY_DISPLAY_SECONDS,
-      verify_real_seconds: VERIFY_REAL_TTL_MS / 1000,
-      verify_expires_at: session.verify_code_expires_at,
-      server_now: now,
-      pending_count: pendingCount,
-      ...verifyCodePublicInfo(session, now),
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Naya code nahi ban paya. Dobara try karein." });
-  }
-});
 
 // Live status of one generated code. The teacher page uses this on reload so
 // the countdown comes from SERVER time — a phone whose clock is a few minutes
@@ -2897,21 +2346,6 @@ app.get("/api/teacher/session-status", requireTeacherAuth, async (req, res) => {
       roster_size,
       flagged_count,
       strict_location: STRICT_LOCATION,
-      // Beacon hata diya — naye stage-2 "New Code" flow ki live state ek saath
-      // bhejte hain, taaki teacher ka ek hi poll me button + timer dono mile.
-      verify_code_issued: Boolean(session.verify_code_hash),
-      verify_display_seconds: VERIFY_DISPLAY_SECONDS,
-      verify_real_seconds: VERIFY_REAL_TTL_MS / 1000,
-      verify_issued_count: session.verify_issued_count || 0,
-      verify_expires_at: session.verify_code_expires_at || 0,
-      verify_ms_left: Math.max(0, (session.verify_code_expires_at || 0) - now),
-      // "Sab students confirm ho gaye?" — teacher ke "Generate New Code" button
-      // ki visibility isi se chalti hai. Ye fields missing hone se button kabhi
-      // active nahi hota tha (page reload / initial render pe), kyunki
-      // renderVerifyPanel() ko `all_confirmed` chahiye.
-      // confirmed = present + pending (dono hi "student ne confirm kiya" hain).
-      all_confirmed: roster_size > 0 ? (marked_count - pending_count) + pending_count >= roster_size : marked_count > 0,
-      unverified_roster: roster_size === 0,
     });
   } catch (err) {
     console.error(err);
@@ -3501,6 +2935,10 @@ app.post("/api/teacher/attendance/approve-all", requireTeacherAuth, async (req, 
 app.post("/api/teacher/attendance/manual-mark", requireTeacherAuth, async (req, res) => {
   try {
     const { roll_no, class_name, subject, course_type, name } = req.body;
+    // Optional: teacher ke chal rahe session se link (teacher page bhejta hai
+    // jab koi live session ho). Isse manual mark sahi session ke PDF me aata
+    // hai; na ho to wo date-level manual mark rehta hai.
+    const manualSessionId = req.body.session_id ? String(req.body.session_id).trim() : "";
     if (!roll_no || !class_name || !subject || !course_type) {
       return res.status(400).json({ error: "Roll number, class, subject and course type are required." });
     }
@@ -3551,7 +2989,7 @@ app.post("/api/teacher/attendance/manual-mark", requireTeacherAuth, async (req, 
       system,
       major_subject: existingStudent ? existingStudent.major_subject || "" : "",
       class_name,
-      session_id: "",
+      session_id: manualSessionId || "",
       date: day.date,
       marked_at: now,
       device_id: "teacher-manual",
@@ -4170,201 +3608,21 @@ app.get("/api/student/my-report.pdf", studentLookupLimiter, async (req, res) => 
 //   3. hand-editing lat/lng in the browser's network tab (token is bound to the
 //      exact fix the server itself validated).
 
-/* =======================================================================
-   STAGE-2 "NEW CODE" — student ke endpoints (beacon ka replacement)
-   -----------------------------------------------------------------------
-   Student flow:
-     1. Attendance code + details bhar kar "Confirm" dabata hai.
-        Entry teacher ke pending list me chali jaati hai.
-     2. Teacher sab confirm hone par naya 6-digit code banata hai.
-     3. Student ke phone par POP-UP aata hai (naye section + modal).
-     4. Sahi code daalne par us student ki attendance APPROVE ho jaati hai.
-   ======================================================================= */
 
-// ---------------------------------------------------------------------------
-// ON-DEMAND SINGLE RELAY — routes
-// (C) KYA NAYA CODE AA GAYA HAI? — Student apna pop-up kab khulega, ye decide
-// karta hai. Ye route sirf ek boolean/flag bhejta hai, KABHI code nahi — warna
-// koi bhi valid 5-digit code rakh kar poll karke code pehch le sakta.
-// SECURITY: sirf 5-digit attendance code chahiye + rate-limited.
-app.get("/api/student/verify-status", studentLookupLimiter, async (req, res) => {
+// Student code daalte hi pata chalta hai ki is session me location check chahiye
+// ya nahi — student page isse apna GPS wait skip kar sakta hai jab OFF ho
+// (default OFF hai). Koi mark nahi hota; sirf ek boolean hint hai.
+app.get("/api/student/location-check", studentLookupLimiter, async (req, res) => {
   try {
     const code = String(req.query.code || "").trim();
-    if (!/^[0-9]{5}$/.test(code)) return res.json({ verify_needed: false });
+    if (!/^[0-9]{5}$/.test(code)) return res.json({ ok: true, location_required: false });
     const now = Date.now();
     const session = await ActiveCode.findOne({ code }).lean();
-    if (!session || now > session.expires_at) return res.json({ verify_needed: false });
-    const live = isVerifyCodeLive(session, now);
-    res.json({
-      // Pop-up tab khulega jab teacher ne code banaya ho AUR wo abhi live ho.
-      verify_needed: live,
-      // Stage-2 flow active hai is session me? (teacher ne code uthaya par
-      // 30s nikal gaye — student ko "teacher se naya code maangein" batane ke liye)
-      verify_expired: Boolean(session.verify_code_hash) && !live,
-      verify_issued_count: session.verify_issued_count || 0,
-      verify_ms_left: Math.max(0, (session.verify_code_expires_at || 0) - now),
-      // ZAROORI: is class me GPS chahiye ya nahi — student ka peekSession()
-      // isi field par GPS maangne ya skip karne ka faisla karta hai. Ye field
-      // bhoolne se GPS hamesha "off" samajh aata tha aur location-required
-      // sessions me student GPS ke bina mark karta tha (server phir use
-      // 5 koshish ke chakkar me pending bhej deta tha).
-      location_required: session.require_location === true,
-    });
+    if (!session || now > session.expires_at) return res.json({ ok: true, location_required: false });
+    return res.json({ ok: true, location_required: session.require_location === true });
   } catch (err) {
     console.error(err);
-    // Fail hone par pop-up nahi khulega — student block nahi hoga.
-    res.json({ verify_needed: false });
-  }
-});
-
-// (D) STUDENT NAYA CODE DAALE — yahi asli approval step hai.
-// Sahi code + live session => us student ki PENDING entry "present" ho jaati hai.
-// GALAT ya expire code => kuch nahi hota (entry pending hi rehti hai, retry safe).
-app.post("/api/student/verify-code", markAttendanceLimiter, async (req, res) => {
-  try {
-    const body = req.body || {};
-    const code = String(body.code || "").trim();
-    const roll = String(body.roll_no || "").trim();
-    const submitted = String(body.verify_code || "").trim();
-
-    if (!/^[0-9]{5}$/.test(code)) return res.status(400).json({ error: "Attendance code galat hai." });
-    if (!/^[0-9]+$/.test(roll)) return res.status(400).json({ error: "Roll number me sirf digits hone chahiye." });
-
-    const now = Date.now();
-    const session = await ActiveCode.findOne({ code });
-    if (!session) return res.status(404).json({ error: "Koi live class nahi mili." });
-    if (now > session.expires_at) {
-      return res.status(400).json({ error: "Attendance code expire ho gaya.", reason: "code_expired" });
-    }
-
-    // ---- CODE VERIFY (constant-time compare + REAL 30s expiry) ----
-    const check = verifyCodeMatches(session, submitted, now);
-    if (!check.ok) {
-      audit("student.verify-code-fail", req, `roll=${roll}`, `reason=${check.reason}`);
-      return res.status(403).json({
-        error: check.reason,
-        reason: check.expired ? "verify_expired" : "verify_wrong",
-        // Student ko UI turant band karne de — wapas 0 par set karte hain.
-        verify_ms_left: 0,
-      });
-    }
-
-    // ---- APPROVE: is student ki is session ki SAARI pending entries present karo.
-    // Sirf usi roll_no + session_id ko, isliye koi aur student approve nahi hota.
-    const result = await Attendance.updateMany(
-      { session_id: session._id.toString(), roll_no: roll, status: "pending" },
-      { status: "present", approved_at: now, pending_reason: "" }
-    );
-    const approved = result.modifiedCount || 0;
-
-    audit(
-      "student.verify-code",
-      req,
-      `roll=${roll}`,
-      `session=${session._id.toString()} approved=${approved}`
-    );
-
-    res.json({
-      success: true,
-      approved,
-      // Kuch approve nahi hua (jaise entry already present thi) — phir bhi
-      // success, kyunki student ka kaam ho gaya; use ghabraane ka koi reason nahi.
-      already_present: approved === 0,
-      roll_no: roll,
-      date: session.created_at ? todayDateString() : todayDateString(),
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Code verify nahi ho paya. Dobara try karein." });
-  }
-});
-// ---------------------------------------------------------------------------
-// (1) REQUESTER: "maine Suno dabaya par kuch nahi mila" → ek relay request rakho.
-//     Ek session ke liye ek hi request zinda rehti hai (~25s).
-app.post("/api/student/relay-request", relayRequestLimiter, async (req, res) => {
-  try {
-    const body = req.body || {};
-    const device_id = String(body.device_id || "").trim();
-    const code = String(body.code || "").trim();
-    const class_name = String(body.class_name || "").trim();
-    const subject = String(body.subject || "").trim();
-    const course_type = String(body.course_type || "").trim();
-    const system = normalizeSystem(body.system);
-    if (!device_id || !/^[0-9]{5}$/.test(code) || !class_name || !subject || !course_type || !system) {
-      return res.json({ ok: false, reason: "bad_request" });
-    }
-    const now = Date.now();
-    const activeCode = await ActiveCode.findOne({ class_name, subject, course_type, system: systemMatch(system) }).sort({ created_at: -1 });
-    // Relay sirf tab kaam ka hai jab beacon ON ho — warna code ka koi sound hi
-    // nahi hai bajane ko.
-    if (!activeCode || now > activeCode.expires_at || activeCode.code !== code || !beaconRequired(activeCode)) {
-      return res.json({ ok: false, reason: "no_beacon" });
-    }
-    pruneRelayPending(now);
-    const key = relaySessionKey(class_name, subject, course_type, system);
-    const existing = relayPending.get(key);
-    if (relayAlive(existing, now)) {
-      // Pehle se ek request zinda hai — dobara likhne ka koi matlab nahi.
-      return res.json({ ok: true, already: true, listen_ms: Math.max(0, Number(existing.expires_at) - now) });
-    }
-    relayPending.set(key, { requester: device_id, created_at: now, expires_at: now + RELAY_REQUEST_TTL_MS });
-    audit("relay.request", req, `device=${device_id.slice(0, 24)}`, `${class_name}/${subject}/${course_type}`);
-    return res.json({ ok: true, listen_ms: RELAY_REQUEST_TTL_MS });
-  } catch (err) {
-    console.error(err);
-    return res.json({ ok: false, reason: "error" });
-  }
-});
-
-// (2) STANDBY (already-verified phone): "koi madad maang raha hai?" → haan to
-//     wahi chirp EK BAAR bajao. Warna kuch nahi (play:false).
-app.get("/api/student/relay-duty", relayDutyLimiter, async (req, res) => {
-  try {
-    const device_id = String(req.query.device_id || "").trim();
-    const code = String(req.query.code || "").trim();
-    const class_name = String(req.query.class_name || "").trim();
-    const subject = String(req.query.subject || "").trim();
-    const course_type = String(req.query.course_type || "").trim();
-    const system = normalizeSystem(req.query.system);
-    if (!device_id || !/^[0-9]{5}$/.test(code) || !class_name || !subject || !course_type || !system) {
-      return res.json({ play: false });
-    }
-    const now = Date.now();
-    const key = relaySessionKey(class_name, subject, course_type, system);
-    // FAST PATH: koi relay request hi nahi → turant "kuch nahi". Ye sabse aam
-    // case hai (saare standby phone har kuch second poll karte hain), isliye
-    // yahaan koi DB query NAHI karte — warna free instance par bekaar load badhe.
-    const entry = relayPending.get(key);
-    if (!relayAlive(entry, now)) return res.json({ play: false });
-    const activeCode = await ActiveCode.findOne({ class_name, subject, course_type, system: systemMatch(system) }).sort({ created_at: -1 });
-    if (!activeCode || now > activeCode.expires_at || activeCode.code !== code || !beaconRequired(activeCode)) {
-      return res.json({ play: false });
-    }
-    const decision = relayPickDecision(entry, device_id, now);
-    if (!decision.play) return res.json({ play: false });
-    // CLAIM synchronously (await se PEHLE) — do standby phone ek saath poll
-    // karein to bhi sirf EK relay bajega. Warna dono ek hi request utha lete
-    // aur do phone saat-saat bajkar poori chirp kachra kar dete.
-    relayPending.delete(key);
-    // GATE: relay sirf wahi phone kar sakta hai jisne IS session me beacon se
-    // verify hokar apni attendance bana li ho (device-lock ki wajah se ye sirf
-    // usi asli student ka phone ho sakta hai). Isse koi bahar wala device
-    // relay-duty ko loop me hit kar ke live beacon code "harvest" nahi kar sakta.
-    // (Gate fail ho to request waste ho gayi — ye jaan-boojh kar fail-safe hai:
-    //  galti se EK relay kam ho jaye, par chaos kabhi na ho.)
-    const mine = await Attendance.findOne({
-      device_id, class_name, subject, course_type, system: systemMatch(system), date: todayDateString(), beacon_verified: true,
-    }).lean();
-    if (!mine) return res.json({ play: false });
-    // Relay ko TAZA code bhejte hain (jo student ne suna wo 1 slot purana ho sakta
-    // hai). Wahi deterministic beacon code, sirf sound me.
-    const spec = chirpSpecFor(currentBeacon(activeCode.beacon_secret, now).code);
-    if (!spec) return res.json({ play: false });
-    audit("relay.play", req, `device=${device_id.slice(0, 24)}`, `${class_name}/${subject}/${course_type}`);
-    return res.json({ play: true, chirp: spec });
-  } catch (err) {
-    console.error(err);
-    return res.json({ play: false });
+    res.json({ ok: true, location_required: false });
   }
 });
 
@@ -4514,57 +3772,6 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       return res.status(400).json({ error: "Incorrect code." });
     }
 
-    // Beacon result bahar rakhte hain taaki Attendance.create() me bhi likh
-    // sakein (audit trail: kaunsa slot use hua). -1 = beacon is session me
-    // band tha, matlab ye mark beacon se verify NAHI hua.
-    let beaconSlotUsed = -1;
-    let beaconWasRequired = false;
-
-    // 1c. BEACON — "abhi class me ho" ka live proof.
-    //     Attendance code to ek dum constant hota hai (WhatsApp par chal jata
-    //     hai). Beacon har 45 second badalta hai aur sirf teacher ke screen par
-    //     dikhta hai — isliye ghar bait ke koi purana code kaam nahi karta.
-    //     Ye check HARD fail hai (pending bhi nahi): galat beacon = student
-    //     class me hi nahi hai, aur teacher approve karne se koi matlab nahi.
-    if (beaconRequired(activeCode)) {
-      beaconWasRequired = true;
-      const beaconEnd = (activeCode.beacon_started_at || activeCode.created_at || now) + (activeCode.beacon_duration_ms || 0);
-      if (now > beaconEnd) {
-        // Beacon window khatam. Ye tabhi hota hai jab teacher ne beacon OFF
-        // karke turant naya code banaya ho (naya session = naya beacon), ya
-        // system clock bigad gaya ho. Student ko saaf batao ki teacher se
-        // naya code maange — error chhupaane se wo confuse hoga.
-        return res.status(400).json({
-          error: "Class ka beacon time khatam ho gaya. Teacher se kahiye ki wo naya code de.",
-          reason: "beacon_over",
-          // Student ko batate hain ki field khatam ho gayi — wo UI par
-          // chhupa dega, taaki wo dobara submit karke same error na mile.
-          beacon_finished: true,
-        });
-      }
-      const beaconResult = verifyBeaconCode(activeCode.beacon_secret, req.body.beacon_code, now);
-      if (!beaconResult.ok) {
-        audit("beacon.fail", req, `roll_no=${cleanRoll}`, `${class_name}/${subject}/${course_type} wrong_code`);
-        return res.status(400).json({
-          error: beaconResult.reason,
-          reason: "beacon_wrong",
-          // Student ko batate hain kitne second me naya code aayega.
-          retry_after_ms: BEACON_SLOT_MS,
-        });
-      }
-      beaconSlotUsed = beaconResult.slot;
-      // Yahan pehle har student ke liye ek `audit("beacon.ok", ...)` likha jata
-      // tha. Wo PURA DUPLICATE tha — Attendance document par pehle se
-      // `beacon_verified` + `beacon_slot` + `beacon_channel` teeno save hote
-      // hain, isliye audit me dobara likhne se koi nayi information nahi milti.
-      // Nuksaan bada tha: AuditLog 730 din tak rehta hai, to 120 students x 5
-      // classes = 600 extra docs/ROZ sirf isi redundant line se — 2 saal me
-      // ~4.4 lakh docs (DB quota ka sabse bada kharcha). Audit log ka maqsad
-      // "teacher ne kya badla" hai; student ka mark hona uske Attendance
-      // record se hi pata chalta hai. (beacon.fail neeche rakha hai — wo
-      // failure hai, Attendance me kahin record nahi hota, isliye diagnostic
-      // value hai.)
-    }
 
     // 1b. Location — anti-proxy ka core, par weak-net friendly.
     //     Do raste chalte hain:
@@ -4664,16 +3871,6 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
           // Token ke hints/automation + abhi ke client hints (advisory).
           extraFlags: [...hintFlags, ...clientHints],
         });
-      } else if (beaconWasRequired && beaconSlotUsed >= 0) {
-        // BEACON VERIFY HO CHUKA HAI -> GPS fail hone par student ko "koshish"
-        // ke chakkar me MAT daalo.
-        // Pehle yahan bina shart ke koshish-gate chalta tha, isliye jis student
-        // ne chirp/code se sahi room-proof de diya tha, wo phir bhi
-        // "Location nahi mili — Koshish 1/5 ... window ke paas jao" dekhta tha
-        // (aur 5 baar!). Uska proof to already ho chuka tha — sirf GPS (jo is
-        // proof se KAMZOR hai) fail hua tha. Ab seedha aage badhne dete hain;
-        // decideMarkStatus beacon ko presence proof maan kar present kar dega.
-        location.flags = [...new Set([...clientHints])];
       } else {
         // Proof nahi mili: pehle student ko KOshish karne do — jab tak uske
         // attempts baaki hain, mark SAVE hi nahi hota (teacher ki list bharne se
@@ -4707,31 +3904,11 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
     }
 
     // 2. Status ka faisla PEHLE kar lete hain (duplicate/upgrade logic ko chahiye).
-    // Beacon verified = is session me beacon ON tha AUR student ne sahi code/chirp diya.
-    const beaconVerifiedNow = beaconWasRequired && beaconSlotUsed >= 0;
-    // RELAY SIGNAL — do alag shak wale case:
-    //  (a) GPS ne fix diya par 1 km+ door bataya -> relay (sound ghar se nahi aati)
-    //  (b) GPS ne fix diya HI NAHI (`no_location` = lat/lng null aaya) -> shak,
-    //      kyunki GPS band karke apni jagah chhupana relay ka aam tarika hai.
-    // ZAROORI FARAK: "GPS weak tha" (accuracy kam / stale / radius bahar) is list
-    // me NAHI hai — wo genuinely indoor student hai (WiFi/cell se 100-300 m ka
-    // fix aata hai). Usko block karna galat hoga, isliye wo present hi rahega.
-    // Sirf tab shak karte hain jab GPS ne kuch bheja hi na ho.
-    const gpsTooFar = Number.isFinite(location.gps_distance_m) && location.gps_distance_m > GPS_CONFLICT_METERS;
-    const gpsAbsent = location.verified !== true && location.reason === "no_location";
-    const gpsConflict = beaconVerifiedNow && (gpsTooFar || gpsAbsent);
-    if (gpsTooFar) {
-      location.flags = [...new Set([...(location.flags || []), "beacon_gps_conflict"])];
-    } else if (gpsAbsent) {
-      location.flags = [...new Set([...(location.flags || []), "beacon_only_no_gps"])];
-    }
     const decision = decideMarkStatus({
       requireApproval: activeCode.require_approval === true,
       autoReview: activeCode.auto_review !== false,
       locationRequired,
       locationVerified: location.verified,
-      beaconVerified: beaconVerifiedNow,
-      gpsConflict,
       flags: location.flags,
     });
     const status = decision.status;
@@ -4885,14 +4062,6 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       status,
       pending_reason: decision.reason || "",
       location_verified: location.verified === true,
-      // beacon_verified: sirf tab true jab is session me beacon ON tha aur
-      // student ne sahi code diya. Beacon OFF session me false rahega — PDF
-      // me ise "sab verify hue the" jaisa mat padhna chahiye.
-      beacon_verified: beaconWasRequired && beaconSlotUsed >= 0,
-      beacon_slot: beaconSlotUsed,
-      // Kis channel se proof aaya (manual/chirp/qr) — sirf audit. Verification
-      // upar wahi thi, isliye ye value security par asar nahi daalti.
-      beacon_channel: beaconWasRequired ? normalizeBeaconChannel(req.body.beacon_channel) : "",
       lat: location.lat,
       lng: location.lng,
       accuracy: location.accuracy,
@@ -5123,6 +4292,12 @@ app.get("/api/teacher/session-live", requireTeacherAuth, async (req, res) => {
       location_off: session.require_location === false,
       active: now <= session.expires_at,
       seconds_left: Math.max(0, Math.round((session.expires_at - now) / 1000)),
+      // SOFT DEADLINE: screen par dikhne wala countdown. Quick code me ye
+      // seconds_left se chhota (10s vs 30s). Purane sessions me 0 -> fallback.
+      display_seconds_left: Math.max(
+        0,
+        Math.round((((session.display_expires_at || session.expires_at) - now)) / 1000)
+      ),
       server_now: now,
       marked_count,
       confirmed_count,
