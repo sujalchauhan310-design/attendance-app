@@ -57,6 +57,7 @@ const PDFDocument = require("pdfkit");
 const { Resend } = require("resend");
 const dns = require("dns");
 const crypto = require("crypto"); // used to hash one-time location tokens
+const fs = require("fs"); // /api/version — page auto-refresh (code change detect)
 dns.setDefaultResultOrder("ipv4first"); //render's IPv6 route to gmail is broken; force ipv4
 
 // Body size limit for JSON requests. The roster upload posts a whole class in
@@ -116,6 +117,7 @@ app.use(express.static(path.join(__dirname, "public"), {
 app.use("/api", (req, res, next) => {
   if (req.path === "/health" || req.path.startsWith("/health/")) return next();
   if (req.path === "/teacher/login") return next(); // login ko DB ki zaroorat nahi
+  if (req.path === "/version") return next(); // version check — DB ki zaroorat nahi
   if (mongoose.connection.readyState !== 1) {
     return res.status(503).json({
       error: "Database se connection nahi hai. Thodi der baad try karein — aapka data safe hai.",
@@ -3641,6 +3643,28 @@ app.get("/api/student/my-report.pdf", studentLookupLimiter, async (req, res) => 
 //   3. hand-editing lat/lng in the browser's network tab (token is bound to the
 //      exact fix the server itself validated).
 
+
+// ---------- AUTO-REFRESH version ----------
+// Code (server.js / lib / pages) badalte hi iski value badal jati hai. Student
+// aur teacher dono pages isse poll karte hain aur change aate hi khud reload ho
+// jate hain — taaki har change par manually Ctrl+Shift+R na karna pade.
+const APP_VERSION_FILES = ["server.js", "lib/sound-code.js", "public/student.html", "public/teacher.html"];
+let appVersionCache = { v: null, at: 0 };
+function computeAppVersion() {
+  const now = Date.now();
+  if (appVersionCache.v && now - appVersionCache.at < 1000) return appVersionCache.v; // 1s cache
+  const h = crypto.createHash("sha1");
+  for (const f of APP_VERSION_FILES) {
+    try { const s = fs.statSync(path.join(__dirname, f)); h.update(f + ":" + s.mtimeMs + ":" + s.size); }
+    catch (e) { h.update(f + ":?"); }
+  }
+  appVersionCache = { v: h.digest("hex").slice(0, 16), at: now };
+  return appVersionCache.v;
+}
+app.get("/api/version", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ v: computeAppVersion() });
+});
 
 // Student code daalte hi pata chalta hai ki is session me location check chahiye
 // ya nahi — student page isse apna GPS wait skip kar sakta hai jab OFF ho

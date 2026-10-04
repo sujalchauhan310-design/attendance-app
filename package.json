@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "dev": "node dev.js",
     "test:pdf": "node tools/pdf-smoke-test.js",
     "test:boot": "node tools/boot-smoke-test.js",
     "test:approval": "node tools/approval-logic-test.js",

@@ -513,12 +513,14 @@ async function startSoundListen() {
   // RACE FIX: flag turant set karo (await se pehle) — warna peek dobara chalne
   // par do getUserMedia session khul jaate the (mic double-on).
   soundListenOn = true;
-  let stream = null, ctx = null, timer = null, capTimer = null;
+  relayAsked = false; // nayi listen = nayi relay request ki dobara permission
+  let stream = null, ctx = null, timer = null, capTimer = null, relayAsk = null;
   const stop = () => {
     soundListenOn = false;
     soundStopFn = null;
     if (timer) clearInterval(timer);
     if (capTimer) clearTimeout(capTimer);
+    if (relayAsk) clearTimeout(relayAsk);
     if (ctx) { try { ctx.close(); } catch (e) {} }
     if (stream) stream.getTracks().forEach((t) => t.stop());
   };
@@ -536,11 +538,13 @@ async function startSoundListen() {
     const buf = new Float32Array(an.frequencyBinCount);
     setSoundListenStatus('🎤 Sun raha hoon… (phone teacher ki taraf rakhein)');
     const letters = 'abcdefghijklmnopqrstuvwxyz';
-    const lo = soundParams.tone_min_hz, hi = soundParams.tone_min_hz + 25 * soundParams.tone_step_hz;
     // Continuous listen state: hamesha taaza code rakho (submit tak).
     let lastHeard = '', heardStreak = 0, heardOnce = false;
     timer = setInterval(() => {
       if (!soundParams) { try { stop(); } catch (e) {} return; } // session sound OFF ho gaya
+      // Band HAR TICK par current soundParams se — OTP/session badalne par bhi sahi
+      // range scan hoti rahe (bahar capture karke rakha stale ho sakta tha).
+      const lo = soundParams.tone_min_hz, hi = soundParams.tone_min_hz + 25 * soundParams.tone_step_hz;
       an.getFloatFrequencyData(buf);
       const binHz = ctx.sampleRate / an.fftSize;
       const loBin = Math.max(1, Math.floor((lo - 120) / binHz));
@@ -560,7 +564,7 @@ async function startSoundListen() {
         if (Number.isFinite(buf[i])) { sum += buf[i]; n++; }
       }
       const noise = n ? sum / n : -100;
-      if (!(peak > noise + 9)) return;
+      if (!(peak > noise + 7)) return; // 7 dB = saste mic / door-par bhi detect ho, par stray tone reject
       const hz = peakBin * binHz;
       const i = Math.round((hz - soundParams.tone_min_hz) / soundParams.tone_step_hz);
       if (i < 0 || i > 25) return;
@@ -581,6 +585,9 @@ async function startSoundListen() {
     }, 40);
     // Safety: mic zyada der mat pakdo (10 min) — uske baad manual code chalega.
     capTimer = setTimeout(() => { try { stop(); } catch (e) {} }, 10 * 60 * 1000);
+    // RELAY (requesting side): ~7s me code na sun paaye to ek baar relay maang lo —
+    // kisi verified phone se wahi tone ek baar bajegi jisse ye mic code pakad le.
+    relayAsk = setTimeout(() => { if (!heardOnce) askRelayOnce(); }, 7000);
   } catch (err) {
     setSoundListenStatus('Mic permission nahi mila — teacher se code likhwayein.');
     stop();
@@ -595,7 +602,30 @@ function applyManualSound() {
   toast('Code lag gaya ✓', 'ok');
 }
 
-/* ---------- RELAY: verified phone wahi tone EK BAAR dobara bajaye ---------- */
+/* ---------- RELAY (requesting side): mic code na sun paaye to madad maango ---------- */
+// Peeche wala student: teacher ki tone is phone ki mic tak nahi pahunchi (~7s) to ek
+// baar relay request bhejo. Server use kisi EK verified phone (jisne aaj is class me
+// attendance mark ki) ko deta hai, wo wahi tone ek baar bajata hai — jisse is phone ka
+// mic code pakad le. (Playing side neeche: startRelayStandby.)
+let relayAsked = false;
+function askRelayOnce() {
+  if (relayAsked || !soundParams) return;
+  try {
+    const p = gatherPayload();
+    // Session ke 4 field chahiye (relay key inhi se banti hai) — wizard ye OTP se
+    // pehle hi bharwa deta hai, phir bhi guard rakha.
+    if (!p.class_name || !p.subject || !p.course_type || !p.system) return;
+    relayAsked = true;
+    fetch('/api/student/relay-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id, class_name: p.class_name, subject: p.subject, course_type: p.course_type, system: p.system }),
+    }).catch(() => {});
+    setSoundListenStatus('📡 Relay maanga — kisi verified phone se tone dobara bajegi…');
+  } catch (e) { /* chhod do — manual fallback hamesha available hai */ }
+}
+
+/* ---------- RELAY (playing side): verified phone wahi tone EK BAAR dobara bajaye ---------- */
 let relayTimer = null;
 function playChirpStudent(spec) {
   const Ctor = window.AudioContext || window.webkitAudioContext;
@@ -607,8 +637,8 @@ function playChirpStudent(spec) {
     const osc = ctx.createOscillator(), g = ctx.createGain();
     osc.type = 'sine'; osc.frequency.value = Number(tone.hz) || 0;
     g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(0.4, t + 0.012);
-    g.gain.setValueAtTime(0.4, t + Math.max(0.012, dur - 0.012));
+    g.gain.linearRampToValueAtTime(0.6, t + 0.012);
+    g.gain.setValueAtTime(0.6, t + Math.max(0.012, dur - 0.012));
     g.gain.linearRampToValueAtTime(0, t + dur);
     osc.connect(g); g.connect(ctx.destination); osc.start(t); osc.stop(t + dur + 0.02);
     t += dur + (Number(spec.gap_ms) || 100) / 1000;
@@ -1457,6 +1487,29 @@ fetch('/api/health').then((r) => r.json()).then((h) => {
   const r = h && h.anti_proxy && h.anti_proxy.radius_meters;
   if (r) $('radiusChip').textContent = `📍 Radius ${r} m`;
 }).catch(() => {});
+</script>
+
+<script>
+// AUTO-REFRESH: server ka code (ya ye page) badalte hi khud reload — taaki har
+// change ke liye manually Ctrl+Shift+R na karna pade. Har 15s /api/version
+// check; value badli to reload. (Stable running me value same rehti hai → koi
+// reload nahi hota — sirf file change / redeploy par hi ye chalta hai.)
+(function () {
+  var V = null;
+  function check() {
+    fetch('/api/version', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var v = d && d.v;
+        if (!v) return;
+        if (V === null) { V = v; return; }  // pehli baar = current version yaad karo
+        if (v !== V) location.reload();      // code badal gaya → fresh page lo
+      })
+      .catch(function () {});
+  }
+  check();
+  setInterval(check, 15000);
+})();
 </script>
 </body>
 </html>

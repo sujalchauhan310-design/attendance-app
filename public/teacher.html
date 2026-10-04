@@ -1023,8 +1023,8 @@ async function playChirpSpec(spec) {
     const osc = ctx.createOscillator(), gain = ctx.createGain();
     osc.type = 'sine'; osc.frequency.value = Number(tone.hz) || 0;
     gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(0.4, t + 0.012);
-    gain.gain.setValueAtTime(0.4, t + Math.max(0.012, dur - 0.012));
+    gain.gain.linearRampToValueAtTime(0.6, t + 0.012);
+    gain.gain.setValueAtTime(0.6, t + Math.max(0.012, dur - 0.012));
     gain.gain.linearRampToValueAtTime(0, t + dur);
     osc.connect(gain); gain.connect(ctx.destination);
     osc.start(t); osc.stop(t + dur + 0.02);
@@ -3889,6 +3889,29 @@ function startAutoRefresh() {
     sessionStorage.removeItem('teacher_password');
   } catch (err) { /* offline — login screen hi dikha do */ }
   showLogin('');
+})();
+</script>
+
+<script>
+// AUTO-REFRESH: server ka code (ya ye page) badalte hi khud reload — taaki har
+// change ke liye manually Ctrl+Shift+R na karna pade. Har 15s /api/version
+// check; value badli to reload. (Stable running me value same rehti hai → koi
+// reload nahi hota — sirf file change / redeploy par hi ye chalta hai.)
+(function () {
+  var V = null;
+  function check() {
+    fetch('/api/version', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var v = d && d.v;
+        if (!v) return;
+        if (V === null) { V = v; return; }  // pehli baar = current version yaad karo
+        if (v !== V) location.reload();      // code badal gaya → fresh page lo
+      })
+      .catch(function () {});
+  }
+  check();
+  setInterval(check, 15000);
 })();
 </script>
 </body>
