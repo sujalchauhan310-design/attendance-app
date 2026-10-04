@@ -100,7 +100,16 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.static(path.join(__dirname, "public")));
+// Static files. HTML ko jaan-boojh kar "no-cache" bhejte hain — warna student
+// ka browser purana page cache me rakhta hai aur naye features dikhte hi nahi.
+// (Ye localStorage ko bilkul nahi chhoota, isliye device_id safe rehti hai.)
+app.use(express.static(path.join(__dirname, "public"), {
+  setHeaders(res, filePath) {
+    if (/\.html?$/i.test(filePath) || /sw\.js$/i.test(filePath) || /manifest\.json$/i.test(filePath)) {
+      res.setHeader("Cache-Control", "no-cache, must-revalidate");
+    }
+  },
+}));
 
 // DB down hone par /api routes se HTML error page ke bajaye saaf JSON mile
 // (frontend ke liye "data side crash" jaisa kuch nahi hona chahiye).
@@ -193,8 +202,8 @@ const AUDIT_RETENTION_DAYS = Number(process.env.AUDIT_RETENTION_DAYS) || 730;
 // jata hai (server par hamesha ON rehta hai). AB DEFAULT **OFF** hai.
 // Kyun: GPS indoor aksar fail ya 100-300 m drift karta hai, isliye class ke
 // ANDAR baithe genuine students bhi pending/flag me chale jate the. Ab location
-// OPTIONAL hai (default OFF) aur presence ka asli sahara **beacon** (rotating
-// code / chirp) hai. STRICT_LOCATION=true sirf tab rakhein jab har haal me GPS
+// OPTIONAL hai (default OFF) aur OFF hone par valid code + device-lock hi
+// presence gate hai. STRICT_LOCATION=true sirf tab rakhein jab har haal me GPS
 // zaroori ho. (Purana "15 baar fail hone par chup-chaap accept kar lo" wala
 // fallback pehle hi poora hata diya gaya tha — wahi proxy ka sabse bada darwaza tha.)
 const STRICT_LOCATION = boolWithDefault(process.env.STRICT_LOCATION, false);
@@ -207,14 +216,6 @@ const MAX_ACCURACY_METERS = Number(process.env.MAX_ACCURACY_METERS) || 60;
 // true hone par poora GPS uncertainty circle radius ke andar hona chahiye
 // (distance + accuracy <= radius) — sirf reported point nahi.
 const GEOFENCE_STRICT_CIRCLE = boolWithDefault(process.env.GEOFENCE_STRICT_CIRCLE, true);
-
-// RELAY DETECTOR ke liye: beacon/chirp se presence proof mil gaya, PAR GPS
-// saaf-saaf bahut door bata raha hai. Sound ghar se nahi aa sakti, isliye
-// "chirp pass + GPS 1 km+ door" = shak (audio call par relay ho raha ho).
-// 1 km jaan-boojh kar hai: classroom ka indoor GPS aksar 100-300 m drift karta
-// hai, aur us drift par genuine student ko shak karna galat hoga. 1 km par koi
-// drift nahi hota — matlab student building me hi nahi hai.
-const GPS_CONFLICT_METERS = Number(process.env.GPS_CONFLICT_METERS) || 1000;
 
 // Verified location token kitni der valid rahega (client usi window me submit kare).
 const LOCATION_TOKEN_TTL_MS = (Number(process.env.LOCATION_TOKEN_TTL_SEC) || 150) * 1000;
@@ -1307,32 +1308,22 @@ function computePercentages({ present, rawHeld, leaveDays }) {
 // Presence ka faisla — EK hi jagah, taaki proxy ka darwaza ya genuine student
 // ka block, dono me se kuch bhi chupke se na ho.
 //
-// ZAROORI DESIGN CHANGE (GPS ka role):
-//   PEHLE: GPS hi presence ka GATE tha. Beacon (rotating code / ultrasonic
-//          chirp) verify hone par bhi, GPS fail hote hi mark PENDING ho jata tha.
-//   AB:    presence proof = GPS **YA** beacon. Dono me se koi EK kaafi hai.
+// DESIGN NOTE (GPS ka role):
+//   Location ON  -> GPS verified hona chahiye, warna mark PENDING.
+//   Location OFF (default) -> GPS ki wajah se koi pending NAHI; gate hai valid
+//     code + device-lock.
 //
-// Kyun ye sahi hai: beacon ka proof GPS se **strong** hai —
-//   * Sound deewar se bahar nahi jaati, isliye "is room me hai" ka asli proof
-//     milta hai. GPS deewar ke aar-paar same number deta hai (150 m radius =
-//     poori building, room alag nahi kar sakta).
-//   * 120 students me classroom ka indoor GPS aksar fail/drift karta hai. Purane
-//     logic me aise har student teacher ke approval queue me chala jata tha —
-//     matlab ek class me 20-40 manual approvals, jo teacher ka waqt kha jata.
-//
-// Aur GPS ab "relay detector" ban jata hai (gpsConflict, neeche step 3):
-// chirp pass hua par GPS 1 km+ door bata raha hai = shak (audio call par relay).
+// Kyun OFF default hai: 120 students me classroom ka indoor GPS aksar fail/drift
+// karta hai, jisse genuine students teacher ke approval queue me chale jate the
+// (ek class me 20-40 manual approvals, jo teacher ka waqt kha jata tha).
 function decideMarkStatus({ requireApproval, autoReview, locationRequired, locationVerified, flags }) {
   const activeFlags = Array.isArray(flags) ? flags.filter(Boolean) : [];
   // 1) Teacher ne khud approval mode ON kiya -> sab pending.
   if (requireApproval === true) return { status: "pending", reason: "approval_mode" };
   // 2) PRESENCE PROOF.
-  //    Location ON  -> GPS YA beacon (koi ek kaafi).
-  //    Location OFF -> teacher ne GPS check hata diya, isliye GPS ki wajah se koi
-  //                    pending NAHI. Presence ka sahara beacon hai (session me ON
-  //                    ho to); warna valid code + device-lock hi gate hai. Default
-  //                    ab OFF hai — indoor GPS fail hone par genuine students
-  //                    pending me nahi jate (wahi bug tha).
+  //    Location ON  -> GPS verify zaroori.
+  //    Location OFF -> GPS ki wajah se koi pending nahi (default OFF hai) —
+  //    valid code + device-lock hi gate hai.
   const presenceProof = locationRequired ? (locationVerified === true) : true;
   if (!presenceProof) {
     return { status: "pending", reason: "no_location_proof" };
@@ -2225,8 +2216,8 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
     // Location check ab OPTIONAL hai aur DEFAULT OFF — GPS indoor aksar fail/drift
     // karta hai, isliye class ke andar baithe students bhi pending me chale jate
     // the. OFF hone par GPS ki wajah se koi pending NAHI hota (decideMarkStatus);
-    // presence ka sahara beacon (rotating code/chirp) hai. Teacher chahe to ON kar
-    // sakta hai — par sirf jab server owner ne allow kiya ho
+    // gate valid code + device-lock hai. Teacher chahe to ON kar sakta hai —
+    // par sirf jab server owner ne allow kiya ho
     // (ALLOW_TEACHER_LOCATION_OFF; default true).
     const locationOn = ALLOW_TEACHER_LOCATION_OFF ? boolWithDefault(require_location, false) : true;
 
@@ -3619,7 +3610,10 @@ app.get("/api/student/location-check", studentLookupLimiter, async (req, res) =>
     const now = Date.now();
     const session = await ActiveCode.findOne({ code }).lean();
     if (!session || now > session.expires_at) return res.json({ ok: true, location_required: false });
-    return res.json({ ok: true, location_required: session.require_location === true });
+    // mark-attendance ke saath CONSISTENT: purane sessions me `require_location`
+    // field thi hi nahi (undefined). Wahan `!== false` se location required mana
+    // jata hai — yahan bhi wahi, warna student GPS skip karke pending me chala jaata.
+    return res.json({ ok: true, location_required: session.require_location !== false });
   } catch (err) {
     console.error(err);
     res.json({ ok: true, location_required: false });
@@ -3791,7 +3785,7 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       lng: null,
       accuracy: null,
       distance_m: null,
-      // GPS ne "radius ke bahar" kaha to kitne door — relay detector ke liye.
+      // GPS ne "radius ke bahar" kaha to kitne door — report/flag ke liye.
       gps_distance_m: null,
       verified: false,
       reason: locationRequired ? "no_gps" : "location_off",
@@ -3837,8 +3831,8 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
           fix = { lat: inline.lat, lng: inline.lng, accuracy: inline.accuracy, distance: inline.distance };
         } else {
           location.reason = inline.code || location.reason;
-          // "outside_radius" par readGpsFix distance bhi deta hai — relay
-          // detector isi ko dekhta hai (beacon pass + GPS 1 km+ door = shak).
+          // "outside_radius" par readGpsFix distance bhi deta hai — report/flag
+          // ke liye store kar dete hain.
           if (Number.isFinite(inline.distance)) location.gps_distance_m = Math.round(inline.distance);
           // Mock/fake location aur automation cheating hai, weak-net problem nahi
           // — inhe seedha block karo (bhejne wale app/devtools ke liye rasta band).

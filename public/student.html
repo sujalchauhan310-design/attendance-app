@@ -208,6 +208,18 @@
     </button>
   </div>
 
+  <script>
+  // SAFETY NET: agar main wizard script kisi wajah se na chale (error / purana
+  // browser), to 1.5 second baad saare steps dikha do — form kabhi atka na rahe.
+  setTimeout(function () {
+    if (window.__wizardReady) return;
+    ['step2', 'step3', 'stepLocation', 'stepCode', 'stepSubmit'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.remove('hide');
+    });
+  }, 1500);
+  </script>
+
   <div id="queueStatus" class="mt-2"></div>
   <div id="failedBox" class="mt-2"></div>
 
@@ -636,6 +648,9 @@ $('rollNo').addEventListener('blur', async () => {
       f.style.opacity = '0.75';
     }
   } catch (err) { /* offline — form manually bhara ja sakta hai */ }
+  // Auto-fill ne values PROGRAMMATICALLY set ki hain (koi input/change event
+  // nahi chala), isliye wizard dobara chalao — warna agle steps na khulein.
+  updateWizard();
 });
 
 // "Check my percentage" ka roll number form se sync rehta hai.
@@ -750,10 +765,10 @@ async function requestLocationToken(p, fix) {
 // ---------------------------------------------------------------------------
 // BURST SPREAD (120+ students ke liye)
 // ---------------------------------------------------------------------------
-// Sound chirp ka ek badside hai: 120 students ka phone EK HI waqt me chirp
-// sunta hai (2 second me), isliye sab log ek hi 2-3 second ke window me "Mark
-// attendance" dabate hain. Server par ek saath 120 POST aati hain aur har POST
-// kai DB query karti hai (duplicate check, device check, anti-proxy, save).
+// 120 students ek hi class me hain, isliye sab log ek hi 2-3 second ke window
+// me "Mark attendance" dabate hain. Server par ek saath 120 POST aati hain aur
+// har POST kai DB query karti hai (duplicate check, device check, anti-proxy,
+// save).
 // Free Render instance par ye burst timeout de sakta hai — aur student ko
 // "network error" dikhta hai jabki sach me sab theek tha.
 //
@@ -821,8 +836,8 @@ async function confirmSubmit() {
       accuracy: coords ? coords.accuracy : null,
       fix_timestamp: coords ? coords.fix_at || Date.now() : 0,
     });
-    // 120+ students ek saath chirp sunte hain, isliye submit bhi ek saath aata
-    // hai — burst spread karke server ko bachaate hain (upar detail me likha hai).
+    // 120+ students ek saath submit karte hain — burst spread karke server ko
+    // bachaate hain (upar detail me likha hai).
     await spreadSubmitBurst();
     let result = await attemptSubmit(payload, 2);
 
@@ -871,10 +886,9 @@ async function confirmSubmit() {
           reason === 'approval_mode'
             ? 'Aap class ke andar the. Teacher ke approve karne par ye count hogi.'
             : reason === 'flagged'
-              // Relay-shak wale case yahin aate hain. Student ko asli ilaaj
-              // batate hain: GPS ON rakhein — tab agali baar khud-ba-khud count
-              // hogi (teacher ko tap nahi karna padega). Ye 120 students me
-              // mass-pending rokne ke liye zaroori hai.
+              // Student ko asli ilaaj batate hain: GPS ON rakhein — tab agali
+              // baar khud-ba-khud count hogi (teacher ko tap nahi karna padega).
+              // Ye 120 students me mass-pending rokne ke liye zaroori hai.
               ? 'Aapki entry teacher ke Review tab me hai — wo confirm karenge to attendance count hogi. Agli baar turant count karane ke liye phone ka GPS/Location ON rakhein aur "Get location" dabayein (GPS band hone par system shak karta hai).'
               : 'Aapki location verify nahi ho payi (net/GPS), isliye entry teacher ke paas chali gayi hai. Wo present mark karenge to attendance count hogi.';
         showResult('warn', title, msg,
@@ -1056,7 +1070,9 @@ syncSystemFromClass();
 function setStepVisible(id, on) { const el = $(id); if (el) el.classList.toggle('hide', !on); }
 function wizardSystemChosen() { return !!document.querySelector('input[name="system"]:checked'); }
 function wizardDetailsFilled() {
-  return Boolean($('rollNo').value.trim() && $('studentName').value.trim() && $('className').value);
+  // Roll + Class zaroori (naam roster se khud bhi aa sakta hai ya server
+  // validate karta hai) — is se wizard kabhi galti se atakta nahi.
+  return Boolean($('rollNo').value.trim() && $('className').value);
 }
 function wizardClassDetailsFilled() { return Boolean($('subject').value && $('courseType').value); }
 function updateWizard() {
@@ -1069,15 +1085,11 @@ function updateWizard() {
   setStepVisible('stepCode', s3);
   setStepVisible('stepSubmit', s3);
 }
-['rollNo', 'studentName', 'className'].forEach((id) => {
-  const el = $(id);
-  if (el) { el.addEventListener('input', updateWizard); el.addEventListener('change', updateWizard); }
-});
-['subject', 'courseType'].forEach((id) => {
-  const el = $(id);
-  if (el) el.addEventListener('change', updateWizard);
-});
+// Har input/change par wizard dobara evaluate hota hai — event delegation se
+// kisi bhi field (auto-fill, select, type) ke chhoote bina.
+['input', 'change'].forEach((ev) => document.addEventListener(ev, updateWizard, true));
 updateWizard();
+window.__wizardReady = true; // safety-net script ko batao ki wizard chal gaya
 
 /* ----------------------------------------------------------------------
    LOCATION PERMISSION — page khulte hi ek baar permission maango, taaki
