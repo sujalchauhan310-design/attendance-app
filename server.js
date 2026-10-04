@@ -522,7 +522,7 @@ require_approval: { type: Boolean, default: false }, // teacher approves each ma
 auto_review: { type: Boolean, default: true },
 send_pdf: { type: Boolean, default: true }, // auto-email attendance PDF 20 min after generation
 pdf_sent: { type: Boolean, default: false }, // prevents sending twice if server restarts
-// SOUND CODE: revolving sound code (letter x6, jaise "aaaaaa"). Secret
+// SOUND CODE: revolving sound code (3 same letters, jaise "aaa"). Secret
 // server-only rehta hai — student ko sirf derive hua code milta hai.
 beacon_enabled: { type: Boolean, default: false },
 beacon_secret: { type: String, default: "" },
@@ -2304,7 +2304,7 @@ app.post("/api/teacher/generate-code", requireTeacherAuth, generateCodeLimiter, 
 });
 
 
-// Teacher ke SOUND CODE ka current code (letter x6) + 45s countdown. Teacher page
+// Teacher ke SOUND CODE ka current code (3 letters) + 2-min countdown. Teacher page
 // ise dikhata hai aur wahi tone bajata hai; student phone se sun kar auto-fill.
 app.get("/api/teacher/sound-code", requireTeacherAuth, async (req, res) => {
   try {
@@ -3981,7 +3981,7 @@ app.post("/api/student/mark-attendance", markAttendanceLimiter, async (req, res)
       }
     }
 
-    // 1d. SOUND CODE — beacon ON ho to 6-letter code verify karo (student ke
+    // 1d. SOUND CODE — beacon ON ho to 3-letter code verify karo (student ke
     //     phone ne sound se liya ya teacher se sunkar type kiya). Galat/purana =
     //     HARD fail (pending nahi), kyunki sound room me hi pahunchti hai.
     if (activeCode.beacon_enabled && activeCode.beacon_secret) {

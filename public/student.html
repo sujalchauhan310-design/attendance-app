@@ -513,11 +513,12 @@ async function startSoundListen() {
   // RACE FIX: flag turant set karo (await se pehle) — warna peek dobara chalne
   // par do getUserMedia session khul jaate the (mic double-on).
   soundListenOn = true;
-  let stream = null, ctx = null, timer = null;
+  let stream = null, ctx = null, timer = null, capTimer = null;
   const stop = () => {
     soundListenOn = false;
     soundStopFn = null;
     if (timer) clearInterval(timer);
+    if (capTimer) clearTimeout(capTimer);
     if (ctx) { try { ctx.close(); } catch (e) {} }
     if (stream) stream.getTracks().forEach((t) => t.stop());
   };
@@ -536,27 +537,50 @@ async function startSoundListen() {
     setSoundListenStatus('🎤 Sun raha hoon… (phone teacher ki taraf rakhein)');
     const letters = 'abcdefghijklmnopqrstuvwxyz';
     const lo = soundParams.tone_min_hz, hi = soundParams.tone_min_hz + 25 * soundParams.tone_step_hz;
+    // Continuous listen state: hamesha taaza code rakho (submit tak).
+    let lastHeard = '', heardStreak = 0, heardOnce = false;
     timer = setInterval(() => {
+      if (!soundParams) { try { stop(); } catch (e) {} return; } // session sound OFF ho gaya
       an.getFloatFrequencyData(buf);
       const binHz = ctx.sampleRate / an.fftSize;
       const loBin = Math.max(1, Math.floor((lo - 120) / binHz));
       const hiBin = Math.min(buf.length - 2, Math.ceil((hi + 120) / binHz));
       let peak = -Infinity, peakBin = -1;
       for (let i = loBin; i <= hiBin; i++) { if (buf[i] > peak) { peak = buf[i]; peakBin = i; } }
+      if (peakBin < 0) return;
+      // In-band SNR: band ke ANDAR hi shor ka level nikalo (peak ±2 bin chhod
+      // kar) aur peak ko usse compare karo. Isse har phone ka apna frequency
+      // response khud compensate ho jata hai — sasta phone par bhi wahi tone
+      // pakka milta hai jo uska speaker achha bajata / mic achha sunta hai
+      // (4–8k sweet spot). Purana 2–6k cross-band floor yahan band ke saath
+      // overlap karta tha aur hardware response ko ignore karta tha.
       let sum = 0, n = 0;
-      const fLo = Math.max(1, Math.floor(2000 / binHz)), fHi = Math.min(buf.length - 1, Math.floor(6000 / binHz));
-      for (let i = fLo; i <= fHi; i++) { if (Number.isFinite(buf[i])) { sum += buf[i]; n++; } }
-      const floor = n ? sum / n : -100;
-      if (peakBin < 0 || !(peak > floor + 8)) return;
+      for (let i = loBin; i <= hiBin; i++) {
+        if (Math.abs(i - peakBin) <= 2) continue; // tone ki apni energy shor me na aaye
+        if (Number.isFinite(buf[i])) { sum += buf[i]; n++; }
+      }
+      const noise = n ? sum / n : -100;
+      if (!(peak > noise + 9)) return;
       const hz = peakBin * binHz;
       const i = Math.round((hz - soundParams.tone_min_hz) / soundParams.tone_step_hz);
       if (i < 0 || i > 25) return;
       if (Math.abs(hz - (soundParams.tone_min_hz + i * soundParams.tone_step_hz)) > soundParams.tone_step_hz / 2) return;
-      if ($('soundCode')) $('soundCode').value = letters[i].repeat(3);
-      stop();
-      setSoundListenStatus('✅ Sound code mil gaya — ab Mark Attendance dabayein.');
-      toast('Sound code mil gaya ✓', 'ok');
+      // Mic ko BAND nahi karte — code har 2 min ghoomta hai, isliye submit tak
+      // sunte reh kar hamesha TAASA code rakhte hain. Debounce: lagatar 2 baar
+      // wahi code suno tabhi maano (tone ~600ms = ~15 samples chalta hai; ek
+      // noise blip kabhi kabhi galat letter chun leta tha).
+      const heard = letters[i].repeat(3);
+      if (heard === lastHeard) heardStreak++; else { lastHeard = heard; heardStreak = 1; }
+      if (heardStreak < 2) return;
+      if ($('soundCode')) $('soundCode').value = heard;
+      if (!heardOnce) {
+        heardOnce = true;
+        setSoundListenStatus('✅ Sound code mil gaya — mic taaza code sunta rahega.');
+        toast('Sound code mil gaya ✓', 'ok');
+      }
     }, 40);
+    // Safety: mic zyada der mat pakdo (10 min) — uske baad manual code chalega.
+    capTimer = setTimeout(() => { try { stop(); } catch (e) {} }, 10 * 60 * 1000);
   } catch (err) {
     setSoundListenStatus('Mic permission nahi mila — teacher se code likhwayein.');
     stop();
@@ -583,8 +607,8 @@ function playChirpStudent(spec) {
     const osc = ctx.createOscillator(), g = ctx.createGain();
     osc.type = 'sine'; osc.frequency.value = Number(tone.hz) || 0;
     g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(0.9, t + 0.012);
-    g.gain.setValueAtTime(0.9, t + Math.max(0.012, dur - 0.012));
+    g.gain.linearRampToValueAtTime(0.4, t + 0.012);
+    g.gain.setValueAtTime(0.4, t + Math.max(0.012, dur - 0.012));
     g.gain.linearRampToValueAtTime(0, t + dur);
     osc.connect(g); g.connect(ctx.destination); osc.start(t); osc.stop(t + dur + 0.02);
     t += dur + (Number(spec.gap_ms) || 100) / 1000;
@@ -958,6 +982,10 @@ async function confirmSubmit() {
     //    Fix na mile to bhi kuch toot-ta nahi: entry teacher ke paas "pending"
     //    chali jaati hai (weak net wale college ke liye yahi asli raasta hai).
     btn.innerHTML = '<span class="spinner"></span> Marking attendance…';
+    // Submit ke bilkul pehle mic se TAASA code le lo (GPS/confirm ke dauraan code
+    // ghoom chuka hota hai) aur mic chhod do.
+    p.sound_code = ($('soundCode') && $('soundCode').value.trim().toLowerCase()) || p.sound_code;
+    if (soundStopFn) { try { soundStopFn(); } catch (e) {} }
     let payload = Object.assign({}, p, {
       device_id,
       // Inline fix + timestamp: server radius/accuracy/mock/freshness khud check karta hai.

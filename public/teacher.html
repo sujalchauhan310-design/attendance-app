@@ -230,14 +230,14 @@
           <div class="muted fs-sm mt-1" id="codeCombo"></div>
         </div>
 
-        <!-- SOUND CODE (auto-fetch): ek tap -> har 5 sec tone, code har 45s badalta -->
+        <!-- SOUND CODE (auto-fetch): ek tap -> har 7 sec tone, code har 2 min badalta -->
         <div id="soundBlock" class="hide" style="margin-top:12px; padding:12px; border:1px solid rgba(111,176,255,.35); border-radius:12px; background:rgba(111,176,255,.06);">
           <div class="row between" style="align-items:center;">
             <div>
               <div style="font-size:.8rem; font-weight:700; color:var(--info);">🔊 SOUND CODE — students ka phone khud sun lega</div>
-              <div class="muted fs-sm mt-1" id="soundHint">Ek tap karo — har 5 second tone bajega, code har 45s badlega.</div>
+              <div class="muted fs-sm mt-1" id="soundHint">Ek tap karo — har 7 second tone bajega, code har 2 minute badlega.</div>
             </div>
-            <div class="mono" id="soundCode" style="font-size:1.7rem; letter-spacing:.3em; font-weight:700; color:var(--info); min-width:150px; text-align:center;">------</div>
+            <div class="mono" id="soundCode" style="font-size:1.7rem; letter-spacing:.3em; font-weight:700; color:var(--info); min-width:150px; text-align:center;">---</div>
           </div>
           <div class="row mt-2" style="gap:8px;">
             <button type="button" class="btn btn-sm grow" id="soundBtn" onclick="toggleSoundAuto()">🔊 Sound chalu karo</button>
@@ -1006,7 +1006,7 @@ function isAuthError(err) { return err && (err.message === 'auth' || err.message
 /* =====================================================================
    Tab switching
    ===================================================================== */
-/* ---------- SOUND CODE (teacher): ek tap -> har 3s tone, code har 45s badalta ---------- */
+/* ---------- SOUND CODE (teacher): ek tap -> har 7s tone, code har 2 min badalta ---------- */
 let soundTimer = null, soundCtx = null;
 function getSoundCtx() {
   if (!soundCtx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return null; try { soundCtx = new C(); } catch (e) { return null; } }
@@ -1023,8 +1023,8 @@ async function playChirpSpec(spec) {
     const osc = ctx.createOscillator(), gain = ctx.createGain();
     osc.type = 'sine'; osc.frequency.value = Number(tone.hz) || 0;
     gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(0.9, t + 0.012);
-    gain.gain.setValueAtTime(0.9, t + Math.max(0.012, dur - 0.012));
+    gain.gain.linearRampToValueAtTime(0.4, t + 0.012);
+    gain.gain.setValueAtTime(0.4, t + Math.max(0.012, dur - 0.012));
     gain.gain.linearRampToValueAtTime(0, t + dur);
     osc.connect(gain); gain.connect(ctx.destination);
     osc.start(t); osc.stop(t + dur + 0.02);
@@ -1049,9 +1049,9 @@ function toggleSoundAuto() {
   if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
   const btn = $('soundBtn');
   if (btn) { btn.textContent = '⏹ Band karo'; btn.classList.add('btn-ok'); }
-  setSoundStatus('🔊 Auto ON — har 5s tone baj raha hai, code har 45s badal raha hai.');
+  setSoundStatus('🔊 Auto ON — har 7s tone baj raha hai, code har 2 min badal raha hai.');
   soundTick();
-  soundTimer = setInterval(soundTick, 5000);
+  soundTimer = setInterval(soundTick, 7000);
 }
 function stopSoundAuto() {
   if (soundTimer) { clearInterval(soundTimer); soundTimer = null; }

@@ -115,23 +115,26 @@ me Web Bluetooth API hi nahi hai). Isliye beacon ko **server-side rotating code*
 me banaya gaya — ye har device par chalta hai (Android/iPhone/laptop sab).
 
 ### 🔊 Sound chirp — 120 students ke liye, bina koi hardware
-Beacon ka 6-digit code screen par hota hai, par **120 students** ke liye type karna slow hai.
-Chirp **wahi code sound me** bhejta hai (**9.0–11.2 kHz**):
+Beacon ka 3-letter code screen par hota hai, par **120 students** ke liye type karna slow hai.
+Chirp **wahi code sound me** bhejta hai (**4.0–8.0 kHz** — saste phone ke speaker/mic ka sweet spot):
 
 | Kya | Kaise |
 |---|---|
-| Teacher | "🔊 Ek baar bajao" ya "🔁 Auto (har 45s)" — laptop/PA speaker se beep-sequence |
+| Teacher | "🔊 Ek baar bajao" ya "🔁 Auto (har 7s tone, code har 2 min)" — laptop/PA speaker se beep-sequence |
 | Student | "🎤 Suno" — phone ka mic sun kar code khud bhar leta hai (`beacon_channel = chirp`) |
 | Crypto | **Naya nahi** — wahi `verifyBeaconCode()`, wahi slot rotation, wahi 1-slot grace |
 | Constants | Server `/api/student/beacon-check` se bhejta hai, taaki client/server out-of-sync na hon |
 
-> **⚠️ Band 9–11 kHz par kyun hai (aur iska trade-off):**
+> **⚠️ Band 4–8 kHz par kyun hai (saste phone ke liye):**
 > Pehle ye **16.5–18.7 kHz (ultrasound)** tha — theoretically best, kyunki sound deewar se
 > bahar nahi jaati. **Par practically har phone par kaam nahi karta tha:** sasta laptop/phone
 > speaker 16 kHz+ par 20–40 dB gir jata hai aur kai phone mic wahan tak sunte hi nahi, isliye
 > student ka phone code nikal hi nahi pata tha ("Suno" dabane par kuch nahi hota).
-> Ab band **9.0–11.2 kHz** hai — 12 kHz tak lagbhag **saare** phone/laptop flat hote hain,
-> isliye ye har device par chalta hai. **Trade-off saaf hai:** sound sunai deta hai aur deewar
+> Ab band **4.0–8.0 kHz** hai — yahi saste hardware ka **sabse mazboot sweet spot** hai
+> (sasta speaker bhi achha bajata, sasta mic bhi achha sunta), aur neeche <4k classroom ka
+> voice/fan shor hai jo isse bachata hai. Student detection ab **in-band SNR** (peak vs band
+> ka apna shor) use karta hai, taaki har phone ka frequency response khud compensate ho jaye.
+> **Trade-off saaf hai:** sound sunai deta hai aur deewar
 > ke aar-paar bhi ja sakta hai, isliye asli anti-proxy **rotating code + device-lock + teacher
 > ki nazar** par hai — sirf sound par nahi.
 >
@@ -141,15 +144,15 @@ Chirp **wahi code sound me** bhejta hai (**9.0–11.2 kHz**):
 > code type kar dein") — 15 second chup-chaap intezaar karne ke bajaye.
 
 **Iske saath kya milta hai:**
-- **Code framing:** server code ko do lead markers (8400 Hz) ke **beech** bajata hai, aur
+- **Code framing:** server code ko do lead markers (3000 Hz) ke **beech** bajata hai, aur
   student sirf inhi ke beech ke digits ginte hain. Isse mic-on click / koi bhi stray tone
   code ko ek-ek khiska nahi sakta (pehle yahi bug tha — student ko teacher ke screen se
   **alag** code milta tha).
 - **Rooted phone par bhi kaam karta hai** — ye physics hai, software claim nahi.
-- **Code type karna hamesha available hai** — koi phone sound decode na kar paye to 6 digit
-  type kar ke attendance ho jati hai (ye fallback kabhi band nahi hota).
+- **Code type karna hamesha available hai** — koi phone sound decode na kar paye to 3-letter
+  code (jaise `aaa`) type kar ke attendance ho jati hai (ye fallback kabhi band nahi hota).
 
-**Fallback:** agar sasta phone mic 17 kHz+ nahi sun pata, student wahi 6-digit code **type** kar
+**Fallback:** agar sasta phone band (4–8 kHz) bhi decode na kar paye, student wahi 3-letter code **type** kar
 deta hai (`beacon_channel = manual`) — kuch bhi tootta nahi, sirf proof weaker hota hai.
 
 ### 🔁 On-demand single relay — peeche baithe students ke liye

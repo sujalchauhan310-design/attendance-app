@@ -27,7 +27,8 @@ check("saare 26 letters tone round-trip", rt);
 // PURANA BUG: teacher ka code ek tha, student ke phone me kuch aur aata tha.
 // Ab dono EK hi lib/source use karte hain — ye test us mismatch ko rokta hai.
 check("teacher code = student decode (koi mismatch nahi)", sc.codeFromTone(sc.letterToneHz(c.code[0])) === c.code);
-check("tone band audible range (9k-16k)", sc.letterToneHz("a") >= 9000 && sc.letterToneHz("z") <= 16000);
+check("tone band cheap-hardware sweet spot (4k-8k)", sc.letterToneHz("a") >= 4000 && sc.letterToneHz("z") <= 8000);
+check("band saste phone ke liye 10k se neeche (weak-speaker safe)", sc.letterToneHz("z") < 10000);
 check("range ke bahar freq = null", sc.letterForTone(19000) === null);
 
 const spec = sc.chirpSpecFor(c.code);
