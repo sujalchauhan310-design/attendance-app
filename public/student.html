@@ -570,12 +570,13 @@ async function startSoundListen() {
       if (i < 0 || i > 25) return;
       if (Math.abs(hz - (soundParams.tone_min_hz + i * soundParams.tone_step_hz)) > soundParams.tone_step_hz / 2) return;
       // Mic ko BAND nahi karte — code har 2 min ghoomta hai, isliye submit tak
-      // sunte reh kar hamesha TAASA code rakhte hain. Debounce: lagatar 2 baar
-      // wahi code suno tabhi maano (tone ~600ms = ~15 samples chalta hai; ek
-      // noise blip kabhi kabhi galat letter chun leta tha).
+      // sunte reh kar hamesha TAASA code rakhte hain. Debounce: lagatar 4 baar
+      // wahi code suno tabhi maano (asli tone ~600ms = ~15 samples chalti hai,
+      // isliye 4 aasani se ho jata hai; par 1-2 frame ki transient noise blip
+      // reject ho jati hai — galat letter pakadne ki sambhavna kam).
       const heard = letters[i].repeat(3);
       if (heard === lastHeard) heardStreak++; else { lastHeard = heard; heardStreak = 1; }
-      if (heardStreak < 2) return;
+      if (heardStreak < 4) return;
       if ($('soundCode')) $('soundCode').value = heard;
       if (!heardOnce) {
         heardOnce = true;
@@ -627,10 +628,13 @@ function askRelayOnce() {
 
 /* ---------- RELAY (playing side): verified phone wahi tone EK BAAR dobara bajaye ---------- */
 let relayTimer = null;
-function playChirpStudent(spec) {
+async function playChirpStudent(spec) {
   const Ctor = window.AudioContext || window.webkitAudioContext;
   if (!Ctor || !spec || !spec.sequence) return;
   let ctx = null; try { ctx = new Ctor(); } catch (e) { return; }
+  // Mobile autoplay: naya AudioContext aksar "suspended" start hota hai — resume
+  // kiye bina bilkul nahi bajega (yahi "A ke phone se koi awaz nahi" wala bug).
+  if (ctx.state === 'suspended') { try { await ctx.resume(); } catch (e) {} }
   let t = ctx.currentTime + 0.05;
   spec.sequence.forEach((tone) => {
     const dur = Math.max(0.05, (Number(tone.ms) || 150) / 1000);
@@ -655,7 +659,12 @@ function startRelayStandby(p) {
       const q = new URLSearchParams({ device_id, class_name: p.class_name, subject: p.subject, course_type: p.course_type, system: p.system || '' });
       const res = await fetch('/api/student/relay-duty?' + q.toString(), { headers: { Accept: 'application/json' } });
       const d = await res.json().catch(() => ({}));
-      if (d && d.play && d.chirp) playChirpStudent(d.chirp);
+      if (d && d.play && d.chirp) {
+        playChirpStudent(d.chirp);
+        // Diagnostic + A ko pata chale: agar ye toast aaya par awaz NAHI aayi,
+        // to samjho AudioContext/autoplay block hai (server se command pahunchi).
+        toast('🔊 Relay tone bajai — peeche wale student ki madad ki', 'ok');
+      }
     } catch (e) { /* net blip */ }
   };
   relayTimer = setInterval(tick, 4000);
