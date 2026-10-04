@@ -120,7 +120,7 @@ Chirp **wahi code sound me** bhejta hai (**4.0–8.0 kHz** — saste phone ke sp
 
 | Kya | Kaise |
 |---|---|
-| Teacher | "🔊 Ek baar bajao" ya "🔁 Auto (har 7s tone, code har 2 min)" — laptop/PA speaker se beep-sequence |
+| Teacher | "🔊 Ek baar bajao" ya "🔁 Auto (har 4s tone, code har 2 min)" — laptop/PA speaker se beep-sequence |
 | Student | "🎤 Suno" — phone ka mic sun kar code khud bhar leta hai (`beacon_channel = chirp`) |
 | Crypto | **Naya nahi** — wahi `verifyBeaconCode()`, wahi slot rotation, wahi 1-slot grace |
 | Constants | Server `/api/student/beacon-check` se bhejta hai, taaki client/server out-of-sync na hon |

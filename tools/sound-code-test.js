@@ -13,7 +13,8 @@ check("alag secret = alag code (mostly)", sc.currentBeacon("xyz", T0).letter ===
 
 check("current code accept", sc.verifyBeaconCode(SEC, c.code, T0).ok === true);
 check("1 purana slot grace me accept", sc.verifyBeaconCode(SEC, sc.currentBeacon(SEC, T0 - sc.BEACON_SLOT_MS).code, T0).ok === true);
-check("2 purana slot REJECT", sc.verifyBeaconCode(SEC, sc.currentBeacon(SEC, T0 - 2 * sc.BEACON_SLOT_MS).code, T0).ok === false);
+check("2 purana slot grace me accept (grace=2)", sc.verifyBeaconCode(SEC, sc.currentBeacon(SEC, T0 - 2 * sc.BEACON_SLOT_MS).code, T0).ok === true);
+check("3 purana slot REJECT", sc.verifyBeaconCode(SEC, sc.currentBeacon(SEC, T0 - 3 * sc.BEACON_SLOT_MS).code, T0).ok === false);
 check("galat secret REJECT", sc.verifyBeaconCode("other", c.code, T0).ok === false);
 check("5 letters REJECT (ab 3 chahiye)", sc.verifyBeaconCode(SEC, "aaaaa", T0).ok === false);
 check("2 letters REJECT", sc.verifyBeaconCode(SEC, "aa", T0).ok === false);

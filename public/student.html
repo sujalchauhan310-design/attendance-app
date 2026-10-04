@@ -984,8 +984,10 @@ async function attemptSubmit(payload, retries) {
 }
 
 let submitting = false;
+let soundRetried = false; // ek submit attempt = ek sound auto-retry (loop rokne ke liye)
 async function confirmSubmit() {
   if (submitting) return; // double-tap guard
+  soundRetried = false;   // har nayi submit-try ko ek auto-retry ka haq
   const p = gatherPayload();
   const btn = $('confirmBtn');
   const errEl = $('confirmErr');
@@ -1054,6 +1056,30 @@ async function confirmSubmit() {
         payload = Object.assign({}, payload, { location_token: tok.data.token });
         result = await attemptSubmit(payload, 1);
       }
+    }
+
+    // SOUND WRONG (galat/purana): code capture ke baad ghoom chuka (ya mic ne
+    // galti se doosra letter pakda). Ek baar TAASA code sun kar auto-retry —
+    // zyadatar students ko ye error kabhi dikhta hi nahi.
+    if (result.reached && !result.data.success && result.data.reason === 'sound_wrong' && !soundRetried) {
+      soundRetried = true;
+      btn.innerHTML = '<span class="spinner"></span> Naya code sun raha hai…';
+      if ($('soundCode')) $('soundCode').value = '';      // purana/galat code hatao
+      try { await startSoundListen(); } catch (e) {}       // mic dobara chalu karo
+      const tw = Date.now();
+      while (Date.now() - tw < 9000) {                     // agle tone ka intezaar (max 9s)
+        const fr = $('soundCode') ? $('soundCode').value.trim() : '';
+        if (fr) break;
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      const fr = $('soundCode') ? $('soundCode').value.trim().toLowerCase() : '';
+      if (fr) {
+        payload.sound_code = fr;                           // taaza code
+        btn.innerHTML = '<span class="spinner"></span> Dobara submit…';
+        result = await attemptSubmit(payload, 1);
+      }
+      // Retry ke baad flow neeche normal chalta hai — success ho to thik, warna
+      // asli error dikh jayega (soundRetried=true se aur retry nahi hoga).
     }
 
     // 4. Server tak pahuncha hi nahi → phone par queue kar do.

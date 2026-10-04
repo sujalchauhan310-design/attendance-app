@@ -230,12 +230,12 @@
           <div class="muted fs-sm mt-1" id="codeCombo"></div>
         </div>
 
-        <!-- SOUND CODE (auto-fetch): ek tap -> har 7 sec tone, code har 2 min badalta -->
+        <!-- SOUND CODE (auto-fetch): ek tap -> har 4 sec tone, code har 2 min badalta -->
         <div id="soundBlock" class="hide" style="margin-top:12px; padding:12px; border:1px solid rgba(111,176,255,.35); border-radius:12px; background:rgba(111,176,255,.06);">
           <div class="row between" style="align-items:center;">
             <div>
               <div style="font-size:.8rem; font-weight:700; color:var(--info);">🔊 SOUND CODE — students ka phone khud sun lega</div>
-              <div class="muted fs-sm mt-1" id="soundHint">Ek tap karo — har 7 second tone bajega, code har 2 minute badlega.</div>
+              <div class="muted fs-sm mt-1" id="soundHint">Ek tap karo — har 4 second tone bajega, code har 2 minute badlega.</div>
             </div>
             <div class="mono" id="soundCode" style="font-size:1.7rem; letter-spacing:.3em; font-weight:700; color:var(--info); min-width:150px; text-align:center;">---</div>
           </div>
@@ -1006,7 +1006,7 @@ function isAuthError(err) { return err && (err.message === 'auth' || err.message
 /* =====================================================================
    Tab switching
    ===================================================================== */
-/* ---------- SOUND CODE (teacher): ek tap -> har 7s tone, code har 2 min badalta ---------- */
+/* ---------- SOUND CODE (teacher): ek tap -> har 4s tone, code har 2 min badalta ---------- */
 let soundTimer = null, soundCtx = null;
 function getSoundCtx() {
   if (!soundCtx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return null; try { soundCtx = new C(); } catch (e) { return null; } }
@@ -1049,9 +1049,9 @@ function toggleSoundAuto() {
   if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
   const btn = $('soundBtn');
   if (btn) { btn.textContent = '⏹ Band karo'; btn.classList.add('btn-ok'); }
-  setSoundStatus('🔊 Auto ON — har 7s tone baj raha hai, code har 2 min badal raha hai.');
+  setSoundStatus('🔊 Auto ON — har 4s tone baj raha hai, code har 2 min badal raha hai.');
   soundTick();
-  soundTimer = setInterval(soundTick, 7000);
+  soundTimer = setInterval(soundTick, 4000);
 }
 function stopSoundAuto() {
   if (soundTimer) { clearInterval(soundTimer); soundTimer = null; }
