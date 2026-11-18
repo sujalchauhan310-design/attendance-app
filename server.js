@@ -5238,6 +5238,194 @@ app.get("/api/check-and-send-monthly-report", requireCronAuth, async (req, res) 
 // Ye handlers LAST me hone chahiye, isliye neeche (START SERVER se pehle) lagte
 // hain. Bina in ke: malformed JSON par Express HTML error page bhejta tha →
 // frontend ka res.json() fail hota tha aur "data side crash" jaisa dikhta tha.
+// =====================================================================
+// WHATSAPP BOT ROUTES — server.js me PASTE karo, is line ke THEEK PEHLE:
+//   // /api par anjaan route → HTML ke bajaye saaf JSON 404.
+//   app.use("/api", (req, res) => { ...404... });
+//
+// Alag se 2 chhote badlaav (neeche "EDIT 1" aur "EDIT 2" dekho).
+// =====================================================================
+
+// ---------- BOT CONFIG ----------
+const BOT_SECRET = process.env.BOT_SECRET || "";
+
+function requireBotAuth(req, res, next) {
+  if (!BOT_SECRET) {
+    return res.status(503).json({ error: "Bot band hai (BOT_SECRET set nahi)." });
+  }
+  const provided = String(req.headers["x-bot-secret"] || "");
+  const a = Buffer.from(provided);
+  const b = Buffer.from(BOT_SECRET);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+  next();
+}
+
+// Sirf digits: "+91 98765-43210" -> "919876543210"
+function normalizePhone(raw) {
+  const d = String(raw || "").replace(/\D/g, "");
+  return d.length >= 10 && d.length <= 15 ? d : "";
+}
+
+function sameName(a, b) {
+  const n = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  const x = n(a), y = n(b);
+  if (!x || !y) return false;
+  return x === y || x.split(" ")[0] === y.split(" ")[0] && (x.includes(y) || y.includes(x));
+}
+
+async function botStudentByPhone(phone) {
+  const p = normalizePhone(phone);
+  if (!p) return null;
+  return Student.findOne({ phone: p });
+}
+
+// ---------- 1. LINK: WhatsApp number <-> roll number ----------
+// Student "link 101 Rahul Sharma" bhejta hai. Roster me jo naam hai wahi match
+// hona chahiye (warna koi bhi dusre ka roll number claim kar leta).
+app.post("/api/bot/link", requireBotAuth, studentLookupLimiter, async (req, res) => {
+  try {
+    const phone = normalizePhone(req.body.phone);
+    const roll = String(req.body.roll_no || "").trim();
+    const name = String(req.body.name || "").trim();
+    if (!phone) return res.status(400).json({ error: "Phone number samajh nahi aaya." });
+    if (!/^[0-9]+$/.test(roll)) return res.status(400).json({ error: "Roll number me sirf digits chahiye." });
+    if (!name) return res.status(400).json({ error: "Naam bhi likho. Example: link 101 Rahul Sharma" });
+
+    const student = await Student.findOne({ roll_no: roll });
+    if (!student) {
+      return res.status(404).json({ error: "Ye roll number roster me nahi hai. Teacher se roster me add karwao." });
+    }
+    if (!sameName(student.name, name)) {
+      audit("bot.link.name-mismatch", req, `roll_no=${roll}`, `phone=***${phone.slice(-4)}`);
+      return res.status(403).json({ error: "Naam roster se match nahi hua. Jo naam college record me hai wahi likho." });
+    }
+    if (student.phone && student.phone !== phone) {
+      return res.status(409).json({ error: "Ye roll number kisi aur number se linked hai. Teacher se unlink karwao." });
+    }
+    const other = await Student.findOne({ phone, roll_no: { $ne: roll } });
+    if (other) {
+      return res.status(409).json({ error: `Ye WhatsApp number pehle se roll ${other.roll_no} se linked hai.` });
+    }
+    student.phone = phone;
+    await student.save();
+    await touchStudentActivity(roll);
+    audit("bot.link", req, `roll_no=${roll}`, `phone=***${phone.slice(-4)}`);
+    res.json({ success: true, roll_no: roll, name: student.name, class_name: student.class_name || "" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Link karne me dikkat aayi. Dobara try karo." });
+  }
+});
+
+// Teacher number unlink kar sakta hai (phone badla / galat link hua).
+app.delete("/api/teacher/phone-link", requireTeacherAuth, async (req, res) => {
+  try {
+    const roll = String(req.body.roll_no || req.query.roll_no || "").trim();
+    if (!/^[0-9]+$/.test(roll)) return res.status(400).json({ error: "Roll number chahiye." });
+    const r = await Student.updateOne({ roll_no: roll }, { $set: { phone: "" } });
+    audit("bot.unlink", req, `roll_no=${roll}`, "");
+    res.json({ success: true, matched: r.matchedCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Unlink nahi ho paya." });
+  }
+});
+
+// ---------- 2. MARK: "present <code> [beacon]" ----------
+// Session ko class + 5-digit code se dhundhte hain (student ko subject/type/
+// system nahi batana). Phir EXISTING /api/student/mark-attendance ko andar se
+// call karte hain, taaki duplicate check, device lock, beacon, smart approval,
+// audit sab wahi chalein — logic dobara nahi likha.
+app.post("/api/bot/mark", requireBotAuth, async (req, res) => {
+  try {
+    const student = await botStudentByPhone(req.body.phone);
+    if (!student) {
+      return res.status(404).json({ error: "Pehle apna number link karo. Example: link 101 Rahul Sharma", reason: "not_linked" });
+    }
+    if (!student.class_name) {
+      return res.status(400).json({ error: "Roster me aapki class set nahi hai. Teacher se kaho." });
+    }
+    const code = String(req.body.code || "").trim();
+    if (!/^[0-9]{5}$/.test(code)) {
+      return res.status(400).json({ error: "Code 5 digit ka hona chahiye." });
+    }
+    const now = Date.now();
+    const session = await ActiveCode.findOne({ class_name: student.class_name, code, expires_at: { $gt: now } }).sort({ created_at: -1 });
+    if (!session) {
+      return res.status(400).json({ error: "Is code ka koi chalu session nahi mila (galat ya expire). Teacher se current code lo." });
+    }
+    // GPS WhatsApp se server-verify nahi ho sakta — location wale session web page se.
+    if (session.require_location !== false) {
+      return res.status(400).json({ error: "Is session me location zaroori hai. Student website se mark karo.", reason: "need_web" });
+    }
+    const soundCode = String(req.body.sound_code || "").trim().toLowerCase();
+    if (session.beacon_enabled && !soundCode) {
+      return res.status(400).json({ error: "Beacon code bhi chahiye (teacher ki screen par). Example: present " + code + " abc", reason: "need_beacon" });
+    }
+
+    const port = process.env.PORT || 3000;
+    const r = await fetch(`http://127.0.0.1:${port}/api/student/mark-attendance`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": "AttendanceWhatsAppBot/1.0" },
+      body: JSON.stringify({
+        roll_no: student.roll_no,
+        class_name: session.class_name,
+        code,
+        subject: session.subject,
+        course_type: session.course_type,
+        system: session.system || "Annual",
+        device_id: "wa:" + student.phone, // phone hi "device" — DeviceLock isi se bandhta hai
+        name: student.name,
+        sound_code: soundCode || undefined,
+      }),
+    });
+    const data = await r.json().catch(() => ({ error: "Server ne samajh aane wala jawab nahi diya." }));
+    res.status(r.status).json({ ...data, subject: session.subject, course_type: session.course_type });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Attendance mark nahi ho payi. Dobara try karo." });
+  }
+});
+
+// ---------- 3. REPORT: PDF ----------
+app.get("/api/bot/report.pdf", requireBotAuth, studentLookupLimiter, async (req, res) => {
+  try {
+    if (!STUDENT_PDF_OPEN) return res.status(403).json({ error: "Report download band hai. Teacher se lo." });
+    const student = await botStudentByPhone(req.query.phone);
+    if (!student) return res.status(404).json({ error: "Pehle apna number link karo. Example: link 101 Rahul Sharma" });
+    const system = normalizeSystem(req.query.system);
+    if (!system) return res.status(400).json({ error: "Annual ya Semester likho." });
+
+    const { rows, days, dates } = await collectStudentSubjectRows(student.roll_no, system);
+    if (!rows.length) {
+      return res.status(404).json({ error: `Last ${days} din me koi attendance nahi mili (${system}).` });
+    }
+    const pdf = await buildStudentPdf(
+      { system, days, from_date: dates[0], to_date: dates[dates.length - 1], class_name: student.class_name || "" },
+      { roll_no: student.roll_no, name: student.name, class_name: student.class_name || "", major_subject: student.major_subject || "", email: "" },
+      rows
+    );
+    await touchStudentActivity(student.roll_no);
+    audit("bot.report", req, `roll_no=${student.roll_no}`, `system=${system}`);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="attendance-${student.roll_no}-${system}.pdf"`);
+    res.send(pdf);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Report banane me dikkat aayi." });
+  }
+});
+
+// =====================================================================
+// EDIT 1 — studentSchema (line ~416) me `email` ke neeche ek line jodo:
+//     phone: { type: String, default: "", index: true },
+//
+// EDIT 2 — "/api" DB-check middleware (line ~117) me BOT ko kuch nahi karna,
+//          par ye line chahiye ki crypto upar import ho (server.js me pehle se
+//          `crypto` use ho raha hai, to kuch add nahi karna).
+// =====================================================================
 
 // /api par anjaan route → HTML ke bajaye saaf JSON 404.
 app.use("/api", (req, res) => {
