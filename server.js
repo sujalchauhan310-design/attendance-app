@@ -421,6 +421,7 @@ const studentSchema = new mongoose.Schema({
   // Optional student email. Isi par student ka apna report PDF jata hai;
   // na hone par DEFAULT email (TEACHER_EMAIL) par chala jata hai.
   email: { type: String, default: "" },
+  phone: { type: String, default: "", index: true },
   updatedAtDate: { type: Date, default: Date.now, expires: STUDENT_RETENTION_DAYS * 24 * 60 * 60 },
 });
 // Reports register ko class-wise filter karte hain — isliye class par index.
